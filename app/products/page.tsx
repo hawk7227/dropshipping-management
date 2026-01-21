@@ -4,7 +4,7 @@
 // Product management page with full CRUD, inventory, Shopify sync, and bulk import
 
 import React, { Suspense, useState } from 'react';
-import ProductsPanel from '@/components/products/ProductsPanel';
+import {ProductsPanel} from '@/components/products/ProductsPanel';
 import { BulkImportPanel } from '@/components/products/BulkImportPanel';
 
 function ProductsPageContent() {

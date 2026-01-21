@@ -475,7 +475,7 @@ export async function POST(request: NextRequest) {
           audience_filter: audienceTags ? { tags: audienceTags } : undefined,
           scheduled_for: scheduledFor,
           status: 'draft',
-        });
+        }as any);
 
         return NextResponse.json({ success: true, data: campaign });
       }

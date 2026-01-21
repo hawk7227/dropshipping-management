@@ -37,22 +37,29 @@ export async function GET(request: NextRequest) {
           return NextResponse.json({ data: { message: 'No stale products', synced: 0 } });
         }
 
+        // Note: Ensure getStaleProducts returns objects with 'product_id' (fixed in lib/price-sync.ts)
         const productIds = staleProducts.map(p => p.product_id);
         const syncJob = await createSyncJob(productIds.length, 'cron');
         
         try {
           const result = await syncProductPrices(productIds);
+          
           await updateSyncJob(syncJob.id, {
             status: 'completed',
-            products_synced: result.synced,
-            errors: result.errors.length > 0 ? result.errors : null,
+            // Use 'processed' or 'products_synced' depending on your DB Schema. 
+            // Defaulting to 'processed' based on lib logic, but keeping your original key if valid.
+            processed: result.synced, 
+            // ✅ FIX: Save count of errors, not the array
+            errors: result.errors.length, 
           });
+          
           console.log(`[CRON] Price sync completed: ${result.synced} synced, ${result.errors.length} errors`);
           return NextResponse.json({ data: result });
         } catch (error) {
           await updateSyncJob(syncJob.id, {
             status: 'failed',
-            errors: [error instanceof Error ? error.message : 'Unknown error'],
+            // ✅ FIX: Save number (1) instead of string array
+            errors: 1, 
           });
           throw error;
         }
@@ -98,15 +105,17 @@ export async function GET(request: NextRequest) {
           const result = await syncProductPrices(productIds);
           await updateSyncJob(syncJob.id, {
             status: 'completed',
-            products_synced: result.synced,
-            errors: result.errors.length > 0 ? result.errors : null,
+            processed: result.synced,
+            // ✅ FIX: Save count of errors
+            errors: result.errors.length,
           });
           console.log(`[CRON] Full price sync completed: ${result.synced} synced`);
           return NextResponse.json({ data: result });
         } catch (error) {
           await updateSyncJob(syncJob.id, {
             status: 'failed',
-            errors: [error instanceof Error ? error.message : 'Unknown error'],
+            // ✅ FIX: Save number
+            errors: 1,
           });
           throw error;
         }

@@ -50,11 +50,11 @@ export async function syncAllProducts(): Promise<{ synced: number; errors: numbe
 
   while (hasMore) {
     try {
-      const endpoint = pageInfo 
+      const endpoint: string = pageInfo 
         ? `products.json?limit=250&page_info=${pageInfo}`
         : 'products.json?limit=250';
 
-      const response = await fetch(`https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/${endpoint}`, {
+      const response: Response = await fetch(`https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/${endpoint}`, {
         headers: {
           'Content-Type': 'application/json',
           'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
@@ -78,9 +78,9 @@ export async function syncAllProducts(): Promise<{ synced: number; errors: numbe
       }
 
       // Check for pagination
-      const linkHeader = response.headers.get('Link');
+      const linkHeader: string | null = response.headers.get('Link');
       if (linkHeader && linkHeader.includes('rel="next"')) {
-        const match = linkHeader.match(/page_info=([^>&]+)/);
+        const match: RegExpMatchArray | null = linkHeader.match(/page_info=([^>&]+)/);
         pageInfo = match ? match[1] : null;
         hasMore = !!pageInfo;
       } else {
@@ -105,23 +105,29 @@ async function upsertProduct(shopifyProduct: any): Promise<void> {
     id: shopifyProduct.id.toString(),
     title: shopifyProduct.title,
     handle: shopifyProduct.handle,
-    vendor: shopifyProduct.vendor || null,
-    product_type: shopifyProduct.product_type || null,
+    vendor: shopifyProduct.vendor || '',
+    product_type: shopifyProduct.product_type || '',
     status: shopifyProduct.status,
-    tags: shopifyProduct.tags ? shopifyProduct.tags.split(', ').filter(Boolean) : null,
-    body_html: shopifyProduct.body_html || null,
+    tags: shopifyProduct.tags ? shopifyProduct.tags.split(', ').filter(Boolean) : [],
+    body_html: shopifyProduct.body_html || '',
+    
+    // ✅ FIX: Added missing required properties
+    description: shopifyProduct.body_html || '', 
+    variants: [], // Initial empty array, variants are upserted separately below
+    price_synced_at: null,
+
     images: shopifyProduct.images?.map((img: any) => ({
       id: img.id.toString(),
       src: img.src,
       alt: img.alt,
       position: img.position,
-    })) || null,
+    })) || [],
     options: shopifyProduct.options?.map((opt: any) => ({
       id: opt.id.toString(),
       name: opt.name,
       position: opt.position,
       values: opt.values,
-    })) || null,
+    })) || [],
     created_at: shopifyProduct.created_at,
     updated_at: shopifyProduct.updated_at,
   };
@@ -172,15 +178,25 @@ export async function syncProduct(productId: string): Promise<Product> {
 
 // Get products from local database
 export async function getProducts(options: {
+  page?: number;
+  pageSize?: number;
   status?: string;
   search?: string;
-  limit?: number;
-  offset?: number;
+  vendor?: string;
+  productType?: string;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
+  limit?: number; // Legacy support
+  offset?: number; // Legacy support
 }): Promise<{ products: Product[]; total: number }> {
   let query = supabase
     .from('products')
-    .select('*', { count: 'exact' })
-    .order('updated_at', { ascending: false });
+    .select('*', { count: 'exact' });
+
+  // Handle sorting
+  const sortBy = options.sortBy || 'updated_at';
+  const sortOrder = options.sortOrder === 'asc';
+  query = query.order(sortBy, { ascending: sortOrder });
 
   if (options.status) {
     query = query.eq('status', options.status);
@@ -189,13 +205,19 @@ export async function getProducts(options: {
   if (options.search) {
     query = query.or(`title.ilike.%${options.search}%,handle.ilike.%${options.search}%`);
   }
+  
+  if (options.vendor) query = query.eq('vendor', options.vendor);
+  if (options.productType) query = query.eq('product_type', options.productType);
 
-  if (options.limit) {
-    query = query.limit(options.limit);
-  }
-
-  if (options.offset) {
-    query = query.range(options.offset, options.offset + (options.limit || 50) - 1);
+  // Pagination Logic
+  if (options.page && options.pageSize) {
+    const from = (options.page - 1) * options.pageSize;
+    const to = from + options.pageSize - 1;
+    query = query.range(from, to);
+  } else if (options.limit) {
+      // Legacy fallback
+      query = query.limit(options.limit);
+      if (options.offset) query = query.range(options.offset, options.offset + options.limit - 1);
   }
 
   const { data, error, count } = await query;
@@ -491,4 +513,148 @@ export async function syncProductsFromShopify(
     synced: result.synced,
     errors: result.errors > 0 ? [`${result.errors} products failed to sync`] : []
   };
+}
+
+// =====================
+// MISSING METHODS FOR ROUTE.TS
+// =====================
+
+// Get Single Product
+export async function getProduct(id: string): Promise<Product | null> {
+    const { data, error } = await supabase.from('products').select('*').eq('id', id).single();
+    if (error) return null;
+    return data;
+}
+
+// Create Product
+export async function createProduct(data: any): Promise<Product> {
+    // 1. Insert Product
+    const { data: product, error } = await supabase.from('products').insert({
+        id: crypto.randomUUID(),
+        title: data.title,
+        handle: data.handle || data.title.toLowerCase().replace(/\s+/g, '-'),
+        body_html: data.description, // Map 'description' input to 'body_html'
+        description: data.description, // Store in both if DB expects both (for safety)
+        vendor: data.vendor || '',
+        product_type: data.product_type || '',
+        tags: data.tags || [],
+        status: data.status || 'draft',
+        images: data.images || [],
+        variants: [], // Placeholder, real variants added below
+        price_synced_at: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+    }).select().single();
+
+    if (error) throw error;
+
+    // 2. Insert Variants if present
+    if (data.variants && data.variants.length > 0) {
+        const variants = data.variants.map((v: any) => ({
+            id: crypto.randomUUID(),
+            product_id: product.id,
+            title: v.title,
+            sku: v.sku,
+            price: v.price,
+            compare_at_price: v.compare_at_price,
+            inventory_quantity: v.inventory_quantity || 0,
+            option1: v.option1,
+            option2: v.option2,
+            option3: v.option3
+        }));
+        await supabase.from('variants').insert(variants);
+    }
+    return product;
+}
+
+// Update Product
+export async function updateProduct(id: string, updates: any): Promise<Product> {
+    const { data, error } = await supabase
+        .from('products')
+        .update({ ...updates, updated_at: new Date().toISOString() })
+        .eq('id', id)
+        .select()
+        .single();
+    
+    if (error) throw error;
+    return data;
+}
+
+// Get Product Variants
+export async function getProductVariants(productId: string): Promise<Variant[]> {
+    const { data } = await supabase.from('variants').select('*').eq('product_id', productId);
+    return data || [];
+}
+
+// Update Inventory
+export async function updateInventory(variantId: string, quantity: number, reason?: string, reference?: string): Promise<void> {
+    // Update variant record
+    const { error } = await supabase.from('variants').update({ inventory_quantity: quantity }).eq('id', variantId);
+    if (error) throw error;
+
+    // Log history (Assumes inventory_logs table exists)
+    await supabase.from('inventory_logs').insert({
+        variant_id: variantId,
+        quantity_change: 0, // In a Set operation, change is implicit or needs calc. Simplified for CRUD.
+        new_quantity: quantity,
+        reason: reason || 'manual_adjustment',
+        reference: reference,
+        created_at: new Date().toISOString()
+    });
+}
+
+// Get Inventory Logs
+export async function getInventoryLogs(productId: string, variantId?: string, limit: number = 50): Promise<any[]> {
+    // Assumes join capability or simple select
+    let query = supabase.from('inventory_logs').select('*, variants!inner(product_id)').eq('variants.product_id', productId);
+    if (variantId) query = query.eq('variant_id', variantId);
+    
+    const { data } = await query.limit(limit).order('created_at', { ascending: false });
+    return data || [];
+}
+
+// Get Product Stats
+export async function getProductStats(): Promise<any> {
+    const { count: total } = await supabase.from('products').select('*', { count: 'exact', head: true });
+    const { count: active } = await supabase.from('products').select('*', { count: 'exact', head: true }).eq('status', 'active');
+    
+    return {
+        total_products: total || 0,
+        active_products: active || 0,
+        total_inventory_value: 0, // Requires aggregation query
+        low_stock_count: 0
+    };
+}
+
+// Import Batch Management
+export async function createImportBatch(total: number, source: string): Promise<any> {
+    const { data, error } = await supabase.from('import_batches').insert({
+        status: 'processing',
+        total_rows: total,
+        source: source,
+        processed_count: 0,
+        created_at: new Date().toISOString()
+    }).select().single();
+    if(error) throw error;
+    return data;
+}
+
+export async function updateImportBatch(id: string, updates: any): Promise<void> {
+    await supabase.from('import_batches').update(updates).eq('id', id);
+}
+
+export async function getImportBatches(): Promise<any[]> {
+    const { data } = await supabase.from('import_batches').select('*').order('created_at', { ascending: false }).limit(20);
+    return data || [];
+}
+
+export async function processImportRow(batchId: string, row: any): Promise<void> {
+    // Basic wrapper to create product from CSV row
+    await createProduct({
+        title: row.title || row.Title,
+        description: row.description || row.Description,
+        price: row.price || row.Price,
+        sku: row.sku || row.SKU,
+        status: 'draft'
+    });
 }

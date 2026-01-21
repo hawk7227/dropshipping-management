@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dropshipping Platform - Full Demo</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .tab-active { border-bottom: 2px solid #111827; color: #111827; }
+    .tab-inactive { border-bottom: 2px solid transparent; color: #6b7280; }
+    .fade-in { animation: fadeIn 0.3s ease-in; }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner { animation: spin 1s linear infinite; }
+    .modal-backdrop { background: rgba(0,0,0,0.5); }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <div id="app"></div>
+
+  <script>
+    // ==========================================
+    // MOCK DATA
+    // ==========================================
+    
+    const mockProducts = [
+      { id: '1', sku: 'SKU-001', title: 'Wireless Bluetooth Headphones', source: 'Amazon', source_url: 'https://amazon.com/dp/B001', competitor_price: 79.99, our_price: 64.99, savings_percent: 18.8, availability_status: 'in_stock', stock_quantity: 150, previous_price: 84.99, price_changed: true, price_change_percent: 5.9, price_change_direction: 'down', last_checked: new Date(Date.now() - 3600000).toISOString() },
+      { id: '2', sku: 'SKU-002', title: 'Smart Watch Fitness Tracker', source: 'Amazon', source_url: 'https://amazon.com/dp/B002', competitor_price: 149.99, our_price: 129.99, savings_percent: 13.3, availability_status: 'low_stock', stock_quantity: 12, previous_price: 149.99, price_changed: false, price_change_percent: 0, price_change_direction: 'none', last_checked: new Date(Date.now() - 7200000).toISOString() },
+      { id: '3', sku: 'SKU-003', title: 'Portable Power Bank 20000mAh', source: 'Walmart', source_url: 'https://walmart.com/ip/123', competitor_price: 45.99, our_price: 39.99, savings_percent: 13.0, availability_status: 'out_of_stock', stock_quantity: 0, previous_price: 42.99, price_changed: true, price_change_percent: 7.0, price_change_direction: 'up', last_checked: new Date(Date.now() - 1800000).toISOString() },
+      { id: '4', sku: 'SKU-004', title: 'USB-C Hub 7-in-1 Adapter', source: 'Amazon', source_url: 'https://amazon.com/dp/B004', competitor_price: 34.99, our_price: 28.99, savings_percent: 17.1, availability_status: 'in_stock', stock_quantity: 89, previous_price: 34.99, price_changed: false, price_change_percent: 0, price_change_direction: 'none', last_checked: new Date(Date.now() - 5400000).toISOString() },
+      { id: '5', sku: 'SKU-005', title: 'Mechanical Gaming Keyboard RGB', source: 'Amazon', source_url: 'https://amazon.com/dp/B005', competitor_price: 89.99, our_price: 74.99, savings_percent: 16.7, availability_status: 'in_stock', stock_quantity: 45, previous_price: 94.99, price_changed: true, price_change_percent: 5.3, price_change_direction: 'down', last_checked: new Date(Date.now() - 900000).toISOString() },
+      { id: '6', sku: 'SKU-006', title: 'Wireless Gaming Mouse', source: 'BestBuy', source_url: 'https://bestbuy.com/p/456', competitor_price: 59.99, our_price: 49.99, savings_percent: 16.7, availability_status: 'low_stock', stock_quantity: 8, previous_price: 54.99, price_changed: true, price_change_percent: 9.1, price_change_direction: 'up', last_checked: new Date(Date.now() - 2700000).toISOString() },
+      { id: '7', sku: 'SKU-007', title: 'Laptop Stand Adjustable', source: 'Amazon', source_url: 'https://amazon.com/dp/B007', competitor_price: 39.99, our_price: 32.99, savings_percent: 17.5, availability_status: 'in_stock', stock_quantity: 200, previous_price: 39.99, price_changed: false, price_change_percent: 0, price_change_direction: 'none', last_checked: new Date(Date.now() - 4500000).toISOString() },
+      { id: '8', sku: 'SKU-008', title: 'Webcam 1080p HD with Mic', source: 'Amazon', source_url: 'https://amazon.com/dp/B008', competitor_price: 49.99, our_price: 42.99, savings_percent: 14.0, availability_status: 'out_of_stock', stock_quantity: 0, previous_price: 52

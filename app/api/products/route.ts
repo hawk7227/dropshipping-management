@@ -187,7 +187,7 @@ export async function POST(request: NextRequest) {
 
         const product = await createProduct({
           title,
-          description,
+          description: description,
           vendor,
           product_type: productType,
           tags,
@@ -384,13 +384,13 @@ export async function POST(request: NextRequest) {
 
         const duplicate = await createProduct({
           title: `${original.title} (Copy)`,
-          description: original.description,
+          description: original.body_html,
           vendor: original.vendor,
           product_type: original.product_type,
           tags: original.tags,
           images: original.images,
           status: 'draft',
-          variants: original.variants?.map(v => ({
+          variants: (original as any).variants?.map((v: any) => ({
             title: v.title,
             sku: v.sku ? `${v.sku}-COPY` : undefined,
             price: v.price,

@@ -467,12 +467,12 @@ export async function POST(request: NextRequest) {
         try {
           const result = await syncProductPrices(productIds, batchSize);
 
-          await updateSyncJob(job.id, {
-            status: 'completed',
-            products_synced: result.synced,
-            products_failed: result.errors.length,
-            completed_at: new Date().toISOString(),
-          });
+         await updateSyncJob(job.id, {
+          status: 'completed',
+          processed: result.synced,        // Changed from products_synced
+          errors: result.errors.length,    // Changed from products_failed
+          completed_at: new Date().toISOString(),
+        });
 
           return NextResponse.json({
             success: true,
@@ -486,7 +486,7 @@ export async function POST(request: NextRequest) {
         } catch (error) {
           await updateSyncJob(job.id, {
             status: 'failed',
-            error_message: String(error),
+            errors: 1,
             completed_at: new Date().toISOString(),
           });
           throw error;

@@ -4,7 +4,7 @@
 // Price intelligence page with competitor tracking, margins, and sync
 
 import React, { Suspense } from 'react';
-import PriceIntelligencePanel from '@/components/price-intelligence/PriceIntelligencePanel';
+import { PriceIntelligencePanel } from '@/components/price-intelligence/PriceIntelligencePanel';
 
 function PricesPageContent() {
   return (
