@@ -171,8 +171,10 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const action = searchParams.get('action') || 'create';
+    console.log(searchParams.get('action'));
     const body = await request.json();
+   const action = searchParams.get('action') || body.action;
+    
 
     switch (action) {
       case 'create': {

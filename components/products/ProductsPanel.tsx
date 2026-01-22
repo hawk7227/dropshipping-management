@@ -194,12 +194,12 @@ export function ProductsPanel() {
 
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-        <StatCard label="Total Products" value={stats?.total.toLocaleString() || '0'} />
-        <StatCard label="Active" value={stats?.active.toLocaleString() || '0'} />
-        <StatCard label="Draft" value={stats?.draft.toLocaleString() || '0'} />
-        <StatCard label="Archived" value={stats?.archived.toLocaleString() || '0'} />
-        <StatCard label="Low Stock" value={stats?.lowStock.toLocaleString() || '0'} />
-        <StatCard label="Out of Stock" value={stats?.outOfStock.toLocaleString() || '0'} />
+       <StatCard label="Total Products" value={(stats?.total ?? 0).toLocaleString()} />
+      <StatCard label="Active" value={stats?.active?.toLocaleString() || '0'} />
+<StatCard label="Draft" value={stats?.draft?.toLocaleString() || '0'} />
+<StatCard label="Archived" value={stats?.archived?.toLocaleString() || '0'} />
+<StatCard label="Low Stock" value={stats?.lowStock?.toLocaleString() || '0'} />
+<StatCard label="Out of Stock" value={stats?.outOfStock?.toLocaleString() || '0'} />
       </div>
 
       {/* Products Table */}

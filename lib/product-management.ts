@@ -60,7 +60,7 @@ export async function syncAllProducts(): Promise<{ synced: number; errors: numbe
           'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
         },
       });
-
+      console.log("SHOPIFY_STORE: ",response);
       if (!response.ok) throw new Error(`API error: ${response.status}`);
 
       const data = await response.json();
@@ -103,17 +103,18 @@ async function upsertProduct(shopifyProduct: any): Promise<void> {
   // Transform to our format
   const product: Omit<Product, 'synced_at'> = {
     id: shopifyProduct.id.toString(),
-    title: shopifyProduct.title,
-    handle: shopifyProduct.handle,
+    // ✅ FIX: Fallback to 'Untitled' if title is missing to prevent DB error
+    title: shopifyProduct.title || 'Untitled Product', 
+    handle: shopifyProduct.handle || '',
     vendor: shopifyProduct.vendor || '',
     product_type: shopifyProduct.product_type || '',
     status: shopifyProduct.status,
     tags: shopifyProduct.tags ? shopifyProduct.tags.split(', ').filter(Boolean) : [],
     body_html: shopifyProduct.body_html || '',
     
-    // ✅ FIX: Added missing required properties
+    // ✅ FIX: Ensure required properties are present
     description: shopifyProduct.body_html || '', 
-    variants: [], // Initial empty array, variants are upserted separately below
+    variants: [], 
     price_synced_at: null,
 
     images: shopifyProduct.images?.map((img: any) => ({
@@ -337,6 +338,9 @@ export async function bulkImportProducts(
     }
 
     try {
+      // ✅ FIX: Validate title before sending to Shopify
+      if (!productData.title) throw new Error("Title is required");
+
       // Create product in Shopify
       const shopifyProduct = await shopifyRequest<{ product: any }>('products.json', {
         method: 'POST',
@@ -383,7 +387,7 @@ export async function bulkImportProducts(
       imported++;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      errors.push(`Failed to import "${productData.title}": ${errorMessage}`);
+      errors.push(`Failed to import "${productData.title || 'Unknown'}": ${errorMessage}`);
       
       await supabase
         .from('product_imports')
@@ -528,19 +532,22 @@ export async function getProduct(id: string): Promise<Product | null> {
 
 // Create Product
 export async function createProduct(data: any): Promise<Product> {
+    // ✅ FIX: Strict validation to explain errors
+    if (!data.title) throw new Error("Title is required");
+
     // 1. Insert Product
     const { data: product, error } = await supabase.from('products').insert({
         id: crypto.randomUUID(),
         title: data.title,
         handle: data.handle || data.title.toLowerCase().replace(/\s+/g, '-'),
-        body_html: data.description, // Map 'description' input to 'body_html'
-        description: data.description, // Store in both if DB expects both (for safety)
+        body_html: data.description, 
+        description: data.description, 
         vendor: data.vendor || '',
         product_type: data.product_type || '',
         tags: data.tags || [],
         status: data.status || 'draft',
         images: data.images || [],
-        variants: [], // Placeholder, real variants added below
+        variants: [], 
         price_synced_at: null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
@@ -649,9 +656,11 @@ export async function getImportBatches(): Promise<any[]> {
 }
 
 export async function processImportRow(batchId: string, row: any): Promise<void> {
-    // Basic wrapper to create product from CSV row
+    // ✅ FIX: Robust mapper to handle case sensitivity and different header names
+    const title = row.title || row.Title || row.name || row.Name || row['Product Name'];
+    
     await createProduct({
-        title: row.title || row.Title,
+        title: title || 'Untitled Product', // Fallback to prevent error
         description: row.description || row.Description,
         price: row.price || row.Price,
         sku: row.sku || row.SKU,
