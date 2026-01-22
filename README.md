@@ -1,3 +1,4 @@
+#Trigger Vercel deployment
 # Dropshipping Membership Platform
 
 Complete production-ready e-commerce platform with membership system, price intelligence, multi-channel selling, AI content generation, and analytics.
