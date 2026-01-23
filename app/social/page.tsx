@@ -1,7 +1,7 @@
 'use client';
 
 // app/social/page.tsx
-// Social & marketing page with posts, campaigns, and AI content generation
+// Social & Marketing page - posts, campaigns, templates, contacts, integrations, and AI insights
 
 import React, { Suspense } from 'react';
 import SocialMarketingPanel from '@/components/social/SocialMarketingPanel';

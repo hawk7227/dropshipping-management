@@ -1,7 +1,7 @@
 'use client';
 
 // app/dashboard/page.tsx
-// Main admin dashboard - central hub for all features
+// Main admin dashboard - central hub for all features including AI Content Brain
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
@@ -31,6 +31,13 @@ interface DashboardStats {
   };
 }
 
+interface AIStats {
+  postsPublished: number;
+  engagementRate: number;
+  patternsLearned: number;
+  latestInsight: string;
+}
+
 interface RecentOrder {
   id: string;
   channel: string;
@@ -42,7 +49,7 @@ interface RecentOrder {
 
 interface Alert {
   id: string;
-  type: 'warning' | 'error' | 'info';
+  type: 'warning' | 'error' | 'info' | 'success';
   message: string;
   action?: string;
   actionUrl?: string;
@@ -77,6 +84,7 @@ const NAVIGATION_CARDS = [
     description: 'AI content, social posts, email campaigns, SMS',
     href: '/social',
     color: 'from-purple-500 to-purple-600',
+    badge: 'AI Insights',
   },
   {
     title: 'Sales Channels',
@@ -86,9 +94,10 @@ const NAVIGATION_CARDS = [
   },
   {
     title: 'AI Tools',
-    description: 'Generate descriptions, SEO analysis, trend detection',
+    description: 'Content Brain, SEO analysis, trend detection',
     href: '/ai',
     color: 'from-pink-500 to-pink-600',
+    badge: 'Self-Learning',
   },
   {
     title: 'Analytics',
@@ -100,6 +109,7 @@ const NAVIGATION_CARDS = [
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [aiStats, setAiStats] = useState<AIStats | null>(null);
   const [recentOrders, setRecentOrders] = useState<RecentOrder[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
@@ -120,6 +130,32 @@ export default function DashboardPage() {
         const ordersData = await ordersRes.json();
         if (ordersData.success) {
           setRecentOrders(ordersData.data?.orders || ordersData.data || []);
+        }
+
+        // Fetch AI Content Brain stats
+        try {
+          const aiRes = await fetch('/api/content-brain?action=stats&days=7');
+          const aiData = await aiRes.json();
+          if (aiData.success && aiData.data) {
+            setAiStats({
+              postsPublished: aiData.data.publishedPosts || 0,
+              engagementRate: aiData.data.avgEngagementRate || 0,
+              patternsLearned: aiData.data.activePatterns || 0,
+              latestInsight: '',
+            });
+          }
+
+          // Get latest insight
+          const reportsRes = await fetch('/api/content-brain?action=reports&limit=1');
+          const reportsData = await reportsRes.json();
+          if (reportsData.success && reportsData.data?.[0]?.insights?.[0]) {
+            setAiStats(prev => prev ? {
+              ...prev,
+              latestInsight: reportsData.data[0].insights[0],
+            } : null);
+          }
+        } catch (aiError) {
+          console.log('AI stats not available yet');
         }
 
         // Generate alerts based on data
@@ -209,6 +245,8 @@ export default function DashboardPage() {
                     ? 'bg-red-50 border-red-200'
                     : alert.type === 'warning'
                     ? 'bg-yellow-50 border-yellow-200'
+                    : alert.type === 'success'
+                    ? 'bg-green-50 border-green-200'
                     : 'bg-blue-50 border-blue-200'
                 }`}
               >
@@ -218,6 +256,8 @@ export default function DashboardPage() {
                       ? 'text-red-700'
                       : alert.type === 'warning'
                       ? 'text-yellow-700'
+                      : alert.type === 'success'
+                      ? 'text-green-700'
                       : 'text-blue-700'
                   }`}
                 >
@@ -232,6 +272,8 @@ export default function DashboardPage() {
                           ? 'text-red-700 hover:text-red-800'
                           : alert.type === 'warning'
                           ? 'text-yellow-700 hover:text-yellow-800'
+                          : alert.type === 'success'
+                          ? 'text-green-700 hover:text-green-800'
                           : 'text-blue-700 hover:text-blue-800'
                       }`}
                     >
@@ -298,6 +340,55 @@ export default function DashboardPage() {
           </div>
         </div>
 
+        {/* AI Content Brain Summary - NEW */}
+        {aiStats && (aiStats.postsPublished > 0 || aiStats.patternsLearned > 0) && (
+          <div className="mb-8 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg border border-purple-100 p-5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
+                  <span className="text-2xl">🧠</span>
+                </div>
+                <div>
+                  <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                    AI Content Brain
+                    <span className="px-2 py-0.5 text-xs bg-purple-100 text-purple-700 rounded-full">Self-Learning</span>
+                  </h3>
+                  <p className="text-sm text-gray-500">7-day performance</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-8">
+                <div className="text-center">
+                  <p className="text-2xl font-semibold text-gray-900">{aiStats.postsPublished}</p>
+                  <p className="text-xs text-gray-500">Posts</p>
+                </div>
+                <div className="text-center">
+                  <p className={`text-2xl font-semibold ${aiStats.engagementRate > 2.5 ? 'text-green-600' : 'text-gray-900'}`}>
+                    {aiStats.engagementRate.toFixed(1)}%
+                  </p>
+                  <p className="text-xs text-gray-500">Engagement</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-2xl font-semibold text-purple-600">{aiStats.patternsLearned}</p>
+                  <p className="text-xs text-gray-500">Patterns</p>
+                </div>
+                <Link
+                  href="/ai?tab=brain"
+                  className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 transition-colors"
+                >
+                  View Insights →
+                </Link>
+              </div>
+            </div>
+            {aiStats.latestInsight && (
+              <div className="mt-4 p-3 bg-white/50 rounded-lg">
+                <p className="text-sm text-gray-600">
+                  <span className="text-purple-600 font-medium">💡 Latest insight:</span> {aiStats.latestInsight}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Quick Actions */}
         <div className="mb-8">
           <h2 className="text-sm font-medium text-gray-500 mb-3">Quick Actions</h2>
@@ -327,9 +418,16 @@ export default function DashboardPage() {
                   href={card.href}
                   className="bg-white rounded-lg border border-gray-200 p-5 hover:border-gray-300 hover:shadow-sm transition-all group"
                 >
-                  <h3 className="font-semibold text-gray-900 group-hover:text-gray-700 mb-1">
-                    {card.title}
-                  </h3>
+                  <div className="flex items-start justify-between">
+                    <h3 className="font-semibold text-gray-900 group-hover:text-gray-700 mb-1">
+                      {card.title}
+                    </h3>
+                    {card.badge && (
+                      <span className="px-2 py-0.5 text-xs bg-purple-100 text-purple-700 rounded-full">
+                        {card.badge}
+                      </span>
+                    )}
+                  </div>
                   <p className="text-sm text-gray-500 mb-3">{card.description}</p>
                   <div
                     className={`h-1 w-12 rounded bg-gradient-to-r ${card.color} opacity-60 group-hover:opacity-100 transition-opacity`}
