@@ -773,16 +773,7 @@ export function generateSupplementalFeed(optimizations: GoogleShoppingOptimizati
 // EXPORTS
 // ============================================================================
 
-export {
-  optimizeGoogleTitle,
-  optimizeGoogleDescription,
-  generateHighlights,
-  generateCustomLabels,
-  matchGoogleCategory,
-  findUnderperformers,
-  GOOGLE_CATEGORIES,
-  HIGH_INTENT_BUYER_SIGNALS
-};
+
 
 export default {
   optimizeForGoogleShopping,
