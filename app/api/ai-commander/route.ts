@@ -7,7 +7,7 @@ import OpenAI from 'openai';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const openai = new OpenAI({ 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 });
 
 export async function POST(request: NextRequest) {
   try {
