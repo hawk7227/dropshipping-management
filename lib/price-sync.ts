@@ -1,570 +1,447 @@
 // lib/price-sync.ts
-// Price Intelligence: Rainforest API sync, competitor tracking, margin analysis
+// Fetches real competitor prices from Rainforest API and writes to Shopify's compare_at_price
+// Works alongside NA Bulk Price Editor - both use the same native Shopify field
 
-import { createClient } from '@supabase/supabase-js';
-import type { CompetitorPrice, PriceSyncJob, MarginAlert } from '@/types/database';
+import { getShopifyProducts, updateShopifyProducts, updateMetafields } from './shopify-admin';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
-const RAINFOREST_API_KEY = process.env.RAINFOREST_API_KEY || '';
+const RAINFOREST_API_KEY = process.env.RAINFOREST_API_KEY!;
 const RAINFOREST_BASE_URL = 'https://api.rainforestapi.com/request';
-const RATE_LIMIT_MS = 1100;
 
-interface RainforestProduct {
-  asin: string;
+interface CompetitorPrice {
+  source: 'amazon' | 'walmart' | 'ebay' | 'target';
+  price: number;
+  url?: string;
+  in_stock: boolean;
+  last_checked: string;
+}
+
+interface PriceSyncResult {
+  product_id: string;
+  variant_id: string;
   title: string;
-  link: string;
-  price?: { value: number; currency: string };
-  buybox_winner?: { price: { value: number }; is_prime: boolean };
-  availability?: { raw: string };
-  fulfillment?: { is_prime_eligible: boolean };
+  current_price: number;
+  old_compare_at: number;
+  new_compare_at: number;
+  competitor_source: string;
+  savings_percent: number;
+  status: 'updated' | 'skipped' | 'error';
+  reason?: string;
 }
 
-// Rate limited Rainforest API request
-let lastRequestTime = 0;
-async function rainforestRequest(asin: string): Promise<RainforestProduct | null> {
-  if (!RAINFOREST_API_KEY) {
-    console.error('[PriceSync] Rainforest API key not configured');
-    return null;
-  }
-
-  const now = Date.now();
-  if (now - lastRequestTime < RATE_LIMIT_MS) {
-    await new Promise(r => setTimeout(r, RATE_LIMIT_MS - (now - lastRequestTime)));
-  }
-  lastRequestTime = Date.now();
-
+/**
+ * Fetch Amazon price by ASIN or search term
+ */
+async function fetchAmazonPrice(params: { asin?: string; search?: string }): Promise<CompetitorPrice | null> {
   try {
-    const params = new URLSearchParams({
+    const queryParams = new URLSearchParams({
       api_key: RAINFOREST_API_KEY,
-      type: 'product',
       amazon_domain: 'amazon.com',
-      asin: asin,
-      include_html: 'false',
     });
 
-    const response = await fetch(`${RAINFOREST_BASE_URL}?${params}`);
-    if (!response.ok) return null;
+    if (params.asin) {
+      queryParams.set('type', 'product');
+      queryParams.set('asin', params.asin);
+    } else if (params.search) {
+      queryParams.set('type', 'search');
+      queryParams.set('search_term', params.search);
+    } else {
+      return null;
+    }
 
+    const response = await fetch(`${RAINFOREST_BASE_URL}?${queryParams}`);
     const data = await response.json();
-    if (!data.request_info?.success) return null;
 
-    return data.product;
-  } catch (error) {
-    console.error(`[PriceSync] Error fetching ASIN ${asin}:`, error);
-    return null;
-  }
-}
+    // Handle product lookup by ASIN
+    if (params.asin && data.product?.buybox_winner?.price?.value) {
+      return {
+        source: 'amazon',
+        price: data.product.buybox_winner.price.value,
+        url: data.product.link,
+        in_stock: data.product.buybox_winner.availability?.type === 'in_stock',
+        last_checked: new Date().toISOString()
+      };
+    }
 
-// Create a new sync job
-export async function createSyncJob(totalProducts: number, source: string = 'manual'): Promise<PriceSyncJob> {
-  const { data, error } = await supabase
-    .from('price_sync_jobs')
-    .insert({
-      status: 'pending',
-      total_products: totalProducts,
-      processed: 0,
-      errors: 0,
-      source: source
-    })
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data;
-}
-
-// Update sync job progress
-export async function updateSyncJob(
-  jobId: string,
-  updates: Partial<PriceSyncJob>
-): Promise<void> {
-  await supabase.from('price_sync_jobs').update(updates).eq('id', jobId);
-}
-
-// Fetch competitor price for a single product
-export async function fetchCompetitorPrice(
-  productId: string,
-  asin: string,
-  ourPrice: number,
-  memberPrice: number
-): Promise<CompetitorPrice | null> {
-  const product = await rainforestRequest(asin);
-  if (!product) return null;
-
-  const competitorPrice = product.buybox_winner?.price?.value || product.price?.value;
-  if (!competitorPrice) return null;
-
-  const priceDiff = ourPrice - competitorPrice;
-  const priceDiffPct = (priceDiff / competitorPrice) * 100;
-
-  const record: Omit<CompetitorPrice, 'id' | 'created_at' | 'updated_at'> = {
-    product_id: productId,
-    sku: null,
-    asin: asin,
-    competitor_name: 'Amazon',
-    competitor_price: competitorPrice,
-    competitor_url: product.link,
-    our_price: ourPrice,
-    member_price: memberPrice,
-    price_difference: priceDiff,
-    price_difference_pct: priceDiffPct,
-    is_prime: product.buybox_winner?.is_prime || product.fulfillment?.is_prime_eligible || false,
-    availability: product.availability?.raw || null,
-    fetched_at: new Date().toISOString(),
-  };
-
-  // Upsert to database
-  const { data, error } = await supabase
-    .from('competitor_prices')
-    .upsert(record, { onConflict: 'product_id,asin' })
-    .select()
-    .single();
-
-  if (error) {
-    console.error('[PriceSync] Error saving competitor price:', error);
-    return null;
-  }
-
-  // Record price history
-  await supabase.from('price_history').insert([
-    { product_id: productId, source: 'us', price: ourPrice },
-    { product_id: productId, source: 'competitor', price: competitorPrice },
-  ]);
-
-  return data;
-}
-
-// Batch sync prices for multiple products
-export async function syncPrices(
-  products: Array<{
-    product_id: string;
-    asin: string;
-    our_price: number;
-    member_price: number;
-  }>,
-  jobId?: string
-): Promise<{ success: number; failed: number; alerts: MarginAlert[] }> {
-  let success = 0;
-  let failed = 0;
-  const alerts: MarginAlert[] = [];
-
-  for (let i = 0; i < products.length; i++) {
-    const product = products[i];
-    
-    try {
-      const result = await fetchCompetitorPrice(
-        product.product_id,
-        product.asin,
-        product.our_price,
-        product.member_price
-      );
-
-      if (result) {
-        success++;
-        
-        // Check for margin alerts
-        const alertsForProduct = checkMarginAlerts(result);
-        if (alertsForProduct.length > 0) {
-          await supabase.from('margin_alerts').insert(alertsForProduct);
-          // ✅ FIX: Cast to MarginAlert[] to resolve type error
-          alerts.push(...(alertsForProduct as MarginAlert[]));
-        }
-      } else {
-        failed++;
+    // Handle search results
+    if (data.search_results?.length > 0) {
+      const top = data.search_results[0];
+      if (top.price?.value) {
+        return {
+          source: 'amazon',
+          price: top.price.value,
+          url: top.link,
+          in_stock: top.availability?.raw !== 'Currently unavailable',
+          last_checked: new Date().toISOString()
+        };
       }
-    } catch (error) {
-      console.error(`[PriceSync] Error processing product ${product.product_id}:`, error);
-      failed++;
     }
 
-    // Update job progress
-    if (jobId) {
-      await updateSyncJob(jobId, {
-        processed: i + 1,
-        errors: failed,
-        status: 'running',
-      });
-    }
-  }
-
-  // Complete job
-  if (jobId) {
-    await updateSyncJob(jobId, {
-      status: 'completed',
-      completed_at: new Date().toISOString(),
-      processed: products.length,
-      errors: failed,
-    });
-  }
-
-  return { success, failed, alerts };
-}
-
-// Check for margin alerts based on competitor price
-function checkMarginAlerts(price: CompetitorPrice): Omit<MarginAlert, 'id' | 'created_at'>[] {
-  const alerts: Omit<MarginAlert, 'id' | 'created_at'>[] = [];
-
-  if (!price.our_price || !price.competitor_price) return alerts;
-
-  const priceDiffPct = price.price_difference_pct || 0;
-
-  // We're more than 20% more expensive
-  if (priceDiffPct > 20) {
-    alerts.push({
-      product_id: price.product_id,
-      alert_type: 'critical',
-      alert_code: 'PRICE_TOO_HIGH',
-      message: `Our price ($${price.our_price}) is ${priceDiffPct.toFixed(1)}% higher than Amazon ($${price.competitor_price})`,
-      recommendation: 'Consider lowering price to remain competitive or highlighting unique value.',
-      is_resolved: false,
-      resolved_at: null,
-    });
-  }
-  // We're 10-20% more expensive
-  else if (priceDiffPct > 10) {
-    alerts.push({
-      product_id: price.product_id,
-      alert_type: 'warning',
-      alert_code: 'PRICE_ELEVATED',
-      message: `Our price is ${priceDiffPct.toFixed(1)}% above Amazon`,
-      recommendation: 'Monitor sales velocity. Price premium may be acceptable with membership value.',
-      is_resolved: false,
-      resolved_at: null,
-    });
-  }
-  // We're significantly cheaper - opportunity
-  else if (priceDiffPct < -15) {
-    alerts.push({
-      product_id: price.product_id,
-      alert_type: 'info',
-      alert_code: 'PRICE_OPPORTUNITY',
-      message: `Our price is ${Math.abs(priceDiffPct).toFixed(1)}% below Amazon - opportunity to increase margin`,
-      recommendation: 'Consider raising price while maintaining competitive position.',
-      is_resolved: false,
-      resolved_at: null,
-    });
-  }
-
-  return alerts;
-}
-
-// Get recent competitor prices
-export async function getCompetitorPrices(
-  optionsOrProductId: { limit?: number; offset?: number; productId?: string } | string
-): Promise<{ prices: CompetitorPrice[]; total: number } | CompetitorPrice[]> {
-  if (typeof optionsOrProductId === 'string') {
-     const { data } = await supabase.from('competitor_prices').select('*').eq('product_id', optionsOrProductId);
-     return data || [];
-  }
-
-  const options = optionsOrProductId;
-  let query = supabase
-    .from('competitor_prices')
-    .select('*', { count: 'exact' })
-    .order('fetched_at', { ascending: false });
-
-  if (options.productId) {
-    query = query.eq('product_id', options.productId);
-  }
-
-  if (options.limit) {
-    query = query.limit(options.limit);
-  }
-
-  if (options.offset) {
-    query = query.range(options.offset, options.offset + (options.limit || 50) - 1);
-  }
-
-  const { data, error, count } = await query;
-  if (error) throw error;
-
-  return { prices: data || [], total: count || 0 };
-}
-
-// Get active margin alerts
-export async function getMarginAlerts(options: {
-  resolved?: boolean;
-  alertType?: 'critical' | 'warning' | 'info';
-  limit?: number;
-}): Promise<MarginAlert[]> {
-  let query = supabase
-    .from('margin_alerts')
-    .select('*')
-    .order('created_at', { ascending: false });
-
-  if (options.resolved !== undefined) {
-    query = query.eq('is_resolved', options.resolved);
-  }
-
-  if (options.alertType) {
-    query = query.eq('alert_type', options.alertType);
-  }
-
-  if (options.limit) {
-    query = query.limit(options.limit);
-  }
-
-  const { data, error } = await query;
-  if (error) throw error;
-
-  return data || [];
-}
-
-// Resolve an alert
-export async function resolveAlert(alertId: string): Promise<void> {
-  await supabase
-    .from('margin_alerts')
-    .update({ is_resolved: true, resolved_at: new Date().toISOString() })
-    .eq('id', alertId);
-}
-
-// Get price history for a product
-export async function getPriceHistory(
-  productId: string,
-  days: number = 30
-): Promise<any[]> {
-  const since = new Date();
-  since.setDate(since.getDate() - days);
-
-  const { data, error } = await supabase
-    .from('price_history')
-    .select('*')
-    .eq('product_id', productId)
-    .gte('recorded_at', since.toISOString())
-    .order('recorded_at', { ascending: true });
-
-  if (error) throw error;
-  return data || [];
-}
-
-// Get sync job status
-export async function getSyncJob(jobId: string): Promise<PriceSyncJob | null> {
-  const { data, error } = await supabase
-    .from('price_sync_jobs')
-    .select('*')
-    .eq('id', jobId)
-    .single();
-
-  if (error) return null;
-  return data;
-}
-
-// Get recent sync jobs
-export async function getRecentSyncJobs(limit: number = 10): Promise<PriceSyncJob[]> {
-  const { data, error } = await supabase
-    .from('price_sync_jobs')
-    .select('*')
-    .order('created_at', { ascending: false })
-    .limit(limit);
-
-  if (error) throw error;
-  return data || [];
-}
-
-// Test Rainforest connection
-export async function testRainforestConnection(): Promise<{ success: boolean; message: string }> {
-  if (!RAINFOREST_API_KEY) {
-    return { success: false, message: 'Rainforest API key not configured' };
-  }
-
-  try {
-    const product = await rainforestRequest('B0BDHWDR12'); // Test ASIN
-    if (product) {
-      return { success: true, message: 'Rainforest API connected successfully' };
-    }
-    return { success: false, message: 'Failed to fetch test product' };
+    return null;
   } catch (error) {
-    return { success: false, message: `Connection error: ${error}` };
+    console.error('Amazon fetch error:', error);
+    return null;
   }
 }
 
-// Get stale products (not synced within specified hours)
-export async function getStaleProducts(hours: number = 24, limit: number = 100): Promise<Array<{ product_id: string; title: string; last_synced: string | null }>> {
-  const cutoffDate = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
-  
-  const { data, error } = await supabase
-    .from('products')
-    .select('id, title, price_synced_at')
-    .or(`price_synced_at.is.null,price_synced_at.lt.${cutoffDate}`)
-    .eq('status', 'active')
-    .limit(limit);
-  
-  if (error) {
-    console.error('[PriceSync] Error getting stale products:', error);
-    return [];
-  }
-  
-  return (data || []).map(p => ({
-    product_id: p.id,
-    title: p.title,
-    last_synced: p.price_synced_at
-  }));
-}
-
-// Get latest sync job
-export async function getLatestSyncJob(): Promise<PriceSyncJob | null> {
-  const { data, error } = await supabase
-    .from('price_sync_jobs')
-    .select('*')
-    .order('started_at', { ascending: false })
-    .limit(1)
-    .single();
-  
-  if (error && error.code !== 'PGRST116') {
-    console.error('[PriceSync] Error getting latest sync job:', error);
-  }
-  
-  return data;
-}
-
-// =====================
-// MISSING METHODS FOR ROUTE.TS
-// =====================
-
-// Upsert Competitor Price (Direct)
-export async function upsertCompetitorPrice(data: {
-    product_id: string;
-    source: string;
-    competitor_price: number;
-    competitor_url?: string;
-    asin?: string;
-    our_price?: number;
-}): Promise<any> {
-    const { data: result, error } = await supabase.from('competitor_prices').upsert({
-        product_id: data.product_id,
-        source: data.source,
-        competitor_price: data.competitor_price,
-        competitor_url: data.competitor_url,
-        asin: data.asin,
-        our_price: data.our_price,
-        fetched_at: new Date().toISOString()
-    }, { onConflict: 'product_id,source' }).select().single();
-
-    if(error) throw error;
-    return result;
-}
-
-// Search Amazon
-export async function searchAmazonProducts(query: string, category?: string): Promise<any[]> {
-    if (!RAINFOREST_API_KEY) return [];
-
+/**
+ * Fetch Walmart price by search
+ */
+async function fetchWalmartPrice(searchTerm: string): Promise<CompetitorPrice | null> {
+  try {
     const params = new URLSearchParams({
       api_key: RAINFOREST_API_KEY,
       type: 'search',
-      amazon_domain: 'amazon.com',
-      search_term: query,
+      source: 'walmart',
+      search_term: searchTerm
     });
-    if(category) params.append('category_id', category);
 
-    try {
-        const res = await fetch(`${RAINFOREST_BASE_URL}?${params}`);
-        if(!res.ok) return [];
-        const data = await res.json();
-        return data.search_results?.slice(0, 10).map((item: any) => ({
-            asin: item.asin,
-            title: item.title,
-            image: item.image,
-            price: item.price?.value,
-            url: item.link
-        })) || [];
-    } catch(e) {
-        console.error("Rainforest search failed", e);
-        return [];
+    const response = await fetch(`${RAINFOREST_BASE_URL}?${params}`);
+    const data = await response.json();
+
+    if (data.search_results?.length > 0) {
+      const top = data.search_results[0];
+      if (top.price?.value) {
+        return {
+          source: 'walmart',
+          price: top.price.value,
+          url: top.link,
+          in_stock: true,
+          last_checked: new Date().toISOString()
+        };
+      }
     }
+
+    return null;
+  } catch (error) {
+    console.error('Walmart fetch error:', error);
+    return null;
+  }
 }
 
-// Fetch Amazon Product (Wrapper)
-export async function fetchAmazonProduct(asin: string): Promise<any> {
-    const product = await rainforestRequest(asin);
-    if (!product) return null;
-    return {
-        asin: product.asin,
-        title: product.title,
-        price: product.price?.value || product.buybox_winner?.price?.value,
-        url: product.link,
-        availability: product.availability?.raw
-    };
-}
-
-// Record Price History
-export async function recordPriceHistory(productId: string, source: string, price: number): Promise<void> {
-    await supabase.from('price_history').insert({
-        product_id: productId,
-        source: source,
-        price: price,
-        recorded_at: new Date().toISOString()
+/**
+ * Fetch eBay price by search
+ */
+async function fetchEbayPrice(searchTerm: string): Promise<CompetitorPrice | null> {
+  try {
+    const params = new URLSearchParams({
+      api_key: RAINFOREST_API_KEY,
+      type: 'search',
+      source: 'ebay',
+      search_term: searchTerm,
+      ebay_domain: 'ebay.com'
     });
+
+    const response = await fetch(`${RAINFOREST_BASE_URL}?${params}`);
+    const data = await response.json();
+
+    // Get average of Buy It Now prices
+    const buyItNow = data.search_results?.filter(
+      (item: any) => item.listing_type === 'buy_it_now' && item.price?.value
+    );
+
+    if (buyItNow?.length > 0) {
+      const avgPrice = buyItNow.reduce((sum: number, item: any) => sum + item.price.value, 0) / buyItNow.length;
+      return {
+        source: 'ebay',
+        price: Math.round(avgPrice * 100) / 100,
+        url: buyItNow[0].link,
+        in_stock: true,
+        last_checked: new Date().toISOString()
+      };
+    }
+
+    return null;
+  } catch (error) {
+    console.error('eBay fetch error:', error);
+    return null;
+  }
 }
 
-// Get Margin Rules
-export async function getMarginRules(): Promise<any[]> {
-    const { data } = await supabase.from('margin_rules').select('*').order('priority', { ascending: false });
-    return data || [];
+/**
+ * Fetch competitor prices for a product
+ */
+export async function fetchCompetitorPrices(
+  product: any,
+  sources: ('amazon' | 'walmart' | 'ebay')[] = ['amazon']
+): Promise<CompetitorPrice[]> {
+  const prices: CompetitorPrice[] = [];
+  
+  // Clean search term from product title
+  const searchTerm = product.title
+    .replace(/[^\w\s-]/g, '')
+    .substring(0, 80);
+
+  // Check for ASIN in metafields or tags
+  const asin = product.metafields?.competitor?.asin || 
+               product.tags?.find((t: string) => t.startsWith('asin:'))?.replace('asin:', '');
+
+  const fetchPromises: Promise<CompetitorPrice | null>[] = [];
+
+  if (sources.includes('amazon')) {
+    fetchPromises.push(
+      asin ? fetchAmazonPrice({ asin }) : fetchAmazonPrice({ search: searchTerm })
+    );
+  }
+  if (sources.includes('walmart')) {
+    fetchPromises.push(fetchWalmartPrice(searchTerm));
+  }
+  if (sources.includes('ebay')) {
+    fetchPromises.push(fetchEbayPrice(searchTerm));
+  }
+
+  const results = await Promise.all(fetchPromises);
+  
+  for (const result of results) {
+    if (result && result.price > 0) {
+      prices.push(result);
+    }
+  }
+
+  return prices;
 }
 
-// Get Price Stats
-export async function getPriceStats(): Promise<any> {
-    // Mocking stats for build
-    return {
-        monitored_products: 150,
-        price_alerts: 5,
-        avg_savings: 12.5
-    };
+/**
+ * Main sync function - fetches competitor prices and writes to compare_at_price
+ * 
+ * @param options.products - Array of products or 'all'
+ * @param options.sources - Which competitors to check
+ * @param options.strategy - How to pick the competitor price
+ * @param options.minMarkup - Minimum markup % your price should be below competitor
+ * @param options.dryRun - Preview without updating
+ */
+export async function syncCompetitorPrices(options: {
+  products?: any[] | 'all';
+  sources?: ('amazon' | 'walmart' | 'ebay')[];
+  strategy?: 'amazon' | 'lowest' | 'highest';
+  minMarkup?: number;
+  dryRun?: boolean;
+}): Promise<{
+  total: number;
+  updated: number;
+  skipped: number;
+  errors: number;
+  results: PriceSyncResult[];
+}> {
+  const {
+    products = 'all',
+    sources = ['amazon'],
+    strategy = 'amazon',
+    minMarkup = 10,
+    dryRun = false
+  } = options;
+
+  // Get products
+  let productList: any[];
+  if (products === 'all') {
+    productList = await getShopifyProducts();
+  } else {
+    productList = products;
+  }
+
+  const results: PriceSyncResult[] = [];
+  let updated = 0;
+  let skipped = 0;
+  let errors = 0;
+
+  for (const product of productList) {
+    try {
+      // Fetch competitor prices
+      const competitorPrices = await fetchCompetitorPrices(product, sources);
+
+      if (competitorPrices.length === 0) {
+        results.push({
+          product_id: product.id,
+          variant_id: product.variants[0]?.id,
+          title: product.title,
+          current_price: parseFloat(product.variants[0]?.price || '0'),
+          old_compare_at: parseFloat(product.variants[0]?.compare_at_price || '0'),
+          new_compare_at: 0,
+          competitor_source: 'none',
+          savings_percent: 0,
+          status: 'skipped',
+          reason: 'No competitor prices found'
+        });
+        skipped++;
+        continue;
+      }
+
+      // Pick competitor price based on strategy
+      let selectedPrice: CompetitorPrice;
+      
+      if (strategy === 'amazon') {
+        const amazonPrice = competitorPrices.find(p => p.source === 'amazon');
+        selectedPrice = amazonPrice || competitorPrices[0];
+      } else if (strategy === 'lowest') {
+        selectedPrice = competitorPrices.reduce((min, p) => p.price < min.price ? p : min);
+      } else {
+        selectedPrice = competitorPrices.reduce((max, p) => p.price > max.price ? p : max);
+      }
+
+      // Process each variant
+      for (const variant of product.variants) {
+        const currentPrice = parseFloat(variant.price);
+        const oldCompareAt = parseFloat(variant.compare_at_price || '0');
+        const newCompareAt = selectedPrice.price;
+
+        // Calculate savings
+        const savingsPercent = newCompareAt > currentPrice 
+          ? Math.round(((newCompareAt - currentPrice) / newCompareAt) * 100)
+          : 0;
+
+        // Skip if competitor price is lower than our price (we're not cheapest)
+        if (newCompareAt <= currentPrice) {
+          results.push({
+            product_id: product.id,
+            variant_id: variant.id,
+            title: product.title,
+            current_price: currentPrice,
+            old_compare_at: oldCompareAt,
+            new_compare_at: newCompareAt,
+            competitor_source: selectedPrice.source,
+            savings_percent: 0,
+            status: 'skipped',
+            reason: `Competitor price ($${newCompareAt}) <= our price ($${currentPrice})`
+          });
+          skipped++;
+          continue;
+        }
+
+        // Skip if savings less than minimum markup
+        if (savingsPercent < minMarkup) {
+          results.push({
+            product_id: product.id,
+            variant_id: variant.id,
+            title: product.title,
+            current_price: currentPrice,
+            old_compare_at: oldCompareAt,
+            new_compare_at: newCompareAt,
+            competitor_source: selectedPrice.source,
+            savings_percent: savingsPercent,
+            status: 'skipped',
+            reason: `Savings ${savingsPercent}% < minimum ${minMarkup}%`
+          });
+          skipped++;
+          continue;
+        }
+
+        // Skip if no change needed
+        if (Math.abs(newCompareAt - oldCompareAt) < 0.01) {
+          results.push({
+            product_id: product.id,
+            variant_id: variant.id,
+            title: product.title,
+            current_price: currentPrice,
+            old_compare_at: oldCompareAt,
+            new_compare_at: newCompareAt,
+            competitor_source: selectedPrice.source,
+            savings_percent: savingsPercent,
+            status: 'skipped',
+            reason: 'Price already set'
+          });
+          skipped++;
+          continue;
+        }
+
+        // Update Shopify if not dry run
+        if (!dryRun) {
+          // Update variant compare_at_price
+          await updateShopifyProducts([{
+            id: product.id,
+            variants: [{
+              id: variant.id,
+              compare_at_price: newCompareAt.toFixed(2)
+            }]
+          }]);
+
+          // Update competitor source metafield
+          await updateMetafields(product.id, [
+            {
+              namespace: 'competitor',
+              key: 'source',
+              value: selectedPrice.source.charAt(0).toUpperCase() + selectedPrice.source.slice(1),
+              type: 'single_line_text_field'
+            },
+            {
+              namespace: 'competitor',
+              key: 'last_checked',
+              value: selectedPrice.last_checked,
+              type: 'single_line_text_field'
+            }
+          ]);
+        }
+
+        results.push({
+          product_id: product.id,
+          variant_id: variant.id,
+          title: product.title,
+          current_price: currentPrice,
+          old_compare_at: oldCompareAt,
+          new_compare_at: newCompareAt,
+          competitor_source: selectedPrice.source,
+          savings_percent: savingsPercent,
+          status: 'updated'
+        });
+        updated++;
+      }
+
+      // Rate limiting - Rainforest has limits
+      await new Promise(resolve => setTimeout(resolve, 600));
+
+    } catch (error: any) {
+      results.push({
+        product_id: product.id,
+        variant_id: product.variants[0]?.id,
+        title: product.title,
+        current_price: 0,
+        old_compare_at: 0,
+        new_compare_at: 0,
+        competitor_source: 'error',
+        savings_percent: 0,
+        status: 'error',
+        reason: error.message
+      });
+      errors++;
+    }
+  }
+
+  return {
+    total: productList.length,
+    updated,
+    skipped,
+    errors,
+    results
+  };
 }
 
-// Calculate Product Margin
-export async function calculateProductMargin(productId: string): Promise<any> {
-    const { data: product } = await supabase
-        .from('products')
-        .select('*, variants(price, cost)')
-        .eq('id', productId)
-        .single();
-    
-    if(!product) return null;
-    
-    // Cast to 'any' to access joined variants data safely
-    const p = product as any;
-
-    const price = p.variants?.[0]?.price || 0;
-    const cost = p.variants?.[0]?.cost || 0;
-    const margin = price - cost;
-    const marginPercent = price > 0 ? (margin / price) * 100 : 0;
-
-    return {
-        price,
-        cost,
-        margin,
-        marginPercent
-    };
+/**
+ * Quick sync for specific products by ID
+ */
+export async function syncProductPrices(productIds: string[], sources?: ('amazon' | 'walmart' | 'ebay')[]) {
+  const products = await getShopifyProducts();
+  const filtered = products.filter(p => productIds.includes(p.id.toString()));
+  
+  return syncCompetitorPrices({
+    products: filtered,
+    sources,
+    dryRun: false
+  });
 }
 
-// Sync Product Prices (Route Adapter)
-export async function syncProductPrices(productIds: string[], batchSize: number = 50): Promise<{ synced: number, errors: string[] }> {
-    // 1. Fetch details for these IDs (need ASINs)
-    const { data: products } = await supabase.from('products')
-        .select('id, variants(sku, price), meta(asin)') 
-        .in('id', productIds);
-    
-    if (!products) return { synced: 0, errors: [] };
+/**
+ * Schedule daily price sync (call from cron)
+ */
+export async function scheduledPriceSync() {
+  console.log('Starting scheduled price sync...');
+  
+  const result = await syncCompetitorPrices({
+    products: 'all',
+    sources: ['amazon'],
+    strategy: 'amazon',
+    minMarkup: 10,
+    dryRun: false
+  });
 
-    // 2. Map to format expected by syncPrices
-    const productsToSync = products.map((p: any) => ({
-        product_id: p.id,
-        asin: p.meta?.asin || 'B0BDHWDR12', // Fallback
-        our_price: p.variants?.[0]?.price || 0,
-        member_price: p.variants?.[0]?.price || 0 
-    }));
-
-    // 3. Call internal logic
-    const result = await syncPrices(productsToSync);
-
-    // 4. Map return format to match Route expectation
-    return { 
-        synced: result.success, 
-        errors: result.failed > 0 ? [`${result.failed} items failed`] : [] 
-    };
+  console.log(`Price sync complete: ${result.updated} updated, ${result.skipped} skipped, ${result.errors} errors`);
+  
+  return result;
 }
