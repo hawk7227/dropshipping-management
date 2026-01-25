@@ -1,5 +1,5 @@
 // lib/google-shopping-optimizer.ts
-// Google Shopping optimization with all required exports
+// Google Shopping optimization - matches app/api/cron/google-shopping/route.ts expectations
 
 import { createClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
@@ -11,257 +11,258 @@ const supabase = createClient(
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+// ============================================================================
+// TYPES - Matching what route.ts expects
+// ============================================================================
+
 interface Product {
   id: string;
   title: string;
   description?: string;
   price: number;
-  compare_at_price?: number;
+  compareAtPrice?: number;
+  costPrice?: number;
   category?: string;
   brand?: string;
-  images?: string[];
+  imageUrl?: string;
+  link?: string;
+  tags?: string[];
 }
 
 interface ProductPerformance {
   product_id: string;
-  title?: string;
   impressions: number;
   clicks: number;
   ctr: number;
   conversions: number;
   revenue: number;
-  cost?: number;
-  roas?: number;
 }
 
-interface CustomLabels {
-  label0?: string;
-  label1?: string;
-  label2?: string;
-  label3?: string;
-  label4?: string;
+// What generateCustomLabels returns - route expects customLabel0, not label0
+interface CustomLabelsResult {
+  customLabel0: string;
+  customLabel1: string;
+  customLabel2: string;
+  customLabel3: string;
+  customLabel4: string;
 }
 
-// Updated interface with flat customLabel properties to match route expectations
+// What optimizeForGoogleShopping returns - matching route.ts usage exactly
 interface OptimizedProduct {
-  productId: string;
   optimizedTitle: string;
   optimizedDescription: string;
-  customLabels: CustomLabels;
+  productHighlights: string[];
   customLabel0: string;
   customLabel1: string;
   customLabel2: string;
   customLabel3: string;
   customLabel4: string;
   googleProductCategory: string;
-  productHighlights: string[];
-  seoScore: number;
-  improvementsMade: string[];
+  priority: 'high' | 'medium' | 'low';
+  scores: {
+    overallScore: number;
+    titleScore: number;
+    descriptionScore: number;
+  };
+  recommendations: string[];
 }
 
-export function generateCustomLabels(product: Product, performance?: ProductPerformance): CustomLabels {
-  const labels: CustomLabels = {};
+// ============================================================================
+// generateCustomLabels - Returns customLabel0-4 format
+// ============================================================================
+
+export function generateCustomLabels(product: Product): CustomLabelsResult {
+  // customLabel0: Margin tier
+  let customLabel0 = 'margin_standard';
+  if (product.costPrice && product.price) {
+    const margin = ((product.price - product.costPrice) / product.costPrice) * 100;
+    if (margin >= 70) {
+      customLabel0 = 'margin_high';
+    } else if (margin >= 40) {
+      customLabel0 = 'margin_medium';
+    } else if (margin < 20) {
+      customLabel0 = 'margin_low';
+    }
+  }
   
+  // customLabel1: Performance tier (placeholder - would use real data)
+  let customLabel1 = 'performance_new';
+  
+  // customLabel2: Price tier
+  let customLabel2 = 'price_medium';
   if (product.price < 25) {
-    labels.label0 = 'under_25';
-  } else if (product.price < 50) {
-    labels.label0 = '25_to_50';
+    customLabel2 = 'price_low';
   } else if (product.price < 100) {
-    labels.label0 = '50_to_100';
-  } else if (product.price < 200) {
-    labels.label0 = '100_to_200';
+    customLabel2 = 'price_medium';
   } else {
-    labels.label0 = 'over_200';
+    customLabel2 = 'price_high';
   }
   
-  if (product.compare_at_price && product.compare_at_price > product.price) {
-    const margin = ((product.compare_at_price - product.price) / product.compare_at_price) * 100;
-    if (margin >= 50) {
-      labels.label1 = 'high_margin';
-    } else if (margin >= 30) {
-      labels.label1 = 'medium_margin';
-    } else {
-      labels.label1 = 'low_margin';
-    }
-  } else {
-    labels.label1 = 'standard_margin';
+  // customLabel3: Sale status
+  let customLabel3 = 'regular';
+  if (product.compareAtPrice && product.compareAtPrice > product.price) {
+    customLabel3 = 'on_sale';
   }
   
-  if (performance) {
-    if (performance.ctr >= 3 && performance.conversions > 0) {
-      labels.label2 = 'top_performer';
-    } else if (performance.ctr >= 1.5) {
-      labels.label2 = 'good_performer';
-    } else if (performance.impressions > 100 && performance.ctr < 0.5) {
-      labels.label2 = 'needs_optimization';
-    } else {
-      labels.label2 = 'average';
-    }
-  } else {
-    labels.label2 = 'new_product';
-  }
-  
-  if (product.compare_at_price && product.compare_at_price > product.price) {
-    labels.label3 = 'on_sale';
-  } else {
-    labels.label3 = 'regular_price';
-  }
-  
-  labels.label4 = product.category?.toLowerCase().replace(/[^a-z0-9]/g, '_') || 'uncategorized';
-  
-  return labels;
-}
-
-export async function getProductPerformance(days: number = 30): Promise<ProductPerformance[]> {
-  const { data, error } = await supabase
-    .from('google_product_performance')
-    .select('*')
-    .gte('recorded_at', new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString());
-  
-  if (error) {
-    console.error('Error fetching performance:', error);
-    return [];
-  }
-  
-  return (data || []).map(d => ({
-    product_id: d.product_id,
-    title: d.title,
-    impressions: d.impressions || 0,
-    clicks: d.clicks || 0,
-    ctr: d.ctr || 0,
-    conversions: d.conversions || 0,
-    revenue: d.revenue || 0,
-    cost: d.cost,
-    roas: d.roas,
-  }));
-}
-
-export async function getUnderperformingProducts(
-  ctrThreshold: number = 0.02,
-  minImpressions: number = 100
-): Promise<ProductPerformance[]> {
-  const performance = await getProductPerformance(30);
-  return performance
-    .filter(p => p.impressions > minImpressions && p.ctr < ctrThreshold)
-    .sort((a, b) => b.impressions - a.impressions);
-}
-
-export async function optimizeProductTitle(product: Product, performance?: ProductPerformance): Promise<string> {
-  try {
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4-turbo-preview',
-      messages: [{ role: 'user', content: `Optimize this product title for Google Shopping (max 150 chars): ${product.title}. Return JSON: { "optimized_title": "..." }` }],
-      response_format: { type: 'json_object' },
-    });
-    const result = JSON.parse(response.choices[0].message.content || '{}');
-    return result.optimized_title || product.title;
-  } catch (error) {
-    return product.title;
-  }
-}
-
-export async function optimizeProductDescription(product: Product): Promise<string> {
-  try {
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4-turbo-preview',
-      messages: [{ role: 'user', content: `Optimize this product description for Google Shopping: ${product.description || product.title}. Return JSON: { "optimized_description": "..." }` }],
-      response_format: { type: 'json_object' },
-    });
-    const result = JSON.parse(response.choices[0].message.content || '{}');
-    return result.optimized_description || product.description || product.title;
-  } catch (error) {
-    return product.description || product.title;
-  }
-}
-
-export async function optimizeProduct(product: Product, performance?: ProductPerformance): Promise<OptimizedProduct> {
-  const [optimizedTitle, optimizedDescription] = await Promise.all([
-    optimizeProductTitle(product, performance),
-    optimizeProductDescription(product),
-  ]);
-  
-  const customLabels = generateCustomLabels(product, performance);
-  const improvements: string[] = [];
-  if (optimizedTitle !== product.title) improvements.push('Title optimized');
-  if (optimizedDescription !== product.description) improvements.push('Description optimized');
+  // customLabel4: Category
+  const customLabel4 = product.category?.toLowerCase().replace(/[^a-z0-9]/g, '_') || 'general';
   
   return {
-    productId: product.id,
-    optimizedTitle,
-    optimizedDescription,
-    customLabels,
-    customLabel0: customLabels.label0 || '',
-    customLabel1: customLabels.label1 || '',
-    customLabel2: customLabels.label2 || '',
-    customLabel3: customLabels.label3 || '',
-    customLabel4: customLabels.label4 || '',
-    googleProductCategory: product.category || '',
-    productHighlights: [],
-    seoScore: 75,
-    improvementsMade: improvements,
+    customLabel0,
+    customLabel1,
+    customLabel2,
+    customLabel3,
+    customLabel4,
   };
 }
 
-export async function batchOptimizeProducts(products: Product[]): Promise<Map<string, OptimizedProduct>> {
+// ============================================================================
+// optimizeForGoogleShopping - Main function route.ts calls
+// ============================================================================
+
+export async function optimizeForGoogleShopping(product: Product): Promise<OptimizedProduct> {
+  let optimizedTitle = product.title;
+  let optimizedDescription = product.description || product.title;
+  let productHighlights: string[] = [];
+  let googleProductCategory = product.category || 'General';
+  
+  // Try AI optimization
+  try {
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4-turbo-preview',
+      messages: [{
+        role: 'user',
+        content: `Optimize this product for Google Shopping:
+Title: ${product.title}
+Description: ${product.description || 'N/A'}
+Category: ${product.category || 'General'}
+Price: $${product.price}
+
+Return JSON with:
+- optimized_title (max 150 chars, include brand/key features)
+- optimized_description (500-1000 chars, benefits-focused)
+- highlights (array of 3-5 bullet points)
+- google_category (Google Product Category path)
+- recommendations (array of 2-3 improvement tips)`
+      }],
+      response_format: { type: 'json_object' },
+    });
+    
+    const result = JSON.parse(response.choices[0].message.content || '{}');
+    optimizedTitle = result.optimized_title || product.title;
+    optimizedDescription = result.optimized_description || product.description || product.title;
+    productHighlights = result.highlights || [];
+    googleProductCategory = result.google_category || product.category || 'General';
+  } catch (error) {
+    console.error('AI optimization failed:', error);
+  }
+  
+  // Generate custom labels
+  const labels = generateCustomLabels(product);
+  
+  // Determine priority based on margin
+  let priority: 'high' | 'medium' | 'low' = 'medium';
+  if (labels.customLabel0 === 'margin_high') {
+    priority = 'high';
+  } else if (labels.customLabel0 === 'margin_low') {
+    priority = 'low';
+  }
+  
+  // Calculate scores
+  const titleScore = optimizedTitle !== product.title ? 85 : 60;
+  const descriptionScore = optimizedDescription !== product.description ? 80 : 55;
+  const overallScore = Math.round((titleScore + descriptionScore) / 2);
+  
+  // Recommendations
+  const recommendations: string[] = [];
+  if (titleScore < 70) recommendations.push('Add brand name and key features to title');
+  if (descriptionScore < 70) recommendations.push('Expand description with benefits and specs');
+  if (productHighlights.length < 3) recommendations.push('Add more product highlights');
+  if (recommendations.length === 0) recommendations.push('Product is well-optimized');
+  
+  return {
+    optimizedTitle,
+    optimizedDescription,
+    productHighlights,
+    customLabel0: labels.customLabel0,
+    customLabel1: labels.customLabel1,
+    customLabel2: labels.customLabel2,
+    customLabel3: labels.customLabel3,
+    customLabel4: labels.customLabel4,
+    googleProductCategory,
+    priority,
+    scores: {
+      overallScore,
+      titleScore,
+      descriptionScore,
+    },
+    recommendations,
+  };
+}
+
+// ============================================================================
+// batchOptimizeForGoogleShopping
+// ============================================================================
+
+export async function batchOptimizeForGoogleShopping(
+  products: Product[]
+): Promise<Map<string, OptimizedProduct>> {
   const results = new Map<string, OptimizedProduct>();
-  const performance = await getProductPerformance(30);
-  const performanceMap = new Map(performance.map(p => [p.product_id, p]));
   
   for (const product of products) {
     try {
-      const perf = performanceMap.get(product.id);
-      const optimized = await optimizeProduct(product, perf);
+      const optimized = await optimizeForGoogleShopping(product);
       results.set(product.id, optimized);
       await new Promise(r => setTimeout(r, 200));
     } catch (error) {
       console.error(`Error optimizing product ${product.id}:`, error);
     }
   }
+  
   return results;
 }
 
-export async function suggestGoogleCategory(product: Product): Promise<string | null> {
-  try {
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4-turbo-preview',
-      messages: [{ role: 'user', content: `Suggest Google Product Category for: ${product.title}. Return JSON: { "google_category": "..." }` }],
-      response_format: { type: 'json_object' },
-    });
-    const result = JSON.parse(response.choices[0].message.content || '{}');
-    return result.google_category || null;
-  } catch (error) {
-    return null;
+// ============================================================================
+// findUnderperformers
+// ============================================================================
+
+export async function findUnderperformers(): Promise<ProductPerformance[]> {
+  const { data, error } = await supabase
+    .from('google_product_performance')
+    .select('*')
+    .lt('ctr', 0.02)
+    .gt('impressions', 100)
+    .order('impressions', { ascending: false })
+    .limit(50);
+  
+  if (error) {
+    console.error('Error finding underperformers:', error);
+    return [];
   }
+  
+  return data || [];
 }
 
-export async function checkFeedHealth(): Promise<{ totalProducts: number; optimized: number; needsAttention: number; issues: { product_id: string; issue: string }[] }> {
-  const performance = await getProductPerformance(30);
-  const underperforming = await getUnderperformingProducts();
-  return {
-    totalProducts: performance.length,
-    optimized: performance.filter(p => p.ctr >= 0.02).length,
-    needsAttention: underperforming.length,
-    issues: underperforming.slice(0, 10).map(p => ({ product_id: p.product_id, issue: `Low CTR` })),
-  };
-}
+// ============================================================================
+// generateSupplementalFeed
+// ============================================================================
 
-export const optimizeForGoogleShopping = optimizeProduct;
-export const batchOptimizeForGoogleShopping = batchOptimizeProducts;
-export const findUnderperformers = getUnderperformingProducts;
-
-export async function generateSupplementalFeed(products: any[]): Promise<any[]> {
-  const results = [];
+export async function generateSupplementalFeed(products: Product[]): Promise<any[]> {
+  const feed = [];
+  
   for (const product of products) {
     const labels = generateCustomLabels(product);
-    results.push({
+    feed.push({
       id: product.id,
-      custom_label_0: labels.label0,
-      custom_label_1: labels.label1,
-      custom_label_2: labels.label2,
-      custom_label_3: labels.label3,
-      custom_label_4: labels.label4,
+      custom_label_0: labels.customLabel0,
+      custom_label_1: labels.customLabel1,
+      custom_label_2: labels.customLabel2,
+      custom_label_3: labels.customLabel3,
+      custom_label_4: labels.customLabel4,
     });
   }
-  return results;
+  
+  return feed;
 }
+
 
