@@ -1,13 +1,12 @@
 // app/api/ai-commander/route.ts
 // Simplified AI Commander - natural language commands
-
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
-const openai = new OpenAI({ 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 });
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 export async function POST(request: NextRequest) {
   try {
@@ -27,7 +26,6 @@ export async function POST(request: NextRequest) {
 - action: the type of action (e.g., "generate_content", "analyze_prices", "create_post", "unknown")
 - description: what you would do
 - parameters: any extracted parameters
-
 Always respond with valid JSON only.`
         },
         { role: 'user', content: prompt }
