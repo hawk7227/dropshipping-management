@@ -381,6 +381,7 @@ export async function syncCompetitorPrices(options: {
   strategy?: string;
   minMarkup?: number;
   forceRefresh?: boolean;
+  dryRun?: boolean;
 }): Promise<{
   synced: number;
   errors: number;
@@ -394,7 +395,8 @@ export async function syncCompetitorPrices(options: {
     sources = ['amazon'], 
     strategy = 'amazon',
     minMarkup = 10,
-    forceRefresh = false 
+    forceRefresh = false,
+    dryRun = false
   } = options;
   
   // Handle products: 'all' case
@@ -477,4 +479,5 @@ export async function scheduledPriceSync(): Promise<{
     errors: result.errors,
   };
 }
+
 
