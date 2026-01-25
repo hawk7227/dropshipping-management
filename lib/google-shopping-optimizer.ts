@@ -53,7 +53,7 @@ interface OptimizedProduct {
   customLabel2: string;
   customLabel3: string;
   customLabel4: string;
-  googleProductCategory?: string;
+  googleProductCategory: string;
   productHighlights: string[];
   seoScore: number;
   improvementsMade: string[];
@@ -195,6 +195,7 @@ export async function optimizeProduct(product: Product, performance?: ProductPer
     customLabel2: customLabels.label2 || '',
     customLabel3: customLabels.label3 || '',
     customLabel4: customLabels.label4 || '',
+    googleProductCategory: product.category || '',
     productHighlights: [],
     seoScore: 75,
     improvementsMade: improvements,
@@ -263,3 +264,4 @@ export async function generateSupplementalFeed(products: any[]): Promise<any[]> 
   }
   return results;
 }
+
