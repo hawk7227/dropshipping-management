@@ -11,10 +11,6 @@ const supabase = createClient(
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// ============================================================================
-// TYPES
-// ============================================================================
-
 interface Product {
   id: string;
   title: string;
@@ -46,21 +42,22 @@ interface CustomLabels {
   label4?: string;
 }
 
-// Using camelCase to match route expectations
+// Updated interface with flat customLabel properties to match route expectations
 interface OptimizedProduct {
   productId: string;
   optimizedTitle: string;
   optimizedDescription: string;
   customLabels: CustomLabels;
+  customLabel0: string;
+  customLabel1: string;
+  customLabel2: string;
+  customLabel3: string;
+  customLabel4: string;
   googleProductCategory?: string;
-  productHighlights?: string[];
+  productHighlights: string[];
   seoScore: number;
   improvementsMade: string[];
 }
-
-// ============================================================================
-// CUSTOM LABELS GENERATION
-// ============================================================================
 
 export function generateCustomLabels(product: Product, performance?: ProductPerformance): CustomLabels {
   const labels: CustomLabels = {};
@@ -115,10 +112,6 @@ export function generateCustomLabels(product: Product, performance?: ProductPerf
   return labels;
 }
 
-// ============================================================================
-// PRODUCT PERFORMANCE
-// ============================================================================
-
 export async function getProductPerformance(days: number = 30): Promise<ProductPerformance[]> {
   const { data, error } = await supabase
     .from('google_product_performance')
@@ -148,120 +141,67 @@ export async function getUnderperformingProducts(
   minImpressions: number = 100
 ): Promise<ProductPerformance[]> {
   const performance = await getProductPerformance(30);
-  
   return performance
     .filter(p => p.impressions > minImpressions && p.ctr < ctrThreshold)
     .sort((a, b) => b.impressions - a.impressions);
 }
 
-// ============================================================================
-// PRODUCT OPTIMIZATION
-// ============================================================================
-
-export async function optimizeProductTitle(
-  product: Product,
-  performance?: ProductPerformance
-): Promise<string> {
-  const prompt = `Optimize this product title for Google Shopping:
-
-Current Title: ${product.title}
-Category: ${product.category || 'General'}
-Brand: ${product.brand || 'Unknown'}
-Price: $${product.price}
-${performance ? `Current CTR: ${(performance.ctr * 100).toFixed(2)}%` : ''}
-
-Requirements:
-- Max 150 characters
-- Include brand, key features, product type
-- Front-load important keywords
-- Avoid promotional text
-
-Return JSON: { "optimized_title": "..." }`;
-
+export async function optimizeProductTitle(product: Product, performance?: ProductPerformance): Promise<string> {
   try {
     const response = await openai.chat.completions.create({
       model: 'gpt-4-turbo-preview',
-      messages: [{ role: 'user', content: prompt }],
+      messages: [{ role: 'user', content: `Optimize this product title for Google Shopping (max 150 chars): ${product.title}. Return JSON: { "optimized_title": "..." }` }],
       response_format: { type: 'json_object' },
     });
-    
     const result = JSON.parse(response.choices[0].message.content || '{}');
     return result.optimized_title || product.title;
   } catch (error) {
-    console.error('Error optimizing title:', error);
     return product.title;
   }
 }
 
-export async function optimizeProductDescription(
-  product: Product
-): Promise<string> {
-  const prompt = `Optimize this product description for Google Shopping:
-
-Title: ${product.title}
-Current Description: ${product.description || 'No description'}
-Category: ${product.category || 'General'}
-
-Requirements:
-- 500-5000 characters
-- Include key features and benefits
-- Use natural language, avoid keyword stuffing
-- Include specifications if relevant
-
-Return JSON: { "optimized_description": "..." }`;
-
+export async function optimizeProductDescription(product: Product): Promise<string> {
   try {
     const response = await openai.chat.completions.create({
       model: 'gpt-4-turbo-preview',
-      messages: [{ role: 'user', content: prompt }],
+      messages: [{ role: 'user', content: `Optimize this product description for Google Shopping: ${product.description || product.title}. Return JSON: { "optimized_description": "..." }` }],
       response_format: { type: 'json_object' },
     });
-    
     const result = JSON.parse(response.choices[0].message.content || '{}');
     return result.optimized_description || product.description || product.title;
   } catch (error) {
-    console.error('Error optimizing description:', error);
     return product.description || product.title;
   }
 }
 
-export async function optimizeProduct(
-  product: Product,
-  performance?: ProductPerformance
-): Promise<OptimizedProduct> {
+export async function optimizeProduct(product: Product, performance?: ProductPerformance): Promise<OptimizedProduct> {
   const [optimizedTitle, optimizedDescription] = await Promise.all([
     optimizeProductTitle(product, performance),
     optimizeProductDescription(product),
   ]);
   
   const customLabels = generateCustomLabels(product, performance);
-  
   const improvements: string[] = [];
-  if (optimizedTitle !== product.title) {
-    improvements.push('Title optimized');
-  }
-  if (optimizedDescription !== product.description) {
-    improvements.push('Description optimized');
-  }
+  if (optimizedTitle !== product.title) improvements.push('Title optimized');
+  if (optimizedDescription !== product.description) improvements.push('Description optimized');
   
   return {
     productId: product.id,
     optimizedTitle,
     optimizedDescription,
     customLabels,
+    customLabel0: customLabels.label0 || '',
+    customLabel1: customLabels.label1 || '',
+    customLabel2: customLabels.label2 || '',
+    customLabel3: customLabels.label3 || '',
+    customLabel4: customLabels.label4 || '',
     productHighlights: [],
     seoScore: 75,
     improvementsMade: improvements,
   };
 }
 
-// ============================================================================
-// BATCH OPTIMIZATION
-// ============================================================================
-
-export async function batchOptimizeProducts(
-  products: Product[]
-): Promise<Map<string, OptimizedProduct>> {
+export async function batchOptimizeProducts(products: Product[]): Promise<Map<string, OptimizedProduct>> {
   const results = new Map<string, OptimizedProduct>();
   const performance = await getProductPerformance(30);
   const performanceMap = new Map(performance.map(p => [p.product_id, p]));
@@ -271,80 +211,43 @@ export async function batchOptimizeProducts(
       const perf = performanceMap.get(product.id);
       const optimized = await optimizeProduct(product, perf);
       results.set(product.id, optimized);
-      
       await new Promise(r => setTimeout(r, 200));
     } catch (error) {
       console.error(`Error optimizing product ${product.id}:`, error);
     }
   }
-  
   return results;
 }
 
-// ============================================================================
-// GOOGLE CATEGORY MAPPING
-// ============================================================================
-
-export async function suggestGoogleCategory(
-  product: Product
-): Promise<string | null> {
-  const prompt = `Suggest the most appropriate Google Product Category for:
-
-Title: ${product.title}
-Description: ${product.description || 'N/A'}
-Current Category: ${product.category || 'N/A'}
-
-Return the full Google Product Category path (e.g., "Apparel & Accessories > Clothing > Shirts & Tops").
-Return JSON: { "google_category": "..." }`;
-
+export async function suggestGoogleCategory(product: Product): Promise<string | null> {
   try {
     const response = await openai.chat.completions.create({
       model: 'gpt-4-turbo-preview',
-      messages: [{ role: 'user', content: prompt }],
+      messages: [{ role: 'user', content: `Suggest Google Product Category for: ${product.title}. Return JSON: { "google_category": "..." }` }],
       response_format: { type: 'json_object' },
     });
-    
     const result = JSON.parse(response.choices[0].message.content || '{}');
     return result.google_category || null;
   } catch (error) {
-    console.error('Error suggesting category:', error);
     return null;
   }
 }
 
-// ============================================================================
-// FEED HEALTH
-// ============================================================================
-
-export async function checkFeedHealth(): Promise<{
-  totalProducts: number;
-  optimized: number;
-  needsAttention: number;
-  issues: { product_id: string; issue: string }[];
-}> {
+export async function checkFeedHealth(): Promise<{ totalProducts: number; optimized: number; needsAttention: number; issues: { product_id: string; issue: string }[] }> {
   const performance = await getProductPerformance(30);
   const underperforming = await getUnderperformingProducts();
-  
   return {
     totalProducts: performance.length,
     optimized: performance.filter(p => p.ctr >= 0.02).length,
     needsAttention: underperforming.length,
-    issues: underperforming.slice(0, 10).map(p => ({
-      product_id: p.product_id,
-      issue: `Low CTR (${(p.ctr * 100).toFixed(2)}%) with ${p.impressions} impressions`,
-    })),
+    issues: underperforming.slice(0, 10).map(p => ({ product_id: p.product_id, issue: `Low CTR` })),
   };
 }
-
-// ============================================================================
-// ALIASES FOR BACKWARD COMPATIBILITY
-// ============================================================================
 
 export const optimizeForGoogleShopping = optimizeProduct;
 export const batchOptimizeForGoogleShopping = batchOptimizeProducts;
 export const findUnderperformers = getUnderperformingProducts;
 
-// Generate supplemental feed data
 export async function generateSupplementalFeed(products: any[]): Promise<any[]> {
   const results = [];
   for (const product of products) {
