@@ -343,3 +343,9 @@ export async function checkFeedHealth(): Promise<{
     })),
   };
 }
+
+// ============================================================================
+// ALIAS FOR BACKWARD COMPATIBILITY
+// ============================================================================
+
+export const optimizeForGoogleShopping = optimizeProduct;
