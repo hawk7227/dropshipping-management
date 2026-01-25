@@ -376,20 +376,42 @@ export async function fetchAmazonProduct(asin: string): Promise<any | null> {
 
 export async function syncCompetitorPrices(options: {
   productIds?: string[];
+  products?: string[] | 'all';
   sources?: ('amazon' | 'walmart' | 'ebay')[];
+  strategy?: string;
+  minMarkup?: number;
   forceRefresh?: boolean;
 }): Promise<{
   synced: number;
   errors: number;
   results: any[];
+  updated?: number;
+  skipped?: number;
 }> {
-  const { productIds = [], sources = ['amazon'], forceRefresh = false } = options;
+  const { 
+    productIds = [], 
+    products,
+    sources = ['amazon'], 
+    strategy = 'amazon',
+    minMarkup = 10,
+    forceRefresh = false 
+  } = options;
+  
+  // Handle products: 'all' case
+  let idsToSync = productIds;
+  if (products === 'all') {
+    // Fetch all product IDs from database
+    const { data } = await supabase.from('products').select('id').limit(500);
+    idsToSync = (data || []).map(p => p.id);
+  } else if (Array.isArray(products)) {
+    idsToSync = products;
+  }
   
   let results: any[] = [];
   let synced = 0;
   let errors = 0;
   
-  for (const productId of productIds) {
+  for (const productId of idsToSync) {
     try {
       const prices = await fetchCompetitorPrices(productId, sources);
       
@@ -405,7 +427,7 @@ export async function syncCompetitorPrices(options: {
     }
   }
   
-  return { synced, errors, results };
+  return { synced, errors, results, updated: synced, skipped: errors };
 }
 
 export async function syncProductPrices(
@@ -455,3 +477,4 @@ export async function scheduledPriceSync(): Promise<{
     errors: result.errors,
   };
 }
+
