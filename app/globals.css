@@ -221,6 +221,30 @@ body {
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
+
+  /* Screen reader only - for accessibility */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+  }
+
+  .sr-only-focusable:focus {
+    position: static;
+    width: auto;
+    height: auto;
+    padding: inherit;
+    margin: inherit;
+    overflow: visible;
+    clip: auto;
+    white-space: normal;
+  }
 }
 
 /* Prose overrides for generated content */
@@ -278,6 +302,10 @@ body {
   @apply bg-gray-900 text-white;
 }
 
+.toast-warning {
+  @apply bg-yellow-600 text-white;
+}
+
 /* Empty state */
 .empty-state {
   @apply text-center py-12;
@@ -330,9 +358,40 @@ body {
   @apply text-xs text-red-600;
 }
 
+/* Status indicators */
+.status-dot {
+  @apply w-2 h-2 rounded-full inline-block;
+}
+
+.status-dot-success {
+  @apply bg-green-500;
+}
+
+.status-dot-warning {
+  @apply bg-yellow-500;
+}
+
+.status-dot-error {
+  @apply bg-red-500;
+}
+
+.status-dot-info {
+  @apply bg-blue-500;
+}
+
+/* Progress bar */
+.progress-bar {
+  @apply h-2 bg-gray-200 rounded-full overflow-hidden;
+}
+
+.progress-bar-fill {
+  @apply h-full bg-blue-600 transition-all duration-300;
+}
+
 /* Responsive adjustments */
 @media (max-width: 640px) {
   .stat-value {
     @apply text-xl;
   }
 }
+
