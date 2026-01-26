@@ -505,3 +505,18 @@ export function getProfitThreshold(): number {
 export function getTargetProfit(): number {
   return PRICING_RULES.profitThresholds.target;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ALIAS EXPORTS FOR COMPATIBILITY
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Alias for calculateListPrice - used by some components
+ */
+export const calculateRetailPrice = calculateListPrice;
+
+/**
+ * Alias for calculateCompetitorPrices - used by some components
+ */
+export { calculateCompetitorPrices as calculateCompetitorDisplayPrices };
+
