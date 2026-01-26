@@ -125,8 +125,8 @@ const SUPPORTED_FILE_TYPES: Record<FileType, string[]> = {
 const DEFAULT_DISCOVERY_FILTERS: DiscoveryFilters = {
   query: '',
   category: '',
-  minPrice: PRICING_RULES.discovery.minPrice,
-  maxPrice: PRICING_RULES.discovery.maxPrice,
+  minPrice: PRICING_RULES.discovery.minAmazonPrice,
+  maxPrice: PRICING_RULES.discovery.maxAmazonPrice,
   minRating: PRICING_RULES.discovery.minRating,
   minReviews: PRICING_RULES.discovery.minReviews,
   primeOnly: PRICING_RULES.discovery.requirePrime,
