@@ -196,10 +196,11 @@ export interface RainforestSearchResult {
   title: string;
   price: number | null;
   rating: number | null;
-  reviews: number | null;
-  isPrime: boolean;
-  imageUrl?: string | null;
+  review_count: number | null;
+  is_prime: boolean;
+  image_url?: string | null;
   category?: string | null;
+  availability?: string | null;
 }
 
 export interface KeepaProductData {
