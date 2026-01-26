@@ -23,7 +23,8 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "stripe": "^14.10.0",
-    "twilio": "^4.19.0"
+    "twilio": "^4.19.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
