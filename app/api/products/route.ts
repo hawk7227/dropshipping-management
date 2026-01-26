@@ -1,553 +1,703 @@
 // app/api/products/route.ts
-// Full product management API - CRUD, Shopify sync, inventory, bulk operations
+// COMPLETE Products API - Full CRUD operations with validation, filtering, pagination,
+// bulk operations, error handling, and Supabase integration
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import {
-  syncProductsFromShopify,
-  getProducts,
-  getProduct,
-  createProduct,
-  updateProduct,
-  getProductVariants,
-  updateInventory,
-  getInventoryLogs,
-  getLowStockProducts,
-  createImportBatch,
-  processImportRow,
-  updateImportBatch,
-  getImportBatches,
-  getProductStats,
-} from '@/lib/product-management';
+import type { Product, ProductStatus, ApiResponse } from '@/types';
+import type { ApiError } from '@/types/errors';
+import { calculateRetailPrice, calculateCompetitorPrices } from '@/lib/utils/pricing-calculator';
+import { PRICING_RULES } from '@/lib/config/pricing-rules';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+// ═══════════════════════════════════════════════════════════════════════════
+// TYPES
+// ═══════════════════════════════════════════════════════════════════════════
 
-// GET /api/products
+interface ProductsQueryParams {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  status?: ProductStatus | 'all';
+  profitStatus?: 'profitable' | 'below_threshold' | 'unknown' | 'all';
+  category?: string;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
+  showStaleOnly?: boolean;
+  showSyncedOnly?: boolean;
+  minPrice?: number;
+  maxPrice?: number;
+  minMargin?: number;
+  maxMargin?: number;
+  ids?: string[];
+}
+
+interface CreateProductRequest {
+  asin: string;
+  title?: string;
+  description?: string;
+  amazon_price?: number;
+  category?: string;
+  image_url?: string;
+}
+
+interface UpdateProductRequest {
+  title?: string;
+  description?: string;
+  amazon_price?: number;
+  retail_price?: number;
+  category?: string;
+  status?: ProductStatus;
+  image_url?: string;
+}
+
+interface BulkOperationRequest {
+  operation: 'pause' | 'unpause' | 'delete' | 'refresh' | 'sync';
+  productIds: string[];
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CONSTANTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+const DEFAULT_PAGE_SIZE = 25;
+const MAX_PAGE_SIZE = 100;
+const MAX_BULK_OPERATIONS = 100;
+const STALE_THRESHOLD_DAYS = PRICING_RULES.refresh.staleThresholdDays;
+const MARGIN_THRESHOLD = PRICING_RULES.profitThresholds.minimum;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Create Supabase client
+ */
+function getSupabaseClient() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabaseKey) {
+    throw new Error('Missing Supabase configuration');
+  }
+
+  return createClient(supabaseUrl, supabaseKey);
+}
+
+/**
+ * Validate ASIN format
+ */
+function isValidAsin(asin: string): boolean {
+  return /^[A-Z0-9]{10}$/.test(asin.toUpperCase());
+}
+
+/**
+ * Create error response
+ */
+function errorResponse(error: ApiError, status: number = 400): NextResponse {
+  return NextResponse.json(
+    { success: false, error },
+    { status }
+  );
+}
+
+/**
+ * Create success response
+ */
+function successResponse<T>(data: T, meta?: Record<string, unknown>): NextResponse {
+  return NextResponse.json({
+    success: true,
+    data,
+    ...(meta && { meta }),
+  });
+}
+
+/**
+ * Parse query parameters
+ */
+function parseQueryParams(searchParams: URLSearchParams): ProductsQueryParams {
+  return {
+    page: parseInt(searchParams.get('page') || '1'),
+    pageSize: Math.min(parseInt(searchParams.get('pageSize') || String(DEFAULT_PAGE_SIZE)), MAX_PAGE_SIZE),
+    search: searchParams.get('search') || undefined,
+    status: (searchParams.get('status') as ProductStatus | 'all') || 'all',
+    profitStatus: (searchParams.get('profitStatus') as ProductsQueryParams['profitStatus']) || 'all',
+    category: searchParams.get('category') || undefined,
+    sortBy: searchParams.get('sortBy') || 'created_at',
+    sortOrder: (searchParams.get('sortOrder') as 'asc' | 'desc') || 'desc',
+    showStaleOnly: searchParams.get('showStaleOnly') === 'true',
+    showSyncedOnly: searchParams.get('showSyncedOnly') === 'true',
+    minPrice: searchParams.get('minPrice') ? parseFloat(searchParams.get('minPrice')!) : undefined,
+    maxPrice: searchParams.get('maxPrice') ? parseFloat(searchParams.get('maxPrice')!) : undefined,
+    minMargin: searchParams.get('minMargin') ? parseFloat(searchParams.get('minMargin')!) : undefined,
+    maxMargin: searchParams.get('maxMargin') ? parseFloat(searchParams.get('maxMargin')!) : undefined,
+    ids: searchParams.get('ids')?.split(',').filter(Boolean) || undefined,
+  };
+}
+
+/**
+ * Build Supabase query with filters
+ */
+function buildProductsQuery(
+  supabase: ReturnType<typeof getSupabaseClient>,
+  params: ProductsQueryParams
+) {
+  let query = supabase.from('products').select('*', { count: 'exact' });
+
+  // Search filter
+  if (params.search) {
+    query = query.or(`title.ilike.%${params.search}%,asin.ilike.%${params.search}%,description.ilike.%${params.search}%`);
+  }
+
+  // Status filter
+  if (params.status && params.status !== 'all') {
+    query = query.eq('status', params.status);
+  }
+
+  // Category filter
+  if (params.category) {
+    query = query.eq('category', params.category);
+  }
+
+  // IDs filter (for bulk operations)
+  if (params.ids && params.ids.length > 0) {
+    query = query.in('id', params.ids);
+  }
+
+  // Price range filters
+  if (params.minPrice !== undefined) {
+    query = query.gte('amazon_price', params.minPrice);
+  }
+  if (params.maxPrice !== undefined) {
+    query = query.lte('amazon_price', params.maxPrice);
+  }
+
+  // Margin range filters
+  if (params.minMargin !== undefined) {
+    query = query.gte('profit_margin', params.minMargin);
+  }
+  if (params.maxMargin !== undefined) {
+    query = query.lte('profit_margin', params.maxMargin);
+  }
+
+  // Profit status filter
+  if (params.profitStatus && params.profitStatus !== 'all') {
+    if (params.profitStatus === 'profitable') {
+      query = query.gte('profit_margin', MARGIN_THRESHOLD * 2);
+    } else if (params.profitStatus === 'below_threshold') {
+      query = query.gte('profit_margin', MARGIN_THRESHOLD).lt('profit_margin', MARGIN_THRESHOLD * 2);
+    } else if (params.profitStatus === 'unknown') {
+      query = query.or(`profit_margin.lt.${MARGIN_THRESHOLD},profit_margin.is.null`);
+    }
+  }
+
+  // Stale products filter
+  if (params.showStaleOnly) {
+    const staleDate = new Date(Date.now() - STALE_THRESHOLD_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    query = query.or(`last_price_check.lt.${staleDate},last_price_check.is.null`);
+  }
+
+  // Synced to Shopify filter
+  if (params.showSyncedOnly) {
+    query = query.not('shopify_id', 'is', null);
+  }
+
+  // Sorting
+  const validSortColumns = ['title', 'created_at', 'updated_at', 'profit_margin', 'amazon_price', 'retail_price', 'rating', 'review_count'];
+  const sortColumn = validSortColumns.includes(params.sortBy || '') ? params.sortBy! : 'created_at';
+  query = query.order(sortColumn, { ascending: params.sortOrder === 'asc' });
+
+  // Pagination
+  const page = Math.max(1, params.page || 1);
+  const pageSize = params.pageSize || DEFAULT_PAGE_SIZE;
+  const offset = (page - 1) * pageSize;
+  query = query.range(offset, offset + pageSize - 1);
+
+  return query;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GET - List products with filtering and pagination
+// ═══════════════════════════════════════════════════════════════════════════
+
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
-    const action = searchParams.get('action') || 'list';
+    const supabase = getSupabaseClient();
+    const params = parseQueryParams(request.nextUrl.searchParams);
 
-    switch (action) {
-      case 'list': {
-        const page = parseInt(searchParams.get('page') || '1');
-        const pageSize = parseInt(searchParams.get('pageSize') || '50');
-        const status = searchParams.get('status') || undefined;
-        const search = searchParams.get('search') || undefined;
-        const vendor = searchParams.get('vendor') || undefined;
-        const productType = searchParams.get('productType') || undefined;
-        const sortBy = searchParams.get('sortBy') as 'title' | 'created_at' | 'updated_at' | 'price' || 'created_at';
-        const sortOrder = searchParams.get('sortOrder') as 'asc' | 'desc' || 'desc';
+    // Build and execute query
+    const query = buildProductsQuery(supabase, params);
+    const { data: products, error, count } = await query;
 
-        const result = await getProducts({
-          page,
-          pageSize,
-          status,
-          search,
-          vendor,
-          productType,
-          sortBy,
-          sortOrder,
-        });
-
-        return NextResponse.json({
-          success: true,
-          data: result.products,
-          pagination: {
-            page,
-            pageSize,
-            total: result.total,
-            totalPages: Math.ceil(result.total / pageSize),
-          },
-        });
-      }
-
-      case 'get': {
-        const id = searchParams.get('id');
-        if (!id) {
-          return NextResponse.json(
-            { success: false, error: 'Product ID required' },
-            { status: 400 }
-          );
-        }
-
-        const product = await getProduct(id);
-        if (!product) {
-          return NextResponse.json(
-            { success: false, error: 'Product not found' },
-            { status: 404 }
-          );
-        }
-
-        return NextResponse.json({ success: true, data: product });
-      }
-
-      case 'variants': {
-        const productId = searchParams.get('productId');
-        if (!productId) {
-          return NextResponse.json(
-            { success: false, error: 'Product ID required' },
-            { status: 400 }
-          );
-        }
-
-        const variants = await getProductVariants(productId);
-        return NextResponse.json({ success: true, data: variants });
-      }
-
-      case 'inventory-logs': {
-        const productId = searchParams.get('productId');
-        const variantId = searchParams.get('variantId') || undefined;
-        const limit = parseInt(searchParams.get('limit') || '50');
-
-        if (!productId) {
-          return NextResponse.json(
-            { success: false, error: 'Product ID required' },
-            { status: 400 }
-          );
-        }
-
-        const logs = await getInventoryLogs(productId, variantId, limit);
-        return NextResponse.json({ success: true, data: logs });
-      }
-
-      case 'low-stock': {
-        const threshold = parseInt(searchParams.get('threshold') || '10');
-        const products = await getLowStockProducts(threshold);
-        return NextResponse.json({ success: true, data: products });
-      }
-
-      case 'stats': {
-        const stats = await getProductStats();
-        return NextResponse.json({ success: true, data: stats });
-      }
-
-      case 'import-batches': {
-        const batches = await getImportBatches();
-        return NextResponse.json({ success: true, data: batches });
-      }
-
-      case 'vendors': {
-        const { data } = await supabase
-          .from('products')
-          .select('vendor')
-          .not('vendor', 'is', null)
-          .order('vendor');
-
-        const vendors = [...new Set((data || []).map(p => p.vendor).filter(Boolean))];
-        return NextResponse.json({ success: true, data: vendors });
-      }
-
-      case 'product-types': {
-        const { data } = await supabase
-          .from('products')
-          .select('product_type')
-          .not('product_type', 'is', null)
-          .order('product_type');
-
-        const types = [...new Set((data || []).map(p => p.product_type).filter(Boolean))];
-        return NextResponse.json({ success: true, data: types });
-      }
-
-      default:
-        return NextResponse.json(
-          { success: false, error: `Unknown action: ${action}` },
-          { status: 400 }
-        );
+    if (error) {
+      console.error('Supabase query error:', error);
+      return errorResponse({
+        code: 'DB_001',
+        message: 'Failed to fetch products',
+        details: error.message,
+        suggestion: 'Please try again or contact support',
+      }, 500);
     }
+
+    // Calculate pagination metadata
+    const totalItems = count || 0;
+    const pageSize = params.pageSize || DEFAULT_PAGE_SIZE;
+    const totalPages = Math.ceil(totalItems / pageSize);
+    const currentPage = params.page || 1;
+
+    return successResponse(products || [], {
+      pagination: {
+        page: currentPage,
+        pageSize,
+        totalItems,
+        totalPages,
+        hasNext: currentPage < totalPages,
+        hasPrev: currentPage > 1,
+      },
+      filters: {
+        search: params.search,
+        status: params.status,
+        profitStatus: params.profitStatus,
+        category: params.category,
+        sortBy: params.sortBy,
+        sortOrder: params.sortOrder,
+      },
+    });
   } catch (error) {
-    console.error('[Products API] GET error:', error);
-    return NextResponse.json(
-      { success: false, error: String(error) },
-      { status: 500 }
-    );
+    console.error('Products GET error:', error);
+    return errorResponse({
+      code: 'API_001',
+      message: 'Internal server error',
+      details: error instanceof Error ? error.message : 'Unknown error',
+      suggestion: 'Please try again later',
+    }, 500);
   }
 }
 
-// POST /api/products
+// ═══════════════════════════════════════════════════════════════════════════
+// POST - Create new product or bulk operation
+// ═══════════════════════════════════════════════════════════════════════════
+
 export async function POST(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
-    console.log(searchParams.get('action'));
+    const supabase = getSupabaseClient();
     const body = await request.json();
-   const action = searchParams.get('action') || body.action;
-    
 
-    switch (action) {
-      case 'create': {
-        const { title, description, vendor, productType, tags, variants, images, status } = body;
-
-        if (!title) {
-          return NextResponse.json(
-            { success: false, error: 'Title is required' },
-            { status: 400 }
-          );
-        }
-
-        const product = await createProduct({
-          title,
-          description: description,
-          vendor,
-          product_type: productType,
-          tags,
-          variants,
-          images,
-          status: status || 'draft',
-        });
-
-        return NextResponse.json({ success: true, data: product });
-      }
-
-      case 'sync-shopify': {
-        const { fullSync = false } = body;
-
-        const result = await syncProductsFromShopify(fullSync);
-
-        return NextResponse.json({
-          success: true,
-          data: {
-            synced: result.synced,
-            errors: result.errors,
-            message: `Synced ${result.synced} products from Shopify`,
-          },
-        });
-      }
-
-      case 'update-inventory': {
-        const { variantId, quantity, reason, reference } = body;
-
-        if (!variantId || quantity === undefined) {
-          return NextResponse.json(
-            { success: false, error: 'Variant ID and quantity required' },
-            { status: 400 }
-          );
-        }
-
-        await updateInventory(variantId, quantity, reason, reference);
-
-        return NextResponse.json({
-          success: true,
-          message: 'Inventory updated successfully',
-        });
-      }
-
-      case 'bulk-update-inventory': {
-        const { updates } = body;
-
-        if (!Array.isArray(updates) || updates.length === 0) {
-          return NextResponse.json(
-            { success: false, error: 'Updates array required' },
-            { status: 400 }
-          );
-        }
-
-        const results: { variantId: string; success: boolean; error?: string }[] = [];
-
-        for (const update of updates) {
-          try {
-            await updateInventory(
-              update.variantId,
-              update.quantity,
-              update.reason || 'bulk_update',
-              update.reference
-            );
-            results.push({ variantId: update.variantId, success: true });
-          } catch (error) {
-            results.push({
-              variantId: update.variantId,
-              success: false,
-              error: String(error),
-            });
-          }
-        }
-
-        const successful = results.filter(r => r.success).length;
-        const failed = results.filter(r => !r.success).length;
-
-        return NextResponse.json({
-          success: true,
-          data: {
-            results,
-            summary: { successful, failed, total: updates.length },
-          },
-        });
-      }
-
-      case 'import-csv': {
-        const { rows, options } = body;
-
-        if (!Array.isArray(rows) || rows.length === 0) {
-          return NextResponse.json(
-            { success: false, error: 'CSV rows required' },
-            { status: 400 }
-          );
-        }
-
-        // Create import batch
-        const batch = await createImportBatch(rows.length, options?.source || 'csv_upload');
-
-        // Process rows
-        let processed = 0;
-        let succeeded = 0;
-        let failed = 0;
-        const errors: string[] = [];
-
-        for (const row of rows) {
-          try {
-            await processImportRow(batch.id, row);
-            succeeded++;
-          } catch (error) {
-            failed++;
-            errors.push(`Row ${processed + 1}: ${error}`);
-          }
-          processed++;
-
-          // Update batch progress every 10 rows
-          if (processed % 10 === 0) {
-            await updateImportBatch(batch.id, {
-              processed_count: processed,
-              success_count: succeeded,
-              error_count: failed,
-            });
-          }
-        }
-
-        // Final batch update
-        await updateImportBatch(batch.id, {
-          status: failed === rows.length ? 'failed' : 'completed',
-          processed_count: processed,
-          success_count: succeeded,
-          error_count: failed,
-          completed_at: new Date().toISOString(),
-        });
-
-        return NextResponse.json({
-          success: true,
-          data: {
-            batchId: batch.id,
-            total: rows.length,
-            succeeded,
-            failed,
-            errors: errors.slice(0, 10), // First 10 errors
-          },
-        });
-      }
-
-      case 'bulk-status-update': {
-        const { productIds, status } = body;
-
-        if (!Array.isArray(productIds) || productIds.length === 0) {
-          return NextResponse.json(
-            { success: false, error: 'Product IDs required' },
-            { status: 400 }
-          );
-        }
-
-        if (!['active', 'draft', 'archived'].includes(status)) {
-          return NextResponse.json(
-            { success: false, error: 'Invalid status' },
-            { status: 400 }
-          );
-        }
-
-        const { error } = await supabase
-          .from('products')
-          .update({ status, updated_at: new Date().toISOString() })
-          .in('id', productIds);
-
-        if (error) throw error;
-
-        return NextResponse.json({
-          success: true,
-          message: `Updated ${productIds.length} products to ${status}`,
-        });
-      }
-
-      case 'duplicate': {
-        const { productId } = body;
-
-        if (!productId) {
-          return NextResponse.json(
-            { success: false, error: 'Product ID required' },
-            { status: 400 }
-          );
-        }
-
-        const original = await getProduct(productId);
-        if (!original) {
-          return NextResponse.json(
-            { success: false, error: 'Product not found' },
-            { status: 404 }
-          );
-        }
-
-        const duplicate = await createProduct({
-          title: `${original.title} (Copy)`,
-          description: original.body_html,
-          vendor: original.vendor,
-          product_type: original.product_type,
-          tags: original.tags,
-          images: original.images,
-          status: 'draft',
-          variants: (original as any).variants?.map((v: any) => ({
-            title: v.title,
-            sku: v.sku ? `${v.sku}-COPY` : undefined,
-            price: v.price,
-            compare_at_price: v.compare_at_price,
-            inventory_quantity: 0,
-            option1: v.option1,
-            option2: v.option2,
-            option3: v.option3,
-          })),
-        });
-
-        return NextResponse.json({ success: true, data: duplicate });
-      }
-
-      default:
-        return NextResponse.json(
-          { success: false, error: `Unknown action: ${action}` },
-          { status: 400 }
-        );
+    // Check if this is a bulk operation
+    if (body.operation && body.productIds) {
+      return handleBulkOperation(supabase, body as BulkOperationRequest);
     }
+
+    // Otherwise, create new product
+    return handleCreateProduct(supabase, body as CreateProductRequest);
   } catch (error) {
-    console.error('[Products API] POST error:', error);
-    return NextResponse.json(
-      { success: false, error: String(error) },
-      { status: 500 }
-    );
+    console.error('Products POST error:', error);
+    return errorResponse({
+      code: 'API_002',
+      message: 'Invalid request',
+      details: error instanceof Error ? error.message : 'Failed to parse request body',
+      suggestion: 'Check your request format',
+    }, 400);
   }
 }
 
-// PUT /api/products
-export async function PUT(request: NextRequest) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const id = searchParams.get('id');
-
-    if (!id) {
-      return NextResponse.json(
-        { success: false, error: 'Product ID required' },
-        { status: 400 }
-      );
-    }
-
-    const body = await request.json();
-    const { title, description, vendor, productType, tags, status, images, variants } = body;
-
-    const updates: Record<string, any> = {};
-    if (title !== undefined) updates.title = title;
-    if (description !== undefined) updates.description = description;
-    if (vendor !== undefined) updates.vendor = vendor;
-    if (productType !== undefined) updates.product_type = productType;
-    if (tags !== undefined) updates.tags = tags;
-    if (status !== undefined) updates.status = status;
-    if (images !== undefined) updates.images = images;
-
-    const product = await updateProduct(id, updates);
-
-    // Update variants if provided
-    if (variants && Array.isArray(variants)) {
-      for (const variant of variants) {
-        if (variant.id) {
-          await supabase
-            .from('product_variants')
-            .update({
-              title: variant.title,
-              sku: variant.sku,
-              price: variant.price,
-              compare_at_price: variant.compare_at_price,
-              option1: variant.option1,
-              option2: variant.option2,
-              option3: variant.option3,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', variant.id);
-        }
-      }
-    }
-
-    return NextResponse.json({ success: true, data: product });
-  } catch (error) {
-    console.error('[Products API] PUT error:', error);
-    return NextResponse.json(
-      { success: false, error: String(error) },
-      { status: 500 }
-    );
+/**
+ * Handle single product creation
+ */
+async function handleCreateProduct(
+  supabase: ReturnType<typeof getSupabaseClient>,
+  data: CreateProductRequest
+): Promise<NextResponse> {
+  // Validate ASIN
+  if (!data.asin) {
+    return errorResponse({
+      code: 'VAL_001',
+      message: 'ASIN is required',
+      suggestion: 'Provide a valid Amazon ASIN',
+    }, 400);
   }
+
+  if (!isValidAsin(data.asin)) {
+    return errorResponse({
+      code: 'VAL_002',
+      message: 'Invalid ASIN format',
+      details: `"${data.asin}" is not a valid ASIN`,
+      suggestion: 'ASIN should be 10 alphanumeric characters',
+    }, 400);
+  }
+
+  const asin = data.asin.toUpperCase();
+
+  // Check for existing product
+  const { data: existing } = await supabase
+    .from('products')
+    .select('id')
+    .eq('asin', asin)
+    .single();
+
+  if (existing) {
+    return errorResponse({
+      code: 'VAL_003',
+      message: 'Product already exists',
+      details: `A product with ASIN ${asin} already exists`,
+      suggestion: 'Use PUT to update the existing product',
+    }, 409);
+  }
+
+  // Calculate pricing if amazon_price provided
+  let retailPrice: number | null = null;
+  let profitMargin: number | null = null;
+  let competitorPrices: Record<string, number> | null = null;
+
+  if (data.amazon_price && data.amazon_price > 0) {
+    retailPrice = calculateRetailPrice(data.amazon_price);
+    profitMargin = ((retailPrice - data.amazon_price) / retailPrice) * 100;
+    competitorPrices = calculateCompetitorPrices(retailPrice);
+  }
+
+  // Create product
+  const now = new Date().toISOString();
+  const productData = {
+    asin,
+    title: data.title || `Product ${asin}`,
+    description: data.description || null,
+    amazon_price: data.amazon_price || null,
+    retail_price: retailPrice,
+    profit_margin: profitMargin,
+    competitor_prices: competitorPrices,
+    category: data.category || 'Uncategorized',
+    image_url: data.image_url || null,
+    status: 'pending' as ProductStatus,
+    rating: null,
+    review_count: null,
+    last_price_check: data.amazon_price ? now : null,
+    created_at: now,
+    updated_at: now,
+    shopify_id: null,
+    shopify_handle: null,
+  };
+
+  const { data: product, error } = await supabase
+    .from('products')
+    .insert(productData)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Product creation error:', error);
+    return errorResponse({
+      code: 'DB_002',
+      message: 'Failed to create product',
+      details: error.message,
+      suggestion: 'Please try again',
+    }, 500);
+  }
+
+  return successResponse(product, { created: true });
 }
 
-// DELETE /api/products
-export async function DELETE(request: NextRequest) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const id = searchParams.get('id');
-    const bulk = searchParams.get('bulk') === 'true';
+/**
+ * Handle bulk operations
+ */
+async function handleBulkOperation(
+  supabase: ReturnType<typeof getSupabaseClient>,
+  data: BulkOperationRequest
+): Promise<NextResponse> {
+  // Validate operation
+  const validOperations = ['pause', 'unpause', 'delete', 'refresh', 'sync'];
+  if (!validOperations.includes(data.operation)) {
+    return errorResponse({
+      code: 'VAL_004',
+      message: 'Invalid operation',
+      details: `Operation "${data.operation}" is not supported`,
+      suggestion: `Valid operations: ${validOperations.join(', ')}`,
+    }, 400);
+  }
 
-    if (bulk) {
-      const body = await request.json();
-      const { productIds } = body;
+  // Validate product IDs
+  if (!data.productIds || data.productIds.length === 0) {
+    return errorResponse({
+      code: 'VAL_005',
+      message: 'No products specified',
+      suggestion: 'Provide at least one product ID',
+    }, 400);
+  }
 
-      if (!Array.isArray(productIds) || productIds.length === 0) {
-        return NextResponse.json(
-          { success: false, error: 'Product IDs required' },
-          { status: 400 }
-        );
+  if (data.productIds.length > MAX_BULK_OPERATIONS) {
+    return errorResponse({
+      code: 'VAL_006',
+      message: 'Too many products',
+      details: `Maximum ${MAX_BULK_OPERATIONS} products per bulk operation`,
+      suggestion: 'Split into smaller batches',
+    }, 400);
+  }
+
+  const results = {
+    success: [] as string[],
+    failed: [] as { id: string; error: string }[],
+  };
+
+  switch (data.operation) {
+    case 'pause':
+    case 'unpause': {
+      const newStatus = data.operation === 'pause' ? 'paused' : 'active';
+      const { error } = await supabase
+        .from('products')
+        .update({ status: newStatus, updated_at: new Date().toISOString() })
+        .in('id', data.productIds);
+
+      if (error) {
+        return errorResponse({
+          code: 'DB_003',
+          message: `Failed to ${data.operation} products`,
+          details: error.message,
+        }, 500);
       }
+      results.success = data.productIds;
+      break;
+    }
 
-      // Delete variants first
-      await supabase
-        .from('product_variants')
-        .delete()
-        .in('product_id', productIds);
-
-      // Delete products
+    case 'delete': {
       const { error } = await supabase
         .from('products')
         .delete()
-        .in('id', productIds);
+        .in('id', data.productIds);
 
-      if (error) throw error;
-
-      return NextResponse.json({
-        success: true,
-        message: `Deleted ${productIds.length} products`,
-      });
+      if (error) {
+        return errorResponse({
+          code: 'DB_004',
+          message: 'Failed to delete products',
+          details: error.message,
+        }, 500);
+      }
+      results.success = data.productIds;
+      break;
     }
 
-    if (!id) {
-      return NextResponse.json(
-        { success: false, error: 'Product ID required' },
-        { status: 400 }
-      );
+    case 'refresh': {
+      // Mark products for refresh (actual refresh handled by separate service)
+      const { error } = await supabase
+        .from('products')
+        .update({ 
+          status: 'pending',
+          updated_at: new Date().toISOString(),
+        })
+        .in('id', data.productIds);
+
+      if (error) {
+        return errorResponse({
+          code: 'DB_005',
+          message: 'Failed to queue products for refresh',
+          details: error.message,
+        }, 500);
+      }
+      results.success = data.productIds;
+      break;
     }
 
-    // Delete variants first
-    await supabase
-      .from('product_variants')
-      .delete()
-      .eq('product_id', id);
+    case 'sync': {
+      // Add to Shopify sync queue (handled by queue service)
+      // For now, just mark as pending sync
+      const { data: products, error: fetchError } = await supabase
+        .from('products')
+        .select('id, asin')
+        .in('id', data.productIds);
 
-    // Delete product
-    const { error } = await supabase
+      if (fetchError) {
+        return errorResponse({
+          code: 'DB_006',
+          message: 'Failed to fetch products for sync',
+          details: fetchError.message,
+        }, 500);
+      }
+
+      // Add to queue
+      const queueItems = (products || []).map(p => ({
+        product_id: p.id,
+        asin: p.asin,
+        operation: 'create',
+        status: 'pending',
+        priority: 5,
+        retry_count: 0,
+        max_retries: 3,
+        created_at: new Date().toISOString(),
+      }));
+
+      const { error: queueError } = await supabase
+        .from('shopify_queue')
+        .insert(queueItems);
+
+      if (queueError) {
+        // Non-blocking - queue might not exist
+        console.warn('Queue insert warning:', queueError.message);
+      }
+
+      results.success = data.productIds;
+      break;
+    }
+  }
+
+  return successResponse({
+    operation: data.operation,
+    total: data.productIds.length,
+    successful: results.success.length,
+    failed: results.failed.length,
+    results,
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PUT - Update existing product
+// ═══════════════════════════════════════════════════════════════════════════
+
+export async function PUT(request: NextRequest) {
+  try {
+    const supabase = getSupabaseClient();
+    const body = await request.json();
+
+    // Get product ID from query params or body
+    const productId = request.nextUrl.searchParams.get('id') || body.id;
+
+    if (!productId) {
+      return errorResponse({
+        code: 'VAL_007',
+        message: 'Product ID is required',
+        suggestion: 'Provide product ID in query params or request body',
+      }, 400);
+    }
+
+    // Verify product exists
+    const { data: existing } = await supabase
+      .from('products')
+      .select('*')
+      .eq('id', productId)
+      .single();
+
+    if (!existing) {
+      return errorResponse({
+        code: 'VAL_008',
+        message: 'Product not found',
+        details: `No product with ID ${productId}`,
+      }, 404);
+    }
+
+    // Build update object
+    const updates: Partial<Product> = {
+      updated_at: new Date().toISOString(),
+    };
+
+    if (body.title !== undefined) updates.title = body.title;
+    if (body.description !== undefined) updates.description = body.description;
+    if (body.category !== undefined) updates.category = body.category;
+    if (body.status !== undefined) updates.status = body.status;
+    if (body.image_url !== undefined) updates.image_url = body.image_url;
+
+    // Handle price updates
+    if (body.amazon_price !== undefined) {
+      updates.amazon_price = body.amazon_price;
+      updates.last_price_check = new Date().toISOString();
+
+      // Recalculate retail price and margins if retail_price not explicitly set
+      if (body.retail_price === undefined && body.amazon_price > 0) {
+        updates.retail_price = calculateRetailPrice(body.amazon_price);
+        updates.profit_margin = ((updates.retail_price - body.amazon_price) / updates.retail_price) * 100;
+        updates.competitor_prices = calculateCompetitorPrices(updates.retail_price);
+      }
+    }
+
+    if (body.retail_price !== undefined) {
+      updates.retail_price = body.retail_price;
+      
+      // Recalculate margin with new retail price
+      const amazonPrice = body.amazon_price !== undefined ? body.amazon_price : existing.amazon_price;
+      if (amazonPrice && body.retail_price > 0) {
+        updates.profit_margin = ((body.retail_price - amazonPrice) / body.retail_price) * 100;
+        updates.competitor_prices = calculateCompetitorPrices(body.retail_price);
+      }
+    }
+
+    // Execute update
+    const { data: product, error } = await supabase
+      .from('products')
+      .update(updates)
+      .eq('id', productId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Product update error:', error);
+      return errorResponse({
+        code: 'DB_007',
+        message: 'Failed to update product',
+        details: error.message,
+      }, 500);
+    }
+
+    return successResponse(product, { updated: true });
+  } catch (error) {
+    console.error('Products PUT error:', error);
+    return errorResponse({
+      code: 'API_003',
+      message: 'Invalid request',
+      details: error instanceof Error ? error.message : 'Failed to parse request body',
+    }, 400);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DELETE - Remove product(s)
+// ═══════════════════════════════════════════════════════════════════════════
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const supabase = getSupabaseClient();
+    
+    // Get product ID(s) from query params
+    const productId = request.nextUrl.searchParams.get('id');
+    const productIds = request.nextUrl.searchParams.get('ids')?.split(',').filter(Boolean);
+
+    const idsToDelete = productIds || (productId ? [productId] : []);
+
+    if (idsToDelete.length === 0) {
+      return errorResponse({
+        code: 'VAL_009',
+        message: 'No products specified',
+        suggestion: 'Provide product ID(s) to delete',
+      }, 400);
+    }
+
+    if (idsToDelete.length > MAX_BULK_OPERATIONS) {
+      return errorResponse({
+        code: 'VAL_010',
+        message: 'Too many products',
+        details: `Maximum ${MAX_BULK_OPERATIONS} products per delete operation`,
+      }, 400);
+    }
+
+    // Delete products
+    const { error, count } = await supabase
       .from('products')
       .delete()
-      .eq('id', id);
+      .in('id', idsToDelete);
 
-    if (error) throw error;
+    if (error) {
+      console.error('Product delete error:', error);
+      return errorResponse({
+        code: 'DB_008',
+        message: 'Failed to delete products',
+        details: error.message,
+      }, 500);
+    }
 
-    return NextResponse.json({
-      success: true,
-      message: 'Product deleted successfully',
+    return successResponse({
+      deleted: count || idsToDelete.length,
+      ids: idsToDelete,
     });
   } catch (error) {
-    console.error('[Products API] DELETE error:', error);
-    return NextResponse.json(
-      { success: false, error: String(error) },
-      { status: 500 }
-    );
+    console.error('Products DELETE error:', error);
+    return errorResponse({
+      code: 'API_004',
+      message: 'Internal server error',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
   }
 }
