@@ -12,7 +12,7 @@ Your "Competitor Prices & Availability" list is empty because:
 
 ## **Where Rainforest API Is Called**
 
-### **1. Core Implementation** (`lib/price-sync.ts`)
+### **1. Core Implementation** (`lib/price-sync.ts`) a
 ```typescript
 // Lines 12-13: API Configuration
 const RAINFOREST_API_KEY = process.env.RAINFOREST_API_KEY || '';
