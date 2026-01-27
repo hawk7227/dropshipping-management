@@ -158,7 +158,8 @@ export function PageHealthCheck({
       const warnings: ApiError[] = [];
 
       // Run all dependency checks
-      for (const dep of dependencies) {
+      const depsArray = Array.isArray(dependencies) ? dependencies : [];
+      for (const dep of depsArray) {
         try {
           const result = await dep.check();
           results.push(result);

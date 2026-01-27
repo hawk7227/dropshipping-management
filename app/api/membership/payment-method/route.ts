@@ -9,6 +9,8 @@ import { cookies } from 'next/headers';
 import { getDefaultPaymentMethod } from '@/lib/stripe-products';
 import { getMembershipDetails } from '@/lib/member-detection';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
   try {
     // Get authenticated user

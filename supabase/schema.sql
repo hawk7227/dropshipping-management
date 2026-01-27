@@ -10,7 +10,7 @@
 -- Competitor prices from Rainforest API
 create table if not exists competitor_prices (
   id uuid primary key default gen_random_uuid(),
-  product_id text not null,
+  product_id text not null references products(id) on delete cascade,
   sku text,
   asin text,
   competitor_name text not null default 'Amazon',
@@ -24,7 +24,8 @@ create table if not exists competitor_prices (
   availability text,
   fetched_at timestamptz default now(),
   created_at timestamptz default now(),
-  updated_at timestamptz default now()
+  updated_at timestamptz default now(),
+  unique(product_id, competitor_name)
 );
 
 create index idx_competitor_prices_product on competitor_prices(product_id);
@@ -71,6 +72,30 @@ create table if not exists margin_alerts (
 create index idx_margin_alerts_product on margin_alerts(product_id);
 create index idx_margin_alerts_unresolved on margin_alerts(is_resolved) where is_resolved = false;
 
+-- Margin rules for automatic pricing
+create table if not exists margin_rules (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  description text,
+  min_margin numeric(5,2) not null,
+  max_margin numeric(5,2),
+  target_margin numeric(5,2),
+  category text,
+  vendor text,
+  product_type text,
+  sku_pattern text,
+  priority int default 0,
+  is_active boolean default true,
+  apply_to_members boolean default false,
+  action text not null default 'alert', -- 'alert' or 'auto-adjust'
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+create index idx_margin_rules_active on margin_rules(is_active);
+create index idx_margin_rules_category on margin_rules(category);
+create index idx_margin_rules_priority on margin_rules(priority desc);
+
 -- =====================
 -- 2. PRODUCT MANAGEMENT
 -- =====================
@@ -87,6 +112,8 @@ create table if not exists products (
   body_html text,
   images jsonb,
   options jsonb,
+  asin text,
+  competitor_link text,
   created_at timestamptz,
   updated_at timestamptz,
   synced_at timestamptz default now()
@@ -94,6 +121,7 @@ create table if not exists products (
 
 create index idx_products_handle on products(handle);
 create index idx_products_status on products(status);
+create index idx_products_asin on products(asin);
 
 -- Variants
 create table if not exists variants (
@@ -614,7 +642,7 @@ CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);
 CREATE INDEX IF NOT EXISTS idx_orders_email ON orders(email);
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at DESC);
-
+-- done till here 
 -- ============================================================================
 -- PRODUCTS TABLE
 -- ============================================================================

@@ -9,6 +9,8 @@ import { cookies } from 'next/headers';
 import { reactivateSubscription } from '@/lib/stripe-products';
 import { getMembershipDetails, clearMembershipCache } from '@/lib/member-detection';
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(request: NextRequest) {
   try {
     // Get authenticated user

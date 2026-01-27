@@ -9,10 +9,12 @@ import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 import { 
   createOrderCheckout, 
-  calculatePricing, 
+  calculatePricing,
   validateCart,
   CartItem 
 } from '@/lib/checkout-logic';
+
+export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {

@@ -40,10 +40,7 @@ export async function GET(request: NextRequest) {
 
         let query = supabase
           .from('competitor_prices')
-          .select(`
-            *,
-            products!inner(id, title, handle, images, status)
-          `, { count: 'exact' });
+          .select('*', { count: 'exact' });
 
         if (source) {
           query = query.eq('source', source);
@@ -184,10 +181,7 @@ export async function GET(request: NextRequest) {
 
         const { data } = await supabase
           .from('competitor_prices')
-          .select(`
-            *,
-            products!inner(id, title, handle, images, status, vendor)
-          `)
+          .select('*')
           .order(sortBy, { ascending: order === 'asc' })
           .limit(limit);
 
@@ -210,39 +204,33 @@ export async function GET(request: NextRequest) {
       
       case 'alerts': {
         const limit = parseInt(searchParams.get('limit') || '50');
-        const acknowledged = searchParams.get('acknowledged');
+        const resolved = searchParams.get('resolved');
         
         let query = supabase
-          .from('price_alerts')
-          .select(`
-            *,
-            products(id, title, handle)
-          `)
+          .from('margin_alerts')
+          .select('*')
           .order('created_at', { ascending: false })
           .limit(limit);
         
-        if (acknowledged === 'true') {
-          query = query.eq('acknowledged', true);
-        } else if (acknowledged === 'false') {
-          query = query.eq('acknowledged', false);
+        if (resolved === 'true') {
+          query = query.eq('is_resolved', true);
+        } else if (resolved === 'false') {
+          query = query.eq('is_resolved', false);
         }
         
         const { data, error } = await query;
         if (error) throw error;
         
-        const alerts = (data || []).map(alert => ({
-          ...alert,
-          product_title: alert.products?.title || 'Unknown Product',
-        }));
-        
-        return NextResponse.json({ success: true, data: alerts });
+        return NextResponse.json({ success: true, data: data || [] });
       }
 
       case 'monitoring-rules': {
+        // Monitoring rules endpoint - queries margin rules
         const { data, error } = await supabase
-          .from('monitoring_rules')
+          .from('margin_rules')
           .select('*')
-          .order('created_at', { ascending: false });
+          .eq('is_active', true)
+          .order('priority', { ascending: false });
         
         if (error) throw error;
         return NextResponse.json({ success: true, data: data || [] });
@@ -258,11 +246,8 @@ export async function GET(request: NextRequest) {
         
         let query = supabase
           .from('competitor_prices')
-          .select(`
-            *,
-            products!inner(id, title, handle, images, status)
-          `)
-          .order('last_checked', { ascending: false })
+          .select('*')
+          .order('fetched_at', { ascending: false })
           .limit(limit);
         
         if (status) {
@@ -280,12 +265,9 @@ export async function GET(request: NextRequest) {
         const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
         
         const { data, error } = await supabase
-          .from('price_alerts')
-          .select(`
-            *,
-            products(id, title, handle)
-          `)
-          .in('alert_type', ['back_in_stock', 'out_of_stock', 'low_stock'])
+          .from('margin_alerts')
+          .select('*')
+          .in('alert_code', ['back_in_stock', 'out_of_stock', 'low_stock'])
           .gte('created_at', cutoff)
           .order('created_at', { ascending: false });
         
@@ -302,47 +284,49 @@ export async function GET(request: NextRequest) {
         
         let query = supabase
           .from('competitor_prices')
-          .select(`
-            *,
-            products!inner(id, title, handle, images, status)
-          `, { count: 'exact' })
-          .order('last_checked', { ascending: false })
+          .select('*, products(id, title)', { count: 'exact' })
+          .order('fetched_at', { ascending: false })
           .range((page - 1) * pageSize, page * pageSize - 1);
         
         if (availability && availability !== 'all') {
-          query = query.eq('availability_status', availability);
+          query = query.eq('availability', availability);
         }
         
         if (priceChange === 'drop') {
-          query = query.lt('price_change_percent', 0);
+          query = query.lt('price_difference_pct', 0);
         } else if (priceChange === 'increase') {
-          query = query.gt('price_change_percent', 0);
+          query = query.gt('price_difference_pct', 0);
         } else if (priceChange === 'changed') {
-          query = query.not('price_change_percent', 'is', null);
+          query = query.not('price_difference_pct', 'is', null);
         }
         
         const { data, count, error } = await query;
         if (error) throw error;
         
-        const prices = (data || []).map(item => ({
-          id: item.id,
-          product_id: item.product_id,
-          product_title: item.products?.title || 'Unknown',
-          source: item.source,
-          source_url: item.source_url,
-          competitor_price: item.competitor_price,
-          our_price: item.our_price,
-          savings_percent: item.savings_percent || 0,
-          last_checked: item.last_checked,
-          availability_status: item.availability_status || 'unknown',
-          stock_quantity: item.stock_quantity,
-          previous_price: item.previous_price,
-          price_changed: item.price_change_percent !== null && item.price_change_percent !== 0,
-          price_change_percent: Math.abs(item.price_change_percent || 0),
-          price_change_direction: item.price_change_percent < 0 ? 'down' : item.price_change_percent > 0 ? 'up' : 'none',
-          availability_changed: item.availability_changed,
-          previous_availability: item.previous_availability,
-        }));
+        const prices = (data || []).map((item: any) => {
+          const productTitle = item.products?.title || item.sku || 'Unknown';
+          
+          return {
+            id: item.id,
+            product_id: item.product_id,
+            product_title: productTitle,
+            source: item.competitor_name,
+            source_url: item.competitor_url,
+            competitor_price: item.competitor_price,
+            our_price: item.our_price,
+            savings_percent: item.price_difference_pct || 0,
+            last_checked: item.fetched_at,
+            availability_status: item.availability || 'unknown',
+            stock_quantity: null,
+            previous_price: null,
+            price_changed: false,
+            price_change_percent: 0,
+            price_change_direction: 'none',
+            availability_changed: false,
+            previous_availability: null,
+            cost_price: null,
+          };
+        });
         
         return NextResponse.json({
           success: true,
@@ -362,8 +346,9 @@ export async function GET(request: NextRequest) {
     }
   } catch (error) {
     console.error('[Prices API] GET error:', error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
     return NextResponse.json(
-      { success: false, error: String(error) },
+      { success: false, error: errorMessage },
       { status: 500 }
     );
   }
@@ -373,8 +358,10 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const action = searchParams.get('action') || 'upsert';
     const body = await request.json();
+    const action = searchParams.get('action') || body.action;
+    //const action = searchParams.get('action') || 'upsert';
+    
 
     switch (action) {
       case 'upsert': {
@@ -540,7 +527,7 @@ export async function POST(request: NextRequest) {
       }
 
       case 'create-margin-rule': {
-        const { name, minMargin, maxMargin, category, vendor, priority } = body;
+        const { name, description, minMargin, maxMargin, targetMargin, category, vendor, productType, skuPattern, priority, isActive, applyToMembers, action } = body;
 
         if (!name || minMargin === undefined) {
           return NextResponse.json(
@@ -553,12 +540,18 @@ export async function POST(request: NextRequest) {
           .from('margin_rules')
           .insert({
             name,
+            description,
             min_margin: minMargin,
             max_margin: maxMargin,
+            target_margin: targetMargin,
             category,
             vendor,
+            product_type: productType,
+            sku_pattern: skuPattern,
             priority: priority || 0,
-            is_active: true,
+            is_active: isActive !== false,
+            apply_to_members: applyToMembers || false,
+            action: action || 'alert',
           })
           .select()
           .single();
@@ -655,8 +648,9 @@ export async function POST(request: NextRequest) {
     }
   } catch (error) {
     console.error('[Prices API] POST error:', error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
     return NextResponse.json(
-      { success: false, error: String(error) },
+      { success: false, error: errorMessage },
       { status: 500 }
     );
   }
@@ -671,7 +665,7 @@ export async function PUT(request: NextRequest) {
 
     switch (action) {
       case 'update-rule': {
-        const { id, name, minMargin, maxMargin, category, vendor, priority, isActive } = body;
+        const { id, name, description, minMargin, maxMargin, targetMargin, category, vendor, productType, skuPattern, priority, isActive, applyToMembers, action } = body;
 
         if (!id) {
           return NextResponse.json(
@@ -682,12 +676,18 @@ export async function PUT(request: NextRequest) {
 
         const updates: Record<string, any> = { updated_at: new Date().toISOString() };
         if (name !== undefined) updates.name = name;
+        if (description !== undefined) updates.description = description;
         if (minMargin !== undefined) updates.min_margin = minMargin;
         if (maxMargin !== undefined) updates.max_margin = maxMargin;
+        if (targetMargin !== undefined) updates.target_margin = targetMargin;
         if (category !== undefined) updates.category = category;
         if (vendor !== undefined) updates.vendor = vendor;
+        if (productType !== undefined) updates.product_type = productType;
+        if (skuPattern !== undefined) updates.sku_pattern = skuPattern;
         if (priority !== undefined) updates.priority = priority;
         if (isActive !== undefined) updates.is_active = isActive;
+        if (applyToMembers !== undefined) updates.apply_to_members = applyToMembers;
+        if (action !== undefined) updates.action = action;
 
         const { data, error } = await supabase
           .from('margin_rules')
@@ -757,8 +757,9 @@ export async function PUT(request: NextRequest) {
     }
   } catch (error) {
     console.error('[Prices API] PUT error:', error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
     return NextResponse.json(
-      { success: false, error: String(error) },
+      { success: false, error: errorMessage },
       { status: 500 }
     );
   }
@@ -856,8 +857,9 @@ export async function DELETE(request: NextRequest) {
     }
   } catch (error) {
     console.error('[Prices API] DELETE error:', error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
     return NextResponse.json(
-      { success: false, error: String(error) },
+      { success: false, error: errorMessage },
       { status: 500 }
     );
   }

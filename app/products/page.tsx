@@ -406,15 +406,51 @@ export default function ProductsPage() {
     dispatch({ type: 'SET_ERROR', payload: null });
 
     try {
-      // In production, this would be an API call
-      // const response = await fetch('/api/products');
-      // const data = await response.json();
+      const response = await fetch('/api/products?action=list&pageSize=1000');
       
-      // For demo, generate mock data
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      const products = generateMockProducts(75);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
       
-      dispatch({ type: 'SET_PRODUCTS', payload: products });
+      const data = await response.json();
+      
+      // Map API response to Product format
+      const mappedProducts = (data.data || []).map((item: any) => ({
+        id: item.id,
+        shopify_product_id: item.id,
+        title: item.title,
+        handle: item.handle,
+        source: 'shopify' as const,
+        source_product_id: item.asin || null,
+        source_url: null,
+        cost_price: item.price || null,
+        retail_price: item.compare_at_price || item.price || null,
+        amazon_display_price: item.compare_at_price || null,
+        costco_display_price: null,
+        ebay_display_price: null,
+        sams_display_price: null,
+        compare_at_price: item.compare_at_price || null,
+        profit_amount: null,
+        profit_percent: null,
+        profit_status: 'unknown' as const,
+        category: item.product_type || null,
+        vendor: item.vendor || null,
+        product_type: item.product_type || null,
+        tags: item.tags || [],
+        rating: null,
+        review_count: null,
+        is_prime: false,
+        image_url: item.images?.[0]?.src || null,
+        inventory_quantity: item.inventory_quantity || 0,
+        status: (item.status as any) || 'active',
+        lifecycle_status: (item.status === 'active' ? 'active' : 'discontinued') as const,
+        created_at: item.created_at,
+        updated_at: item.updated_at,
+        synced_at: item.synced_at,
+        last_price_check: null,
+      }));
+      
+      dispatch({ type: 'SET_PRODUCTS', payload: mappedProducts });
     } catch (error) {
       dispatch({
         type: 'SET_ERROR',
@@ -537,9 +573,8 @@ export default function ProductsPage() {
             />
 
             <ProductsPanel
-              products={state.products}
-              onProductUpdate={handleProductUpdate}
-              onProductsRemove={handleProductsRemove}
+              initialProducts={state.products}
+              onProductsChange={(products) => dispatch({ type: 'SET_PRODUCTS', payload: products })}
             />
           </>
         )}

@@ -449,14 +449,16 @@ export function roundToTwoDecimals(value: number): number {
 /**
  * Format price for display
  */
-export function formatPrice(price: number): string {
+export function formatPrice(price: number | null | undefined): string {
+  if (price === null || price === undefined) return '-';
   return `$${price.toFixed(2)}`;
 }
 
 /**
  * Format profit percentage for display
  */
-export function formatProfitPercent(percent: number): string {
+export function formatProfitPercent(percent: number | null | undefined): string {
+  if (percent === null || percent === undefined) return '-';
   return `${percent.toFixed(1)}%`;
 }
 

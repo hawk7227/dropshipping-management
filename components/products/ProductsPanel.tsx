@@ -2464,7 +2464,7 @@ export function ProductsPanel({
   // Notify parent of products change
   useEffect(() => {
     onProductsChange?.(state.products);
-  }, [state.products, onProductsChange]);
+  }, [state.products]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // ACTION HANDLERS
