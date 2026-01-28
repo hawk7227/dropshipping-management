@@ -68,8 +68,8 @@ function calculateStats(products: Product[]): ProductStats {
   const total = products.length;
   const active = products.filter(p => p.status === 'active').length;
   const paused = products.filter(p => p.status === 'paused').length;
-  const lowMargin = products.filter(p => (p.profit_margin ?? 0) < MARGIN_THRESHOLD).length;
-  const synced = products.filter(p => p.shopify_id).length;
+  const lowMargin = products.filter(p => (p.profit_percent ?? 0) < MARGIN_THRESHOLD).length;
+  const synced = products.filter(p => p.source === 'shopify' && p.shopify_product_id).length;
   const stale = products.filter(p => {
     if (!p.last_price_check) return true;
     const days = (Date.now() - new Date(p.last_price_check).getTime()) / (1000 * 60 * 60 * 24);
@@ -162,38 +162,52 @@ function generateMockProducts(count: number): Product[] {
   const statuses: ProductStatus[] = ['active', 'paused', 'pending'];
 
   return Array.from({ length: count }, (_, i) => {
-    const amazonPrice = 10 + Math.random() * 40;
+    const costPrice = 10 + Math.random() * 40;
     const markup = 1.8 + Math.random() * 0.4;
-    const retailPrice = amazonPrice * markup;
-    const margin = ((retailPrice - amazonPrice) / retailPrice) * 100;
+    const retailPrice = costPrice * markup;
+    const profitPercent = ((retailPrice - costPrice) / retailPrice) * 100;
     const lastCheck = Math.random() > 0.2
       ? new Date(Date.now() - Math.random() * 30 * 24 * 60 * 60 * 1000).toISOString()
       : null;
 
     return {
       id: `prod-${i + 1}`,
-      asin: `B${String(Math.random()).slice(2, 11).toUpperCase()}`,
+      shopify_product_id: null,
       title: `Product ${i + 1} - ${categories[i % categories.length]} Item with Long Descriptive Name`,
-      description: `High-quality ${categories[i % categories.length].toLowerCase()} product with excellent reviews.`,
-      amazon_price: amazonPrice,
+      handle: `product-${i + 1}`,
+      source: 'manual' as const,
+      source_product_id: `B${String(Math.random()).slice(2, 11).toUpperCase()}`,
+      source_url: null,
+      cost_price: costPrice,
       retail_price: retailPrice,
-      profit_margin: margin,
-      competitor_prices: {
-        amazon: retailPrice * 1.15,
-        walmart: retailPrice * 1.08,
-        target: retailPrice * 1.12,
-        ebay: retailPrice * 1.05,
-      },
-      status: statuses[Math.floor(Math.random() * statuses.length)],
-      image_url: `https://picsum.photos/seed/${i}/200/200`,
+      member_price: null,
+      amazon_display_price: retailPrice * 1.15,
+      costco_display_price: retailPrice * 1.08,
+      ebay_display_price: retailPrice * 1.05,
+      sams_display_price: retailPrice * 1.12,
+      compare_at_price: retailPrice * 1.2,
+      profit_amount: retailPrice - costPrice,
+      profit_percent: profitPercent,
+      profit_status: profitPercent > MARGIN_THRESHOLD ? 'profitable' as const : 'below_threshold' as const,
       category: categories[i % categories.length],
+      vendor: null,
+      product_type: categories[i % categories.length],
+      tags: [],
       rating: 3.5 + Math.random() * 1.5,
       review_count: Math.floor(100 + Math.random() * 5000),
-      last_price_check: lastCheck,
+      is_prime: Math.random() > 0.3,
+      image_url: `https://picsum.photos/seed/${i}/200/200`,
+      inventory_quantity: Math.floor(10 + Math.random() * 100),
+      status: statuses[Math.floor(Math.random() * statuses.length)],
+      lifecycle_status: 'active' as const,
+      below_threshold_since: null,
       created_at: new Date(Date.now() - Math.random() * 90 * 24 * 60 * 60 * 1000).toISOString(),
       updated_at: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString(),
-      shopify_id: Math.random() > 0.3 ? `shopify-${i + 1}` : null,
-      shopify_handle: Math.random() > 0.3 ? `product-${i + 1}` : null,
+      synced_at: lastCheck,
+      last_price_check: lastCheck,
+      admin_override: false,
+      admin_override_by: null,
+      admin_override_at: null,
     };
   });
 }
@@ -206,50 +220,58 @@ function PageHeader({
   stats,
   onImportClick,
   onRefreshClick,
+  onShopifySyncClick,
   isLoading,
 }: {
   stats: ProductStats;
   onImportClick: () => void;
   onRefreshClick: () => void;
+  onShopifySyncClick: () => void;
   isLoading: boolean;
 }) {
   return (
-    <div className="mb-6">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+    <div className="mb-8">
+      <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Products</h1>
-          <p className="text-gray-500 mt-1">
-            Manage your product inventory and Shopify sync
-          </p>
+          <h1 className="text-3xl font-bold text-gray-900">Products</h1>
+          <p className="text-gray-500 mt-1">Manage your product catalog and inventory</p>
         </div>
 
         <div className="flex items-center gap-3">
+          <button
+            onClick={onShopifySyncClick}
+            disabled={isLoading}
+            className="px-4 py-2 text-green-700 bg-green-100 border border-green-300 rounded-lg hover:bg-green-200 disabled:opacity-50 flex items-center gap-2"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            {isLoading ? 'Syncing...' : 'Sync Shopify'}
+          </button>
+
+          <button
+            onClick={onImportClick}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            Import Products
+          </button>
+
           <button
             onClick={onRefreshClick}
             disabled={isLoading}
             className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 flex items-center gap-2"
           >
             {isLoading ? (
-              <svg className="animate-spin h-4 w-4 text-gray-500" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-900"></div>
             ) : (
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
             )}
             Refresh
-          </button>
-
-          <button
-            onClick={onImportClick}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
-          >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-            Import Products
           </button>
         </div>
       </div>
@@ -412,10 +434,14 @@ export default function ProductsPage() {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
       
-      const data = await response.json();
+      const result = await response.json();
+      
+      if (!result.success) {
+        throw new Error(result.error || 'API request failed');
+      }
       
       // Map API response to Product format
-      const mappedProducts = (data.data || []).map((item: any) => ({
+      const mappedProducts = (result.data || []).map((item: any) => ({
         id: item.id,
         shopify_product_id: item.id,
         title: item.title,
@@ -423,31 +449,36 @@ export default function ProductsPage() {
         source: 'shopify' as const,
         source_product_id: item.asin || null,
         source_url: null,
-        cost_price: item.price || null,
-        retail_price: item.compare_at_price || item.price || null,
-        amazon_display_price: item.compare_at_price || null,
-        costco_display_price: null,
-        ebay_display_price: null,
-        sams_display_price: null,
+        cost_price: item.cost_price || null,
+        retail_price: item.retail_price || null,
+        member_price: item.member_price || null,
+        amazon_display_price: item.amazon_display_price || null,
+        costco_display_price: item.costco_display_price || null,
+        ebay_display_price: item.ebay_display_price || null,
+        sams_display_price: item.sams_display_price || null,
         compare_at_price: item.compare_at_price || null,
-        profit_amount: null,
-        profit_percent: null,
-        profit_status: 'unknown' as const,
-        category: item.product_type || null,
+        profit_amount: item.profit_amount || null,
+        profit_percent: item.profit_percent || null,
+        profit_status: item.profit_status || 'unknown' as const,
+        category: item.category || null,
         vendor: item.vendor || null,
         product_type: item.product_type || null,
         tags: item.tags || [],
-        rating: null,
-        review_count: null,
-        is_prime: false,
-        image_url: item.images?.[0]?.src || null,
+        rating: item.rating || null,
+        review_count: item.review_count || null,
+        is_prime: item.is_prime || false,
+        image_url: item.image_url || null,
         inventory_quantity: item.inventory_quantity || 0,
         status: (item.status as any) || 'active',
-        lifecycle_status: (item.status === 'active' ? 'active' : 'discontinued') as const,
+        lifecycle_status: item.lifecycle_status || 'active' as const,
+        below_threshold_since: item.below_threshold_since || null,
         created_at: item.created_at,
         updated_at: item.updated_at,
         synced_at: item.synced_at,
-        last_price_check: null,
+        last_price_check: item.last_price_check || null,
+        admin_override: item.admin_override || false,
+        admin_override_by: item.admin_override_by || null,
+        admin_override_at: item.admin_override_at || null,
       }));
       
       dispatch({ type: 'SET_PRODUCTS', payload: mappedProducts });
@@ -459,7 +490,7 @@ export default function ProductsPage() {
           message: 'Failed to fetch products',
           details: error instanceof Error ? error.message : 'Unknown error',
           suggestion: 'Check your connection and try again',
-        },
+        } as ApiError,
       });
     }
   }, []);
@@ -474,12 +505,12 @@ export default function ProductsPage() {
     const interval = setInterval(() => {
       if (!state.isLoading && !state.showImport) {
         // Silent refresh - don't show loading state
-        // fetchProducts();
+        fetchProducts();
       }
     }, REFRESH_INTERVAL);
 
     return () => clearInterval(interval);
-  }, [state.isLoading, state.showImport]);
+  }, [state.isLoading, state.showImport, fetchProducts]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // HANDLERS
@@ -494,9 +525,14 @@ export default function ProductsPage() {
   }, []);
 
   const handleImportComplete = useCallback((products: Product[]) => {
-    dispatch({ type: 'ADD_PRODUCTS', payload: products });
+    // Add products to state if provided
+    if (products && products.length > 0) {
+      dispatch({ type: 'ADD_PRODUCTS', payload: products });
+    }
+    // Always refresh to get latest data from database
+    fetchProducts();
     dispatch({ type: 'TOGGLE_IMPORT' });
-  }, []);
+  }, [fetchProducts]);
 
   const handleApplySuggestion = useCallback(async (suggestion: any) => {
     // Simulate applying suggestion
@@ -510,12 +546,51 @@ export default function ProductsPage() {
     console.log('Product action:', action, productIds);
   }, []);
 
+  // Handle Shopify sync
+  const handleShopifySync = useCallback(async () => {
+    try {
+      dispatch({ type: 'SET_LOADING', payload: true });
+      
+      const response = await fetch('/api/products?action=sync-shopify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({}),
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        console.log('Shopify sync successful:', result.data);
+        // Refresh products to show synced items
+        await fetchProducts();
+      } else {
+        console.error('Shopify sync failed:', result.error);
+        // You could show a toast notification here
+      }
+    } catch (error) {
+      console.error('Shopify sync error:', error);
+      // You could show a toast notification here
+    } finally {
+      dispatch({ type: 'SET_LOADING', payload: false });
+    }
+  }, [fetchProducts]);
+
   // ─────────────────────────────────────────────────────────────────────────
   // EXISTING ASINS (for import duplicate detection)
   // ─────────────────────────────────────────────────────────────────────────
 
   const existingAsins = useMemo(() => {
-    return new Set(state.products.map(p => p.asin));
+    return new Set(
+      state.products
+        .map(p => p.source_product_id)
+        .filter((asin): asin is string => asin !== null && asin !== undefined)
+    );
   }, [state.products]);
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -523,22 +598,21 @@ export default function ProductsPage() {
   // ─────────────────────────────────────────────────────────────────────────
 
   return (
-    <PageHealthCheck requiredServices={['supabase', 'rainforest']}>
-      <div className="space-y-6">
-        {/* Error Banner */}
-        {state.error && !state.isLoading && (
-          <FeatureStatusBanner
-            status={{
-              code: state.error.code,
-              status: 'error',
-              message: state.error.message,
-              details: state.error.details,
-              suggestion: state.error.suggestion,
-              blocking: false,
-            }}
-            onDismiss={() => dispatch({ type: 'SET_ERROR', payload: null })}
-          />
-        )}
+    <div className="space-y-6">
+      {/* Error Banner */}
+      {state.error && !state.isLoading && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+          <p className="font-medium">{state.error.message}</p>
+          {state.error.details && <p className="text-sm mt-1">{state.error.details}</p>}
+          {state.error.suggestion && <p className="text-sm mt-1">{state.error.suggestion}</p>}
+          <button
+            onClick={() => dispatch({ type: 'SET_ERROR', payload: null })}
+            className="mt-2 text-sm underline"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
         {/* Loading State */}
         {state.isLoading && state.products.length === 0 && (
@@ -557,6 +631,7 @@ export default function ProductsPage() {
               stats={state.stats}
               onImportClick={() => dispatch({ type: 'TOGGLE_IMPORT' })}
               onRefreshClick={fetchProducts}
+              onShopifySyncClick={handleShopifySync}
               isLoading={state.isLoading}
             />
             <EmptyState onImport={() => dispatch({ type: 'TOGGLE_IMPORT' })} />
@@ -569,6 +644,7 @@ export default function ProductsPage() {
               stats={state.stats}
               onImportClick={() => dispatch({ type: 'TOGGLE_IMPORT' })}
               onRefreshClick={fetchProducts}
+              onShopifySyncClick={handleShopifySync}
               isLoading={state.isLoading}
             />
 
@@ -594,6 +670,5 @@ export default function ProductsPage() {
           onProductAction={handleProductAction}
         />
       </div>
-    </PageHealthCheck>
   );
 }

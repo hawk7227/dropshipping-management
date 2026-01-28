@@ -7,8 +7,9 @@
  * Design: Professional white/gray, clean layout
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 
 // ============================================================================
 // TYPE DEFINITIONS
@@ -51,7 +52,7 @@ interface User {
   createdAt: string;
 }
 
-type TabId = 'overview' | 'billing' | 'settings';
+type TabId = 'profile' | 'membership' | 'billing' | 'notifications' | 'api';
 
 // ============================================================================
 // UTILITY FUNCTIONS
@@ -553,6 +554,658 @@ function BillingTab({ invoices }: { invoices: Invoice[] }) {
 }
 
 /**
+ * Profile Tab
+ */
+function ProfileTab({ user }: { user: User }) {
+  const [editing, setEditing] = useState(false);
+  const [formData, setFormData] = useState({
+    name: user.name || '',
+    email: user.email,
+    phone: '',
+    timezone: 'America/New_York',
+  });
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    
+    try {
+      const response = await fetch('/api/account/profile', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: formData.name,
+          phone: formData.phone,
+          timezone: formData.timezone,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update profile');
+      }
+
+      setEditing(false);
+    } catch (error) {
+      console.error('Profile update error:', error);
+      // TODO: Show error message to user
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-white rounded-xl border border-gray-200 p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">
+          Profile Information
+        </h2>
+        
+        {editing ? (
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Name
+              </label>
+              <input
+                type="text"
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Email
+              </label>
+              <input
+                type="email"
+                value={formData.email}
+                disabled
+                className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-500"
+              />
+              <p className="text-sm text-green-600 mt-1">✓ Verified</p>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Phone
+              </label>
+              <input
+                type="tel"
+                value={formData.phone}
+                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Timezone
+              </label>
+              <select
+                value={formData.timezone}
+                onChange={(e) => setFormData({ ...formData, timezone: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="America/New_York">America/New_York</option>
+                <option value="America/Los_Angeles">America/Los_Angeles</option>
+                <option value="America/Chicago">America/Chicago</option>
+                <option value="Europe/London">Europe/London</option>
+              </select>
+            </div>
+            
+            <div className="flex gap-3">
+              <button
+                type="submit"
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                Save Changes
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditing(false)}
+                className="px-4 py-2 text-gray-600 hover:text-gray-900"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        ) : (
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Name
+              </label>
+              <p className="px-4 py-2 bg-gray-50 rounded-lg text-gray-900">
+                {user.name || 'Not set'}
+              </p>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Email
+              </label>
+              <p className="px-4 py-2 bg-gray-50 rounded-lg text-gray-900">
+                {user.email} ✓
+              </p>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Phone
+              </label>
+              <p className="px-4 py-2 bg-gray-50 rounded-lg text-gray-900">
+                Not set
+              </p>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Timezone
+              </label>
+              <p className="px-4 py-2 bg-gray-50 rounded-lg text-gray-900">
+                America/New_York
+              </p>
+            </div>
+            
+            <button
+              onClick={() => setEditing(true)}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            >
+              Edit Profile
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="bg-white rounded-xl border border-gray-200 p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">
+          Password
+        </h2>
+        <button className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">
+          Change Password
+        </button>
+      </div>
+
+      <div className="bg-white rounded-xl border border-red-200 p-6">
+        <h2 className="text-lg font-semibold text-red-900 mb-4">
+          Danger Zone
+        </h2>
+        <button className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">
+          Delete Account
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Membership Tab
+ */
+function MembershipTab({
+  membership,
+  paymentMethod,
+  onManageBilling,
+  onCancel,
+  onReactivate,
+  processing,
+}: {
+  membership: Membership;
+  paymentMethod: PaymentMethod | null;
+  onManageBilling: () => void;
+  onCancel: () => void;
+  onReactivate: () => void;
+  processing: string | null;
+}) {
+  const isActive = ['active', 'trialing'].includes(membership.status);
+  const isPastDue = membership.status === 'past_due';
+
+  return (
+    <div className="space-y-6">
+      {/* Status Card */}
+      <div className="bg-white rounded-xl border border-gray-200 p-6">
+        <div className="flex items-start justify-between mb-6">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900">
+              Membership Status
+            </h2>
+            <p className="text-gray-500 mt-1">
+              {membership.tier === 'annual' ? 'Annual' : 'Monthly'} Plan
+            </p>
+          </div>
+          <StatusBadge
+            status={membership.status}
+            cancelAtPeriodEnd={membership.cancelAtPeriodEnd}
+          />
+        </div>
+
+        <div className="space-y-4">
+          <div className="flex justify-between">
+            <span className="text-gray-600">Current Period</span>
+            <span className="font-medium">
+              {formatDate(membership.currentPeriodStart)} - {formatDate(membership.currentPeriodEnd)}
+            </span>
+          </div>
+          
+          {membership.cancelAtPeriodEnd && (
+            <div className="flex justify-between">
+              <span className="text-amber-600">Cancels on</span>
+              <span className="font-medium text-amber-600">
+                {formatDate(membership.currentPeriodEnd)}
+              </span>
+            </div>
+          )}
+        </div>
+
+        <div className="mt-6 flex gap-3">
+          {isActive && (
+            <button
+              onClick={onManageBilling}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            >
+              Manage Billing
+            </button>
+          )}
+          
+          {isActive && !membership.cancelAtPeriodEnd && (
+            <button
+              onClick={onCancel}
+              disabled={processing === 'cancel'}
+              className="px-4 py-2 border border-red-300 text-red-600 rounded-lg hover:bg-red-50 disabled:opacity-50"
+            >
+              Cancel Membership
+            </button>
+          )}
+          
+          {membership.cancelAtPeriodEnd && (
+            <button
+              onClick={onReactivate}
+              disabled={processing === 'reactivate'}
+              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+            >
+              Reactivate
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Payment Method */}
+      <div className="bg-white rounded-xl border border-gray-200 p-6">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">
+          Payment Method
+        </h3>
+        {paymentMethod ? (
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-8 bg-gray-100 rounded flex items-center justify-center">
+                <span className="text-xs font-medium">
+                  {formatCardBrand(paymentMethod.brand).slice(0, 2).toUpperCase()}
+                </span>
+              </div>
+              <div>
+                <p className="font-medium">
+                  {formatCardBrand(paymentMethod.brand)} ending in {paymentMethod.last4}
+                </p>
+                <p className="text-sm text-gray-500">
+                  Expires {paymentMethod.expMonth}/{paymentMethod.expYear}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={onManageBilling}
+              className="text-sm text-blue-600 hover:text-blue-700"
+            >
+              Update Card
+            </button>
+          </div>
+        ) : (
+          <div className="text-center py-8">
+            <p className="text-gray-500 mb-4">No payment method on file</p>
+            <button
+              onClick={onManageBilling}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            >
+              Add Payment Method
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Notifications Tab
+ */
+function NotificationsTab() {
+  const [preferences, setPreferences] = useState({
+    emailNotifications: true,
+    smsNotifications: false,
+    marketingEmails: false,
+    priceAlerts: true,
+    orderUpdates: true,
+    membershipRenewals: true,
+  });
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    // Load current preferences
+    const loadPreferences = async () => {
+      try {
+        const response = await fetch('/api/account/notifications');
+        if (response.ok) {
+          const data = await response.json();
+          setPreferences(data.preferences);
+        }
+      } catch (error) {
+        console.error('Failed to load notification preferences:', error);
+      }
+    };
+    loadPreferences();
+  }, []);
+
+  const handleToggle = (key: keyof typeof preferences) => {
+    const newPreferences = { ...preferences, [key]: !preferences[key] };
+    setPreferences(newPreferences);
+  };
+
+  const handleSave = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch('/api/account/notifications', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ preferences }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to save preferences');
+      }
+    } catch (error) {
+      console.error('Failed to save notification preferences:', error);
+      // TODO: Show error message to user
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-white rounded-xl border border-gray-200 p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">
+          Notification Preferences
+        </h2>
+        
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-medium text-gray-900">Email Notifications</p>
+              <p className="text-sm text-gray-500">Receive important updates via email</p>
+            </div>
+            <button
+              onClick={() => handleToggle('emailNotifications')}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                preferences.emailNotifications ? 'bg-blue-600' : 'bg-gray-200'
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                  preferences.emailNotifications ? 'translate-x-6' : 'translate-x-1'
+                }`}
+              />
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-medium text-gray-900">SMS Notifications</p>
+              <p className="text-sm text-gray-500">Get text messages for urgent updates</p>
+            </div>
+            <button
+              onClick={() => handleToggle('smsNotifications')}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                preferences.smsNotifications ? 'bg-blue-600' : 'bg-gray-200'
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                  preferences.smsNotifications ? 'translate-x-6' : 'translate-x-1'
+                }`}
+              />
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-medium text-gray-900">Marketing Emails</p>
+              <p className="text-sm text-gray-500">Receive promotional offers and newsletters</p>
+            </div>
+            <button
+              onClick={() => handleToggle('marketingEmails')}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                preferences.marketingEmails ? 'bg-blue-600' : 'bg-gray-200'
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                  preferences.marketingEmails ? 'translate-x-6' : 'translate-x-1'
+                }`}
+              />
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-medium text-gray-900">Price Alerts</p>
+              <p className="text-sm text-gray-500">Notifications when prices change</p>
+            </div>
+            <button
+              onClick={() => handleToggle('priceAlerts')}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                preferences.priceAlerts ? 'bg-blue-600' : 'bg-gray-200'
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                  preferences.priceAlerts ? 'translate-x-6' : 'translate-x-1'
+                }`}
+              />
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-medium text-gray-900">Order Updates</p>
+              <p className="text-sm text-gray-500">Track your order status</p>
+            </div>
+            <button
+              onClick={() => handleToggle('orderUpdates')}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                preferences.orderUpdates ? 'bg-blue-600' : 'bg-gray-200'
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                  preferences.orderUpdates ? 'translate-x-6' : 'translate-x-1'
+                }`}
+              />
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-medium text-gray-900">Membership Renewals</p>
+              <p className="text-sm text-gray-500">Reminders before membership expires</p>
+            </div>
+            <button
+              onClick={() => handleToggle('membershipRenewals')}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                preferences.membershipRenewals ? 'bg-blue-600' : 'bg-gray-200'
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                  preferences.membershipRenewals ? 'translate-x-6' : 'translate-x-1'
+                }`}
+              />
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-6">
+          <button 
+            onClick={handleSave}
+            disabled={loading}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+          >
+            {loading ? 'Saving...' : 'Save Preferences'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * API Tab
+ */
+function APITab() {
+  const [apiKey, setApiKey] = useState({
+    live: 'sk_live_51xxxxx...xxxxx',
+    test: 'sk_test_51xxxxx...xxxxx',
+  });
+  const [webhookUrl, setWebhookUrl] = useState('https://your-site.com/webhook');
+  const [webhookEvents, setWebhookEvents] = useState([
+    'order.created',
+    'product.updated',
+  ]);
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+  };
+
+  const regenerateKey = (type: 'live' | 'test') => {
+    // TODO: Implement API key regeneration
+    console.log(`Regenerating ${type} key`);
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-white rounded-xl border border-gray-200 p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">
+          API Keys
+        </h2>
+        
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Live Key
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="password"
+                value={apiKey.live}
+                readOnly
+                className="flex-1 px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg font-mono text-sm"
+              />
+              <button
+                onClick={() => copyToClipboard(apiKey.live)}
+                className="px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Copy
+              </button>
+              <button
+                onClick={() => regenerateKey('live')}
+                className="px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Regenerate
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Test Key
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="password"
+                value={apiKey.test}
+                readOnly
+                className="flex-1 px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg font-mono text-sm"
+              />
+              <button
+                onClick={() => copyToClipboard(apiKey.test)}
+                className="px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Copy
+              </button>
+              <button
+                onClick={() => regenerateKey('test')}
+                className="px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Regenerate
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl border border-gray-200 p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">
+          Webhooks
+        </h2>
+        
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Endpoint URL
+            </label>
+            <input
+              type="url"
+              value={webhookUrl}
+              onChange={(e) => setWebhookUrl(e.target.value)}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Events
+            </label>
+            <div className="space-y-2">
+              {['order.created', 'product.updated', 'payment.succeeded', 'membership.created'].map(event => (
+                <label key={event} className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={webhookEvents.includes(event)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setWebhookEvents(prev => [...prev, event]);
+                      } else {
+                        setWebhookEvents(prev => prev.filter(e => e !== event));
+                      }
+                    }}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm text-gray-700">{event}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+            Configure Webhooks
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
  * Settings Tab
  */
 function SettingsTab({ user }: { user: User }) {
@@ -665,9 +1318,29 @@ export default function AccountPortal() {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<TabId>('overview');
+  const [activeTab, setActiveTab] = useState<TabId>('profile');
   const [processing, setProcessing] = useState<string | null>(null);
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
+
+  // Update URL when tab changes
+  const handleTabChange = (tab: TabId) => {
+    setActiveTab(tab);
+    const url = new URL(window.location.href);
+    url.searchParams.set('tab', tab);
+    window.history.replaceState({}, '', url.toString());
+  };
+
+  // Check URL parameters for tab selection
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const tabParam = urlParams.get('tab');
+    if (tabParam && ['profile', 'membership', 'billing', 'notifications', 'api'].includes(tabParam)) {
+      setActiveTab(tabParam as TabId);
+    } else {
+      // Default to profile tab
+      setActiveTab('profile');
+    }
+  }, []);
 
   const [user, setUser] = useState<User | null>(null);
   const [membership, setMembership] = useState<Membership | null>(null);
@@ -696,12 +1369,8 @@ export default function AccountPortal() {
 
         if (membershipRes.ok) {
           const membershipData = await membershipRes.json();
-          if (membershipData) {
-            setMembership(membershipData);
-          } else {
-            router.push('/membership');
-            return;
-          }
+          setMembership(membershipData);
+          // Don't redirect to membership page - allow access to account settings
         }
 
         if (invoicesRes.ok) {
@@ -740,6 +1409,19 @@ export default function AccountPortal() {
       setProcessing(null);
     }
   }, []);
+
+  // Logout
+  const handleLogout = useCallback(async () => {
+    try {
+      const supabase = createClientComponentClient();
+      await supabase.auth.signOut();
+      router.push('/login');
+    } catch (error) {
+      console.error('Logout error:', error);
+      // Even if logout fails, redirect to login
+      router.push('/login');
+    }
+  }, [router]);
 
   // Cancel membership
   const handleCancel = useCallback(async () => {
@@ -788,8 +1470,8 @@ export default function AccountPortal() {
     );
   }
 
-  // Error
-  if (!membership || !user) {
+  // Error - only require user, membership is optional
+  if (!user) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
         <div className="bg-white rounded-xl p-8 max-w-md w-full text-center">
@@ -815,33 +1497,53 @@ export default function AccountPortal() {
               <h1 className="text-2xl font-bold text-gray-900">My Account</h1>
               <p className="text-gray-500">{user.email}</p>
             </div>
-            <button
-              onClick={() => router.push('/')}
-              className="text-sm text-gray-600 hover:text-gray-900"
-            >
-              Back to Shop
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleLogout}
+                className="px-4 py-2 text-sm text-red-600 hover:text-red-700 border border-red-200 rounded-lg hover:bg-red-50"
+              >
+                Sign Out
+              </button>
+              <button
+                onClick={() => router.push('/')}
+                className="text-sm text-gray-600 hover:text-gray-900"
+              >
+                Back to Shop
+              </button>
+            </div>
           </div>
 
           {/* Tabs */}
           <div className="flex gap-2">
             <TabButton
-              active={activeTab === 'overview'}
-              onClick={() => setActiveTab('overview')}
+              active={activeTab === 'profile'}
+              onClick={() => handleTabChange('profile')}
             >
-              Overview
+              Profile
+            </TabButton>
+            <TabButton
+              active={activeTab === 'membership'}
+              onClick={() => handleTabChange('membership')}
+            >
+              Membership
             </TabButton>
             <TabButton
               active={activeTab === 'billing'}
-              onClick={() => setActiveTab('billing')}
+              onClick={() => handleTabChange('billing')}
             >
               Billing
             </TabButton>
             <TabButton
-              active={activeTab === 'settings'}
-              onClick={() => setActiveTab('settings')}
+              active={activeTab === 'notifications'}
+              onClick={() => handleTabChange('notifications')}
             >
-              Settings
+              Notifications
+            </TabButton>
+            <TabButton
+              active={activeTab === 'api'}
+              onClick={() => handleTabChange('api')}
+            >
+              API
             </TabButton>
           </div>
         </div>
@@ -855,10 +1557,11 @@ export default function AccountPortal() {
           </div>
         )}
 
-        {activeTab === 'overview' && (
-          <OverviewTab
+        {activeTab === 'profile' && <ProfileTab user={user} />}
+
+        {activeTab === 'membership' && membership && (
+          <MembershipTab
             membership={membership}
-            user={user}
             paymentMethod={paymentMethod}
             onManageBilling={handleManageBilling}
             onCancel={() => setCancelModalOpen(true)}
@@ -866,20 +1569,36 @@ export default function AccountPortal() {
             processing={processing}
           />
         )}
+        {activeTab === 'membership' && !membership && (
+          <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
+            <h3 className="text-lg font-medium text-gray-900 mb-2">No Membership Found</h3>
+            <p className="text-gray-500 mb-6">You don't have an active membership yet.</p>
+            <button
+              onClick={() => router.push('/membership')}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            >
+              View Membership Plans
+            </button>
+          </div>
+        )}
 
         {activeTab === 'billing' && <BillingTab invoices={invoices} />}
 
-        {activeTab === 'settings' && <SettingsTab user={user} />}
+        {activeTab === 'notifications' && <NotificationsTab />}
+
+        {activeTab === 'api' && <APITab />}
       </main>
 
       {/* Cancel Modal */}
-      <CancelModal
-        open={cancelModalOpen}
-        onClose={() => setCancelModalOpen(false)}
-        onConfirm={handleCancel}
-        processing={processing === 'cancel'}
-        periodEnd={membership.currentPeriodEnd}
-      />
+      {membership && (
+        <CancelModal
+          open={cancelModalOpen}
+          onClose={() => setCancelModalOpen(false)}
+          onConfirm={handleCancel}
+          processing={processing === 'cancel'}
+          periodEnd={membership.currentPeriodEnd}
+        />
+      )}
     </div>
   );
 }

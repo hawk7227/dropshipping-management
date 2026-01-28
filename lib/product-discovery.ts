@@ -1,389 +1,367 @@
 // lib/product-discovery.ts
-// ═══════════════════════════════════════════════════════════════════════════
-// Product Discovery Logic
-// Discovers new products from Amazon that meet criteria and demand thresholds
-// Uses PRICING_RULES as single source of truth
-// ═══════════════════════════════════════════════════════════════════════════
+// Discovers products from Amazon via Rainforest API that meet 80%+ markup criteria
+// Auto-publishes to Shopify with proper pricing
 
-import { createClient } from '@supabase/supabase-js';
-import {
-  PRICING_RULES,
-  meetsDiscoveryCriteria,
-  meetsDemandCriteria,
-  meetsAllCriteria,
-  containsExcludedBrand,
-  calculateRetailPrice,
-  calculateCompetitorPrices,
-  getTodayDiscoveryCategories,
-  getCategoryConfig,
-  isValidASIN,
-} from '@/lib/config/pricing-rules';
-import {
-  lookupProducts,
-  saveDemandData,
-  isKeepaConfigured,
-  type KeepaProduct,
-} from '@/lib/services/keepa';
+const RAINFOREST_API_KEY = process.env.RAINFOREST_API_KEY!;
+const SHOPIFY_SHOP_DOMAIN = process.env.SHOPIFY_SHOP_DOMAIN!;
+const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN!;
 
-// ═══════════════════════════════════════════════════════════════════════════
-// CONFIGURATION
-// ═══════════════════════════════════════════════════════════════════════════
+// Discovery criteria
+const DISCOVERY_CONFIG = {
+  minPrice: 3,           // Minimum Amazon price
+  maxPrice: 25,          // Maximum Amazon price
+  minReviews: 500,       // Minimum review count
+  minRating: 3.5,        // Minimum star rating
+  primeOnly: true,       // Must be Prime eligible
+  markupPercent: 70,     // Our markup: Cost × 1.70 = Sales price
+  minProfitPercent: 80,  // Minimum profit margin to qualify
+};
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '',
-  process.env.SUPABASE_SERVICE_ROLE_KEY || ''
-);
+// Search terms for product discovery
+const SEARCH_TERMS = [
+  'kitchen gadgets',
+  'phone accessories',
+  'home organization',
+  'pet supplies',
+  'beauty tools',
+  'fitness accessories',
+  'car accessories',
+  'office supplies',
+  'outdoor gear',
+  'tech accessories'
+];
 
-const RAINFOREST_API_KEY = process.env.RAINFOREST_API_KEY || '';
-const RAINFOREST_BASE_URL = 'https://api.rainforestapi.com/request';
-
-// ═══════════════════════════════════════════════════════════════════════════
-// TYPES
-// ═══════════════════════════════════════════════════════════════════════════
-
-export interface DiscoveryOptions {
-  categories?: string[];
-  maxApiCalls?: number;
-  maxProductsPerDay?: number;
-  dryRun?: boolean;
-  runId?: string;
-}
-
-export interface DiscoveryResult {
-  discovered: number;
-  rejected: number;
-  alreadyExist: number;
-  apiCalls: number;
-  tokensUsed: number;
-  errors: string[];
-  products: DiscoveredProduct[];
-}
-
-export interface DiscoveredProduct {
+interface DiscoveredProduct {
   asin: string;
   title: string;
   amazonPrice: number;
-  retailPrice: number;
-  profitMargin: number;
-  rating: number | null;
-  reviewCount: number | null;
-  bsr: number | null;
-  demandScore: number;
-  demandTier: string;
+  salesPrice: number;
+  profitAmount: number;
+  profitPercent: number;
+  rating: number;
+  reviewCount: number;
+  imageUrl: string;
+  amazonUrl: string;
   category: string;
-  imageUrl: string | null;
-  competitorPrices: Record<string, number>;
+  isPrime: boolean;
 }
 
-interface RainforestProduct {
-  asin: string;
-  title: string;
-  link: string;
-  image: string;
-  rating?: number;
-  ratings_total?: number;
-  price?: { value: number; currency: string };
-  is_prime?: boolean;
-  bestsellers_rank?: Array<{ category: string; rank: number }>;
+interface DiscoveryResult {
+  searched: number;
+  found: number;
+  published: number;
+  skipped: number;
+  products: DiscoveredProduct[];
+  errors: string[];
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// RAINFOREST API
-// ═══════════════════════════════════════════════════════════════════════════
+/**
+ * Search Rainforest API for products
+ */
+async function searchRainforest(searchTerm: string): Promise<any[]> {
+  const params = new URLSearchParams({
+    api_key: RAINFOREST_API_KEY,
+    type: 'search',
+    amazon_domain: 'amazon.com',
+    search_term: searchTerm,
+    sort_by: 'featured'
+  });
 
-async function searchRainforest(
-  searchTerm: string,
-  options: { categoryId?: string; maxResults?: number } = {}
-): Promise<{ success: boolean; products: RainforestProduct[]; error?: string }> {
-  if (!RAINFOREST_API_KEY) {
-    return { success: false, products: [], error: 'RAINFOREST_API_KEY not configured' };
-  }
+  const response = await fetch(`https://api.rainforestapi.com/request?${params}`);
+  const data = await response.json();
+
+  return data.search_results || [];
+}
+
+/**
+ * Get detailed product info by ASIN
+ */
+async function getProductDetails(asin: string): Promise<any> {
+  const params = new URLSearchParams({
+    api_key: RAINFOREST_API_KEY,
+    type: 'product',
+    amazon_domain: 'amazon.com',
+    asin: asin
+  });
+
+  const response = await fetch(`https://api.rainforestapi.com/request?${params}`);
+  const data = await response.json();
+
+  return data.product || null;
+}
+
+/**
+ * Check if product meets discovery criteria
+ */
+function meetsDiscoveryCriteria(product: any): boolean {
+  const price = product.price?.value || product.buybox_winner?.price?.value || 0;
+  const rating = product.rating || 0;
+  const reviews = product.ratings_total || product.reviews_total || 0;
+  const isPrime = product.is_prime || product.buybox_winner?.is_prime || false;
+
+  // Check all criteria
+  if (price < DISCOVERY_CONFIG.minPrice || price > DISCOVERY_CONFIG.maxPrice) return false;
+  if (rating < DISCOVERY_CONFIG.minRating) return false;
+  if (reviews < DISCOVERY_CONFIG.minReviews) return false;
+  if (DISCOVERY_CONFIG.primeOnly && !isPrime) return false;
+
+  // Calculate profit margin
+  const salesPrice = price * (1 + DISCOVERY_CONFIG.markupPercent / 100);
+  const profit = salesPrice - price;
+  const profitPercent = (profit / price) * 100;
+
+  if (profitPercent < DISCOVERY_CONFIG.minProfitPercent) return false;
+
+  return true;
+}
+
+/**
+ * Calculate pricing for a product
+ */
+function calculatePricing(amazonPrice: number): { salesPrice: number; profitAmount: number; profitPercent: number } {
+  const salesPrice = Math.round(amazonPrice * (1 + DISCOVERY_CONFIG.markupPercent / 100) * 100) / 100;
+  const profitAmount = Math.round((salesPrice - amazonPrice) * 100) / 100;
+  const profitPercent = Math.round((profitAmount / amazonPrice) * 100);
+
+  return { salesPrice, profitAmount, profitPercent };
+}
+
+/**
+ * Push product to Shopify
+ */
+async function pushToShopify(product: DiscoveredProduct): Promise<string | null> {
+  const shopifyProduct = {
+    product: {
+      title: product.title,
+      body_html: `<p>Discovered from Amazon - ${product.category}</p>`,
+      vendor: 'Auto-Discovered',
+      product_type: product.category,
+      status: 'active', // AUTO-PUBLISH
+      tags: [
+        'auto-discovered',
+        '80-percent-markup',
+        product.category.toLowerCase().replace(/\s+/g, '-'),
+        `asin-${product.asin}`
+      ].join(', '),
+      variants: [{
+        price: product.salesPrice.toFixed(2),
+        compare_at_price: (product.salesPrice * 1.85).toFixed(2), // Show "was" price
+        sku: product.asin,
+        inventory_management: null,
+        inventory_policy: 'continue'
+      }],
+      images: [{
+        src: product.imageUrl
+      }],
+      metafields: [
+        {
+          namespace: 'discovery',
+          key: 'asin',
+          value: product.asin,
+          type: 'single_line_text_field'
+        },
+        {
+          namespace: 'discovery',
+          key: 'cost_price',
+          value: product.amazonPrice.toString(),
+          type: 'number_decimal'
+        },
+        {
+          namespace: 'discovery',
+          key: 'profit_percent',
+          value: product.profitPercent.toString(),
+          type: 'number_decimal'
+        },
+        {
+          namespace: 'discovery',
+          key: 'amazon_url',
+          value: product.amazonUrl,
+          type: 'single_line_text_field'
+        },
+        {
+          namespace: 'social_proof',
+          key: 'rating',
+          value: product.rating.toString(),
+          type: 'number_decimal'
+        },
+        {
+          namespace: 'social_proof',
+          key: 'review_count',
+          value: product.reviewCount.toString(),
+          type: 'number_integer'
+        }
+      ]
+    }
+  };
 
   try {
-    const params = new URLSearchParams({
-      api_key: RAINFOREST_API_KEY,
-      type: 'search',
-      amazon_domain: 'amazon.com',
-      search_term: searchTerm,
-      sort_by: 'featured',
-      page: '1',
-    });
+    const response = await fetch(
+      `https://${SHOPIFY_SHOP_DOMAIN}/admin/api/2024-01/products.json`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN
+        },
+        body: JSON.stringify(shopifyProduct)
+      }
+    );
 
-    if (options.categoryId) params.set('category_id', options.categoryId);
-
-    const response = await fetch(`${RAINFOREST_BASE_URL}?${params.toString()}`);
     const data = await response.json();
-
-    if (!data.request_info?.success) {
-      return { success: false, products: [], error: data.request_info?.message || 'Request failed' };
+    
+    if (data.product?.id) {
+      return data.product.id.toString();
     }
 
-    return { success: true, products: (data.search_results || []).slice(0, options.maxResults || 20) };
-  } catch (error: any) {
-    return { success: false, products: [], error: error.message };
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// HELPERS
-// ═══════════════════════════════════════════════════════════════════════════
-
-async function asinExists(asin: string): Promise<boolean> {
-  const { data } = await supabase.from('products').select('id').eq('asin', asin).single();
-  return !!data;
-}
-
-async function isRecentlyRejected(asin: string): Promise<boolean> {
-  const { data } = await supabase
-    .from('rejection_log')
-    .select('id')
-    .eq('asin', asin)
-    .gte('created_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
-    .single();
-  return !!data;
-}
-
-async function logRejection(
-  asin: string, reason: string, details: Record<string, unknown>,
-  productData: Record<string, unknown>, source: string, runId?: string
-): Promise<void> {
-  try {
-    await supabase.from('rejection_log').upsert({
-      asin, rejection_reason: reason, rejection_details: details,
-      product_data: productData, source, discovery_run_id: runId || null,
-      recheck_after: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    }, { onConflict: 'asin,source' });
+    console.error('Shopify push error:', data);
+    return null;
   } catch (error) {
-    console.error('[Discovery] Failed to log rejection:', error);
+    console.error('Shopify push error:', error);
+    return null;
   }
 }
 
-async function saveDiscoveredProduct(
-  product: DiscoveredProduct, keepaProduct: KeepaProduct | null, runId?: string
-): Promise<{ success: boolean; error?: string }> {
+/**
+ * Check if product already exists in Shopify (by ASIN)
+ */
+async function productExistsInShopify(asin: string): Promise<boolean> {
   try {
-    const { error } = await supabase.from('products').insert({
-      asin: product.asin, title: product.title,
-      amazon_price: product.amazonPrice, retail_price: product.retailPrice,
-      member_price: Math.round(product.retailPrice * 0.9 * 100) / 100,
-      image_url: product.imageUrl, rating: product.rating, review_count: product.reviewCount,
-      category: product.category, is_prime: true, status: 'pending_sync',
-      source: 'discovery', discovery_run_id: runId, created_at: new Date().toISOString(),
-    });
-    if (error) return { success: false, error: error.message };
-    if (keepaProduct) await saveDemandData(keepaProduct);
-    return { success: true };
-  } catch (error: any) {
-    return { success: false, error: error.message };
+    const response = await fetch(
+      `https://${SHOPIFY_SHOP_DOMAIN}/admin/api/2024-01/products.json?tag=asin-${asin}`,
+      {
+        headers: {
+          'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN
+        }
+      }
+    );
+
+    const data = await response.json();
+    return (data.products?.length || 0) > 0;
+  } catch {
+    return false;
   }
 }
 
-function transformAndValidateProduct(
-  rfProduct: RainforestProduct, keepaProduct: KeepaProduct | null, categoryName: string
-): { valid: boolean; product?: DiscoveredProduct; reasons?: string[] } {
-  const price = rfProduct.price?.value || keepaProduct?.currentAmazonPrice;
-  if (!price) return { valid: false, reasons: ['No price available'] };
-
-  const productForValidation = {
-    price, rating: rfProduct.rating || keepaProduct?.rating,
-    reviewCount: rfProduct.ratings_total || keepaProduct?.reviewCount,
-    isPrime: rfProduct.is_prime ?? keepaProduct?.isPrime ?? true,
-    title: rfProduct.title || keepaProduct?.title || '',
-    category: categoryName,
-    bsr: rfProduct.bestsellers_rank?.[0]?.rank || keepaProduct?.currentBSR,
-    demandScore: keepaProduct?.demandScore || 50,
-  };
-
-  const criteriaResult = meetsAllCriteria(productForValidation);
-  if (!criteriaResult.passes) return { valid: false, reasons: criteriaResult.reasons };
-
-  const retailPrice = calculateRetailPrice(price);
-  const profitMargin = ((retailPrice - price) / retailPrice) * 100;
-
-  return {
-    valid: true,
-    product: {
-      asin: rfProduct.asin, title: rfProduct.title || keepaProduct?.title || '',
-      amazonPrice: price, retailPrice,
-      profitMargin: Math.round(profitMargin * 100) / 100,
-      rating: rfProduct.rating || keepaProduct?.rating || null,
-      reviewCount: rfProduct.ratings_total || keepaProduct?.reviewCount || null,
-      bsr: productForValidation.bsr || null,
-      demandScore: keepaProduct?.demandScore || 50,
-      demandTier: criteriaResult.demandTier || 'medium',
-      category: categoryName,
-      imageUrl: rfProduct.image || keepaProduct?.imageUrl || null,
-      competitorPrices: calculateCompetitorPrices(retailPrice),
-    },
-  };
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// MAIN DISCOVERY FUNCTION
-// ═══════════════════════════════════════════════════════════════════════════
-
-export async function discoverProducts(options: DiscoveryOptions = {}): Promise<DiscoveryResult> {
+/**
+ * Main discovery function - finds and publishes products meeting 80%+ markup
+ */
+export async function discoverProducts(options?: {
+  searchTerms?: string[];
+  maxProducts?: number;
+  dryRun?: boolean;
+}): Promise<DiscoveryResult> {
   const {
-    categories = getTodayDiscoveryCategories(),
-    maxApiCalls = 50,
-    maxProductsPerDay = PRICING_RULES.discovery.maxProductsPerDay,
-    dryRun = false,
-    runId,
-  } = options;
-
-  console.log(`[Discovery] Starting: categories=${categories.join(',')} maxApiCalls=${maxApiCalls} dryRun=${dryRun}`);
+    searchTerms = SEARCH_TERMS,
+    maxProducts = 50,
+    dryRun = false
+  } = options || {};
 
   const result: DiscoveryResult = {
-    discovered: 0, rejected: 0, alreadyExist: 0,
-    apiCalls: 0, tokensUsed: 0, errors: [], products: [],
+    searched: 0,
+    found: 0,
+    published: 0,
+    skipped: 0,
+    products: [],
+    errors: []
   };
 
-  let discoveryRunId = runId;
-  if (!dryRun && !discoveryRunId) {
-    const { data: run } = await supabase.from('discovery_runs').insert({
-      run_type: 'manual', triggered_by: 'api', categories_searched: categories, status: 'running',
-    }).select().single();
-    discoveryRunId = run?.id;
-  }
+  for (const term of searchTerms) {
+    if (result.found >= maxProducts) break;
 
-  const useKeepa = isKeepaConfigured();
-  const collectedAsins: string[] = [];
-  const searchTermsUsed: string[] = [];
+    try {
+      console.log(`Searching: ${term}`);
+      const searchResults = await searchRainforest(term);
+      result.searched += searchResults.length;
 
-  // Phase 1: Search for products
-  for (const categoryName of categories) {
-    if (result.apiCalls >= maxApiCalls) break;
-    const categoryConfig = getCategoryConfig(categoryName);
-    if (!categoryConfig) continue;
+      for (const item of searchResults) {
+        if (result.found >= maxProducts) break;
 
-    for (const searchTerm of categoryConfig.searchTerms) {
-      if (result.apiCalls >= maxApiCalls || result.discovered >= maxProductsPerDay) break;
-      searchTermsUsed.push(searchTerm);
+        // Quick filter on search results
+        const price = item.price?.value || 0;
+        if (price < DISCOVERY_CONFIG.minPrice || price > DISCOVERY_CONFIG.maxPrice) continue;
 
-      const searchResult = await searchRainforest(searchTerm, {
-        categoryId: categoryConfig.amazonCategoryId, maxResults: 10,
-      });
-      result.apiCalls++;
+        // Get detailed product info
+        const product = await getProductDetails(item.asin);
+        if (!product) continue;
 
-      if (!searchResult.success) {
-        result.errors.push(`Search failed for "${searchTerm}": ${searchResult.error}`);
-        continue;
-      }
+        // Check criteria
+        if (!meetsDiscoveryCriteria(product)) continue;
 
-      for (const rfProduct of searchResult.products) {
-        if (!isValidASIN(rfProduct.asin)) continue;
-        if (containsExcludedBrand(rfProduct.title)) continue;
-        if (rfProduct.price && (rfProduct.price.value < PRICING_RULES.discovery.minPrice ||
-            rfProduct.price.value > PRICING_RULES.discovery.maxPrice)) continue;
-        collectedAsins.push(rfProduct.asin);
-      }
-    }
-  }
+        // Calculate pricing
+        const amazonPrice = product.buybox_winner?.price?.value || product.price?.value || 0;
+        const { salesPrice, profitAmount, profitPercent } = calculatePricing(amazonPrice);
 
-  const uniqueAsins = [...new Set(collectedAsins)];
-  console.log(`[Discovery] Collected ${uniqueAsins.length} unique ASINs`);
+        const discoveredProduct: DiscoveredProduct = {
+          asin: product.asin,
+          title: product.title,
+          amazonPrice,
+          salesPrice,
+          profitAmount,
+          profitPercent,
+          rating: product.rating || 0,
+          reviewCount: product.ratings_total || 0,
+          imageUrl: product.main_image?.link || '',
+          amazonUrl: product.link || `https://amazon.com/dp/${product.asin}`,
+          category: product.categories?.[0]?.name || term,
+          isPrime: product.buybox_winner?.is_prime || false
+        };
 
-  // Phase 2: Batch Keepa lookup
-  let keepaProducts: Map<string, KeepaProduct> = new Map();
-  if (useKeepa && uniqueAsins.length > 0) {
-    const keepaResult = await lookupProducts(uniqueAsins, {
-      includeHistory: true, jobType: 'discovery', jobId: discoveryRunId,
-    });
-    result.tokensUsed = keepaResult.tokensUsed;
-    for (const product of keepaResult.products) keepaProducts.set(product.asin, product);
-  }
+        result.products.push(discoveredProduct);
+        result.found++;
 
-  // Phase 3: Validate and save
-  for (const categoryName of categories) {
-    const categoryConfig = getCategoryConfig(categoryName);
-    if (!categoryConfig) continue;
-
-    for (const searchTerm of categoryConfig.searchTerms) {
-      if (result.discovered >= maxProductsPerDay) break;
-
-      const searchResult = await searchRainforest(searchTerm, {
-        categoryId: categoryConfig.amazonCategoryId, maxResults: 10,
-      });
-      if (!searchResult.success) continue;
-
-      for (const rfProduct of searchResult.products) {
-        if (result.discovered >= maxProductsPerDay) break;
-        if (!isValidASIN(rfProduct.asin)) continue;
-        if (await asinExists(rfProduct.asin)) { result.alreadyExist++; continue; }
-        if (await isRecentlyRejected(rfProduct.asin)) { result.rejected++; continue; }
-
-        const keepaProduct = keepaProducts.get(rfProduct.asin) || null;
-        const validation = transformAndValidateProduct(rfProduct, keepaProduct, categoryConfig.name);
-
-        if (!validation.valid) {
-          result.rejected++;
-          if (!dryRun) {
-            await logRejection(rfProduct.asin, validation.reasons?.[0] || 'Unknown',
-              { reasons: validation.reasons },
-              { title: rfProduct.title, price: rfProduct.price?.value, rating: rfProduct.rating },
-              'discovery', discoveryRunId);
-          }
+        // Check if already in Shopify
+        const exists = await productExistsInShopify(product.asin);
+        if (exists) {
+          result.skipped++;
+          console.log(`Skipped (exists): ${product.title}`);
           continue;
         }
 
-        if (!dryRun && validation.product) {
-          const saveResult = await saveDiscoveredProduct(validation.product, keepaProduct, discoveryRunId);
-          if (!saveResult.success) {
-            result.errors.push(`Failed to save ${rfProduct.asin}: ${saveResult.error}`);
-            continue;
+        // Push to Shopify
+        if (!dryRun) {
+          const shopifyId = await pushToShopify(discoveredProduct);
+          if (shopifyId) {
+            result.published++;
+            console.log(`Published: ${product.title} → Shopify ID: ${shopifyId}`);
+          } else {
+            result.errors.push(`Failed to publish: ${product.title}`);
           }
+        } else {
+          console.log(`[DRY RUN] Would publish: ${product.title} @ $${salesPrice}`);
         }
 
-        if (validation.product) {
-          result.products.push(validation.product);
-          result.discovered++;
-          console.log(`[Discovery] ✓ ${rfProduct.asin} - ${rfProduct.title?.substring(0, 50)}...`);
-        }
+        // Rate limiting
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
+    } catch (error: any) {
+      result.errors.push(`Search "${term}" failed: ${error.message}`);
     }
+
+    // Rate limiting between searches
+    await new Promise(resolve => setTimeout(resolve, 2000));
   }
 
-  if (!dryRun && discoveryRunId) {
-    await supabase.from('discovery_runs').update({
-      status: 'completed', products_evaluated: uniqueAsins.length,
-      products_added: result.discovered, products_rejected: result.rejected,
-      products_already_exist: result.alreadyExist, api_tokens_used: result.tokensUsed,
-      api_calls_made: result.apiCalls, search_terms_used: searchTermsUsed,
-      completed_at: new Date().toISOString(),
-    }).eq('id', discoveryRunId);
-  }
-
-  console.log(`[Discovery] Complete: ${result.discovered} discovered, ${result.rejected} rejected`);
   return result;
 }
 
-export function validateProduct(product: {
-  price?: number | null; rating?: number | null; reviewCount?: number | null;
-  isPrime?: boolean; title?: string | null; category?: string | null;
-  bsr?: number | null; demandScore?: number | null;
-}): { passes: boolean; reasons: string[]; demandTier?: string } {
-  return meetsAllCriteria(product);
+/**
+ * Validate existing products still meet 80% markup
+ */
+export async function validateProfitMargins(): Promise<{
+  validated: number;
+  alerts: { productId: string; title: string; currentProfit: number; requiredProfit: number }[];
+}> {
+  // This would check all discovered products against current Amazon prices
+  // and create alerts if profit drops below threshold
+  
+  const alerts: { productId: string; title: string; currentProfit: number; requiredProfit: number }[] = [];
+  
+  // Implementation would fetch products with discovery.asin metafield,
+  // check current Amazon price via Rainforest,
+  // compare against current sales price
+  
+  return {
+    validated: 0,
+    alerts
+  };
 }
-
-export async function getDiscoveryStats(days: number = 30) {
-  const { data } = await supabase
-    .from('discovery_runs')
-    .select('products_added, products_rejected, api_calls_made, api_tokens_used')
-    .gte('run_date', new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
-
-  if (!data || data.length === 0) {
-    return { totalRuns: 0, totalDiscovered: 0, totalRejected: 0, totalApiCalls: 0, totalTokensUsed: 0, avgDiscoveredPerRun: 0 };
-  }
-
-  const stats = data.reduce((acc, run) => ({
-    totalDiscovered: acc.totalDiscovered + (run.products_added || 0),
-    totalRejected: acc.totalRejected + (run.products_rejected || 0),
-    totalApiCalls: acc.totalApiCalls + (run.api_calls_made || 0),
-    totalTokensUsed: acc.totalTokensUsed + (run.api_tokens_used || 0),
-  }), { totalDiscovered: 0, totalRejected: 0, totalApiCalls: 0, totalTokensUsed: 0 });
-
-  return { totalRuns: data.length, ...stats, avgDiscoveredPerRun: Math.round(stats.totalDiscovered / data.length * 10) / 10 };
-}
-
-export default { discoverProducts, validateProduct, getDiscoveryStats };
-

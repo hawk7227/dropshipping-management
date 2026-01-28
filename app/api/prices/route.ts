@@ -99,9 +99,8 @@ export async function GET(request: NextRequest) {
 
       case 'stale': {
         const hours = parseInt(searchParams.get('hours') || '24');
-        const limit = parseInt(searchParams.get('limit') || '100');
 
-        const products = await getStaleProducts(hours, limit);
+        const products = await getStaleProducts(hours);
         return NextResponse.json({ success: true, data: products });
       }
 
@@ -117,14 +116,16 @@ export async function GET(request: NextRequest) {
 
       case 'calculate-margin': {
         const productId = searchParams.get('productId');
-        if (!productId) {
+        const costPrice = searchParams.get('cost');
+        
+        if (!productId || !costPrice) {
           return NextResponse.json(
-            { success: false, error: 'Product ID required' },
+            { success: false, error: 'Product ID and cost price required' },
             { status: 400 }
           );
         }
 
-        const margin = await calculateProductMargin(productId);
+        const margin = await calculateProductMargin(parseFloat(costPrice), parseFloat(costPrice));
         return NextResponse.json({ success: true, data: margin });
       }
 
@@ -148,7 +149,7 @@ export async function GET(request: NextRequest) {
 
       case 'search-amazon': {
         const query = searchParams.get('query');
-        const category = searchParams.get('category') || undefined;
+        const limit = parseInt(searchParams.get('limit') || '10');
 
         if (!query) {
           return NextResponse.json(
@@ -157,7 +158,7 @@ export async function GET(request: NextRequest) {
           );
         }
 
-        const results = await searchAmazonProducts(query, category);
+        const results = await searchAmazonProducts(query, limit);
         return NextResponse.json({ success: true, data: results });
       }
 
@@ -383,11 +384,12 @@ export async function POST(request: NextRequest) {
 
         const result = await upsertCompetitorPrice({
           product_id: productId,
-          source,
-          competitor_price: competitorPrice,
+          competitor: source,
+          price: competitorPrice,
           competitor_url: competitorUrl,
-          asin,
-          our_price: ourPrice,
+          currency: 'USD',
+          in_stock: true,
+          last_checked: new Date().toISOString(),
         });
 
         return NextResponse.json({ success: true, data: result });
@@ -419,15 +421,16 @@ export async function POST(request: NextRequest) {
 
             const result = await upsertCompetitorPrice({
               product_id: productId,
-              source: 'amazon',
-              competitor_price: amazonProduct.price,
-              competitor_url: amazonProduct.url,
-              asin,
-              our_price: parseFloat(ourPrice),
+              competitor: 'amazon',
+              price: amazonProduct.price,
+              competitor_url: amazonProduct.url || '',
+              currency: 'USD',
+              in_stock: true,
+              last_checked: new Date().toISOString(),
             });
 
             // Record history
-            await recordPriceHistory(productId, 'amazon', amazonProduct.price);
+            await recordPriceHistory(productId, amazonProduct.price, { amazon: amazonProduct.price });
 
             return NextResponse.json({
               success: true,
@@ -449,33 +452,42 @@ export async function POST(request: NextRequest) {
         const { productIds, batchSize = 10 } = body;
 
         // Create sync job
-        const job = await createSyncJob(productIds?.length || 0);
+        const job = await createSyncJob('sync-all', productIds?.length || 0);
 
         try {
+          if (!job || !job.id) {
+            return NextResponse.json(
+              { success: false, error: 'Failed to create sync job' },
+              { status: 500 }
+            );
+          }
+
           const result = await syncProductPrices(productIds, batchSize);
 
-         await updateSyncJob(job.id, {
-          status: 'completed',
-          processed: result.synced,        // Changed from products_synced
-          errors: result.errors.length,    // Changed from products_failed
-          completed_at: new Date().toISOString(),
-        });
+          await updateSyncJob(job.id, {
+            status: 'completed',
+            processed: result.synced,
+            errors: result.errors,
+            completed_at: new Date().toISOString(),
+          });
 
           return NextResponse.json({
             success: true,
             data: {
               jobId: job.id,
               synced: result.synced,
-              failed: result.errors.length,
-              errors: result.errors.slice(0, 10),
+              failed: result.errors,
+              errors: [],
             },
           });
         } catch (error) {
-          await updateSyncJob(job.id, {
-            status: 'failed',
-            errors: 1,
-            completed_at: new Date().toISOString(),
-          });
+          if (job?.id) {
+            await updateSyncJob(job.id, {
+              status: 'failed',
+              errors: 1,
+              completed_at: new Date().toISOString(),
+            });
+          }
           throw error;
         }
       }
@@ -510,11 +522,12 @@ export async function POST(request: NextRequest) {
 
         const result = await upsertCompetitorPrice({
           product_id: productId,
-          source: 'amazon',
-          competitor_price: amazonProduct.price || 0,
-          competitor_url: amazonProduct.url,
-          asin,
-          our_price: parseFloat(ourPrice),
+          competitor: 'amazon',
+          price: amazonProduct.price || 0,
+          competitor_url: amazonProduct.url || '',
+          currency: 'USD',
+          in_stock: true,
+          last_checked: new Date().toISOString(),
         });
 
         return NextResponse.json({
@@ -580,11 +593,12 @@ export async function POST(request: NextRequest) {
             if (amazonProduct && amazonProduct.price) {
               await upsertCompetitorPrice({
                 product_id: link.productId,
-                source: 'amazon',
-                competitor_price: amazonProduct.price,
-                competitor_url: amazonProduct.url,
-                asin: link.asin,
-                our_price: link.ourPrice || 0,
+                competitor: 'amazon',
+                price: amazonProduct.price,
+                competitor_url: amazonProduct.url || '',
+                currency: 'USD',
+                in_stock: true,
+                last_checked: new Date().toISOString(),
               });
 
               results.push({ productId: link.productId, success: true });

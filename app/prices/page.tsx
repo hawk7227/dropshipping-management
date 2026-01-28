@@ -11,7 +11,15 @@ import {
   useMemo,
   useReducer,
 } from 'react';
-import type { Product, PriceAlert, ApiResponse } from '@/types';
+import type { 
+  Product, 
+  ProductSource, 
+  ProductStatus, 
+  LifecycleStatus, 
+  ProfitStatus,
+  PriceAlert, 
+  ApiResponse 
+} from '@/types';
 import type { ApiError } from '@/types/errors';
 import { PriceIntelligencePanel } from '@/components/price-intelligence/PriceIntelligencePanel';
 import { FeatureStatusBanner } from '@/components/ui/FeatureStatusBanner';
@@ -106,39 +114,52 @@ function generateMockProducts(count: number): Product[] {
   const categories = ['Electronics', 'Home & Kitchen', 'Beauty', 'Health', 'Sports', 'Toys', 'Garden'];
 
   return Array.from({ length: count }, (_, i) => {
-    const amazonPrice = 10 + Math.random() * 40;
+    const costPrice = 10 + Math.random() * 40;
     const markup = 1.5 + Math.random() * 0.8; // 50% to 130% markup
-    const retailPrice = amazonPrice * markup;
-    const margin = ((retailPrice - amazonPrice) / retailPrice) * 100;
+    const retailPrice = costPrice * markup;
+    const profitPercent = ((retailPrice - costPrice) / retailPrice) * 100;
     const lastCheck = Math.random() > 0.15
       ? new Date(Date.now() - Math.random() * 21 * 24 * 60 * 60 * 1000).toISOString()
       : null;
 
     return {
       id: `prod-${i + 1}`,
-      asin: `B${String(Math.random()).slice(2, 11).toUpperCase()}`,
+      shopify_product_id: null,
       title: `Product ${i + 1} - ${categories[i % categories.length]} Item with Detailed Description`,
-      description: `High-quality ${categories[i % categories.length].toLowerCase()} product.`,
-      amazon_price: amazonPrice,
+      handle: null,
+      source: 'manual' as ProductSource,
+      source_product_id: null,
+      source_url: null,
+      cost_price: costPrice,
       retail_price: retailPrice,
-      profit_margin: margin,
-      competitor_prices: {
-        amazon: retailPrice * (1.1 + Math.random() * 0.2),
-        walmart: retailPrice * (1.05 + Math.random() * 0.15),
-        target: retailPrice * (1.08 + Math.random() * 0.18),
-        ebay: retailPrice * (0.98 + Math.random() * 0.1),
-        best_buy: retailPrice * (1.12 + Math.random() * 0.2),
-      },
-      status: Math.random() > 0.1 ? 'active' : 'paused',
-      image_url: `https://picsum.photos/seed/price${i}/200/200`,
+      member_price: null,
+      amazon_display_price: retailPrice * (1.1 + Math.random() * 0.2),
+      costco_display_price: retailPrice * (1.05 + Math.random() * 0.15),
+      ebay_display_price: retailPrice * (0.98 + Math.random() * 0.1),
+      sams_display_price: retailPrice * (1.08 + Math.random() * 0.18),
+      compare_at_price: retailPrice * 1.2,
+      profit_amount: retailPrice - costPrice,
+      profit_percent: profitPercent,
+      profit_status: profitPercent > MARGIN_THRESHOLD ? 'profitable' as ProfitStatus : 'below_threshold' as ProfitStatus,
       category: categories[i % categories.length],
+      vendor: null,
+      product_type: null,
+      tags: null,
       rating: 3.5 + Math.random() * 1.5,
       review_count: Math.floor(100 + Math.random() * 5000),
-      last_price_check: lastCheck,
+      is_prime: Math.random() > 0.3,
+      image_url: `https://picsum.photos/seed/price${i}/200/200`,
+      inventory_quantity: Math.floor(10 + Math.random() * 100),
+      status: Math.random() > 0.1 ? 'active' as ProductStatus : 'paused' as ProductStatus,
+      lifecycle_status: 'active' as LifecycleStatus,
+      below_threshold_since: null,
       created_at: new Date(Date.now() - Math.random() * 90 * 24 * 60 * 60 * 1000).toISOString(),
       updated_at: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString(),
-      shopify_id: Math.random() > 0.3 ? `shopify-${i + 1}` : null,
-      shopify_handle: Math.random() > 0.3 ? `product-${i + 1}` : null,
+      synced_at: lastCheck,
+      last_price_check: lastCheck,
+      admin_override: false,
+      admin_override_by: null,
+      admin_override_at: null,
     };
   });
 }
@@ -401,13 +422,13 @@ export default function PricesPage() {
 
   // Calculate alerts count (products below margin threshold)
   const alertCount = useMemo(() => {
-    return state.products.filter(p => (p.profit_margin ?? 0) < MARGIN_THRESHOLD).length;
+    return state.products.filter(p => (p.profit_percent ?? 0) < MARGIN_THRESHOLD).length;
   }, [state.products]);
 
   // Calculate average margin
   const avgMargin = useMemo(() => {
     if (state.products.length === 0) return 0;
-    const total = state.products.reduce((sum, p) => sum + (p.profit_margin ?? 0), 0);
+    const total = state.products.reduce((sum, p) => sum + (p.profit_percent ?? 0), 0);
     return total / state.products.length;
   }, [state.products]);
 
@@ -420,19 +441,35 @@ export default function PricesPage() {
     dispatch({ type: 'SET_ERROR', payload: null });
 
     try {
-      // In production, this would be an API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      const products = generateMockProducts(60);
+      // Fetch all products - don't filter by status initially
+      const response = await fetch('/api/products?limit=1000');
       
+      if (!response.ok) {
+        throw new Error(`Failed to fetch products: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      
+      if (!result.success) {
+        throw new Error(result.error || 'API request failed');
+      }
+
+      // Use products directly - Price Intelligence can track and analyze any product
+      // Pricing data will be fetched and populated by the sync jobs
+      const products: Product[] = (result.data || []);
+
       dispatch({ type: 'SET_PRODUCTS', payload: products });
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       dispatch({
         type: 'SET_ERROR',
         payload: {
-          code: 'PRICE_FETCH_001',
-          message: 'Failed to fetch price data',
-          details: error instanceof Error ? error.message : 'Unknown error',
-          suggestion: 'Check your connection and try again',
+          code: 'PRICE_FETCH_ERROR',
+          message: 'Failed to load products',
+          details: errorMessage,
+          severity: 'error',
+          suggestion: 'Check your network connection and try refreshing',
+          blocking: false,
         },
       });
     }
@@ -442,40 +479,45 @@ export default function PricesPage() {
     dispatch({ type: 'SET_REFRESHING', payload: true });
 
     try {
-      // Simulate refreshing all prices
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      // Get all product IDs to sync
+      const productIds = state.products.map(p => p.id);
       
-      // Update products with fresh data
-      const refreshedProducts = state.products.map(product => {
-        const priceChange = (Math.random() - 0.5) * 2; // ±$1
-        const newAmazonPrice = Math.max(5, (product.amazon_price || 15) + priceChange);
-        const newRetailPrice = newAmazonPrice * (1.8 + Math.random() * 0.2);
-        
-        return {
-          ...product,
-          amazon_price: newAmazonPrice,
-          retail_price: newRetailPrice,
-          profit_margin: ((newRetailPrice - newAmazonPrice) / newRetailPrice) * 100,
-          last_price_check: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
+      // Call the real sync API
+      const response = await fetch('/api/prices?action=sync-all', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ productIds }),
       });
 
-      dispatch({ type: 'BULK_UPDATE', payload: refreshedProducts });
+      if (!response.ok) {
+        throw new Error(`Failed to sync prices: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Sync failed');
+      }
+
+      // Refresh the products data after sync
+      await fetchProducts();
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       dispatch({
         type: 'SET_ERROR',
         payload: {
           code: 'REFRESH_001',
           message: 'Failed to refresh prices',
-          details: error instanceof Error ? error.message : 'Unknown error',
+          details: errorMessage,
           suggestion: 'Try again in a few moments',
-        },
+        } as ApiError,
       });
     } finally {
       dispatch({ type: 'SET_REFRESHING', payload: false });
     }
-  }, [state.products]);
+  }, [fetchProducts]);
 
   // Initial fetch
   useEffect(() => {
@@ -509,22 +551,21 @@ export default function PricesPage() {
   // ─────────────────────────────────────────────────────────────────────────
 
   return (
-    <PageHealthCheck requiredServices={['supabase', 'rainforest', 'keepa']}>
-      <div className="space-y-6">
-        {/* Error Banner */}
-        {state.error && !state.isLoading && (
-          <FeatureStatusBanner
-            status={{
-              code: state.error.code,
-              status: 'error',
-              message: state.error.message,
-              details: state.error.details,
-              suggestion: state.error.suggestion,
-              blocking: false,
-            }}
-            onDismiss={() => dispatch({ type: 'SET_ERROR', payload: null })}
-          />
-        )}
+    <div className="space-y-6">
+      {/* Error Banner */}
+      {state.error && !state.isLoading && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+          <p className="font-medium">{state.error.message}</p>
+          {state.error.details && <p className="text-sm mt-1">{state.error.details}</p>}
+          {state.error.suggestion && <p className="text-sm mt-1">{state.error.suggestion}</p>}
+          <button
+            onClick={() => dispatch({ type: 'SET_ERROR', payload: null })}
+            className="mt-2 text-sm underline"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
         {/* Loading State */}
         {state.isLoading && (
@@ -567,6 +608,5 @@ export default function PricesPage() {
           onProductAction={handleProductAction}
         />
       </div>
-    </PageHealthCheck>
   );
 }

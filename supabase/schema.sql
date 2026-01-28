@@ -109,6 +109,7 @@ create table if not exists products (
   product_type text,
   status text not null default 'active',
   tags text[],
+  category text,
   body_html text,
   images jsonb,
   options jsonb,

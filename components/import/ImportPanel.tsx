@@ -2558,40 +2558,66 @@ export function ImportPanel({
     };
 
     reader.readAsText(file);
-  }, []);
+  }, [existingAsins]);
 
-  const handleSearch = useCallback(async () => {
+  const handleDiscover = useCallback(async () => {
     dispatch({ type: 'SET_DISCOVERING', payload: true });
     dispatch({ type: 'SET_DISCOVERY_ERROR', payload: null });
 
     try {
-      // Simulate API call (replace with real Rainforest API call)
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Build search parameters
+      const searchParams = new URLSearchParams({
+        query: state.discoveryFilters.query,
+        ...(state.discoveryFilters.category && { category: state.discoveryFilters.category }),
+        ...(state.discoveryFilters.minPrice && { minPrice: String(state.discoveryFilters.minPrice) }),
+        ...(state.discoveryFilters.maxPrice && { maxPrice: String(state.discoveryFilters.maxPrice) }),
+        ...(state.discoveryFilters.minRating && { minRating: String(state.discoveryFilters.minRating) }),
+        ...(state.discoveryFilters.minReviews && { minReviews: String(state.discoveryFilters.minReviews) }),
+        ...(state.discoveryFilters.primeOnly && { primeOnly: 'true' }),
+        pageSize: '50',
+      });
 
-      // Mock discovered products
-      const mockProducts: RainforestSearchResult[] = Array.from({ length: 20 }, (_, i) => ({
-        asin: `B${String(Math.random()).slice(2, 11).toUpperCase()}`,
-        title: `${state.discoveryFilters.query} Product ${i + 1} - Premium Quality Item with Great Reviews`,
-        price: state.discoveryFilters.minPrice + Math.random() * (state.discoveryFilters.maxPrice - state.discoveryFilters.minPrice),
-        image_url: `https://picsum.photos/200/200?random=${i}`,
-        rating: 3.5 + Math.random() * 1.5,
-        review_count: Math.floor(500 + Math.random() * 5000),
-        category: state.discoveryFilters.category || 'General',
-        is_prime: state.discoveryFilters.primeOnly || Math.random() > 0.3,
-        availability: 'In Stock',
+      // Call real discovery API
+      const response = await fetch(`/api/discovery?${searchParams}`);
+      
+      if (!response.ok) {
+        throw new Error(`Discovery API error: ${response.status}`);
+      }
+
+      const result = await response.json();
+      
+      if (!result.success) {
+        throw new Error(result.error?.message || 'Discovery failed');
+      }
+
+      // Transform results to RainforestSearchResult format
+      const discoveredProducts: RainforestSearchResult[] = result.data.map((item: any) => ({
+        asin: item.asin,
+        title: item.title,
+        price: item.price,
+        image_url: item.image_url,
+        rating: item.rating,
+        review_count: item.review_count,
+        category: item.category,
+        is_prime: item.is_prime,
+        availability: item.availability,
       }));
 
-      dispatch({ type: 'SET_DISCOVERED_PRODUCTS', payload: mockProducts });
+      dispatch({ type: 'SET_DISCOVERED_PRODUCTS', payload: discoveredProducts });
     } catch (error) {
       dispatch({
         type: 'SET_DISCOVERY_ERROR',
         payload: {
           code: 'DISC_001',
-          message: 'Discovery failed',
+          message: 'Failed to discover products',
           details: error instanceof Error ? error.message : 'Unknown error',
-          suggestion: 'Check your API configuration and try again',
+          suggestion: 'Check your search criteria and try again',
+          severity: 'error' as const,
+          blocking: false,
         },
       });
+    } finally {
+      dispatch({ type: 'SET_DISCOVERING', payload: false });
     }
   }, [state.discoveryFilters]);
 
@@ -2607,90 +2633,122 @@ export function ImportPanel({
       },
     });
 
-    const importedProducts: Product[] = [];
-    abortControllerRef.current = new AbortController();
-
     try {
-      // Process in batches
-      for (let i = 0; i < selectedAsins.length; i++) {
-        if (abortControllerRef.current?.signal.aborted) break;
+      // Prepare import items
+      const importItems = selectedAsins.map(asin => ({
+        asin,
+        title: `Product ${asin}`,
+        amazon_price: null, // Will be fetched by API
+        category: 'Imported',
+      }));
 
-        const asin = selectedAsins[i];
-        
-        dispatch({
-          type: 'SET_PROGRESS',
-          payload: {
-            currentItem: i + 1,
-            currentProductAsin: asin,
-            phase: i < selectedAsins.length * 0.3 ? 'fetching_rainforest' :
-                   i < selectedAsins.length * 0.6 ? 'fetching_keepa' :
-                   i < selectedAsins.length * 0.9 ? 'calculating' : 'saving',
-            estimatedTimeRemaining: Math.max(0, ((selectedAsins.length - i) / BATCH_SIZE) * (BATCH_DELAY / 1000)),
+      // Start real import job
+      const response = await fetch('/api/import', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          items: importItems,
+          options: {
+            skipExisting: true,
+            fetchPrices: true,
+            fetchDetails: true,
           },
-        });
+        }),
+      });
 
-        try {
-          // Simulate API call for each product
-          await new Promise(resolve => setTimeout(resolve, 200 + Math.random() * 300));
-
-          // Simulate occasional failures
-          if (Math.random() < 0.05) {
-            throw new Error('API rate limit exceeded');
-          }
-
-          // Create mock product
-          const amazonPrice = 10 + Math.random() * 15;
-          const retailPrice = calculateRetailPrice(amazonPrice);
-          const competitorPrices = calculateCompetitorPrices(retailPrice);
-
-          const product: Product = {
-            id: generateId(),
-            asin,
-            title: `Product ${asin} - Imported Item`,
-            description: 'Imported product description',
-            amazon_price: amazonPrice,
-            retail_price: retailPrice,
-            profit_margin: ((retailPrice - amazonPrice) / retailPrice) * 100,
-            competitor_prices: competitorPrices,
-            status: 'active',
-            image_url: `https://picsum.photos/200/200?random=${i}`,
-            category: 'Imported',
-            rating: 4 + Math.random(),
-            review_count: Math.floor(100 + Math.random() * 1000),
-            last_price_check: new Date().toISOString(),
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-            shopify_id: null,
-            shopify_handle: null,
-          };
-
-          importedProducts.push(product);
-          dispatch({
-            type: 'SET_PROGRESS',
-            payload: { successCount: importedProducts.length },
-          });
-        } catch (error) {
-          dispatch({
-            type: 'ADD_PROGRESS_ERROR',
-            payload: {
-              asin,
-              error: error instanceof Error ? error.message : 'Unknown error',
-            },
-          });
-        }
-
-        // Batch delay
-        if ((i + 1) % BATCH_SIZE === 0) {
-          await new Promise(resolve => setTimeout(resolve, BATCH_DELAY));
-        }
+      if (!response.ok) {
+        throw new Error(`Import API error: ${response.status}`);
       }
 
-      dispatch({
-        type: 'SET_PROGRESS',
-        payload: { phase: 'complete' },
-      });
-      dispatch({ type: 'SET_IMPORT_RESULT', payload: importedProducts });
-      onImportComplete(importedProducts);
+      const result = await response.json();
+      
+      if (!result.success) {
+        throw new Error(result.error?.message || 'Import failed');
+      }
+
+      const jobId = result.data.jobId;
+
+      // Poll for progress
+      const pollProgress = async () => {
+        try {
+          const progressResponse = await fetch(`/api/import?jobId=${jobId}`);
+          const progressResult = await progressResponse.json();
+
+          if (progressResult.success) {
+            const job = progressResult.data;
+            
+            dispatch({
+              type: 'SET_PROGRESS',
+              payload: {
+                currentItem: job.processedItems,
+                totalItems: job.totalItems,
+                successCount: job.successCount,
+                failCount: job.failCount,
+                phase: job.status === 'completed' ? 'complete' : 
+                       job.status === 'failed' ? 'calculating' : 'fetching_rainforest',
+                errors: job.errors.map(e => ({ asin: e.asin, error: e.error })),
+                estimatedTimeRemaining: Math.max(0, ((job.totalItems - job.processedItems) / BATCH_SIZE) * (BATCH_DELAY / 1000)),
+              },
+            });
+
+            if (job.status === 'completed' || job.status === 'failed') {
+              if (job.status === 'completed') {
+                // Use created products from job if available, otherwise fetch from API
+                let importedProducts = [];
+                
+                if (job.createdProducts && job.createdProducts.length > 0) {
+                  importedProducts = job.createdProducts;
+                  console.log('[ImportPanel] Using created products from job:', importedProducts.length);
+                } else {
+                  // Fallback: Fetch the imported products from products API
+                  console.log('[ImportPanel] Fetching imported products from API');
+                  const productsResponse = await fetch('/api/products?action=list&pageSize=1000');
+                  const productsResult = await productsResponse.json();
+                  
+                  if (productsResult.success) {
+                    importedProducts = productsResult.data.filter((p: any) => 
+                      importItems.some(item => item.asin === p.asin)
+                    );
+                  }
+                }
+                  
+                dispatch({ type: 'SET_IMPORT_RESULT', payload: importedProducts });
+                onImportComplete(importedProducts);
+              }
+              
+              dispatch({
+                type: 'SET_PROGRESS',
+                payload: { phase: job.status === 'completed' ? 'complete' : 'calculating' },
+              });
+              
+              if (job.status === 'failed') {
+                dispatch({
+                  type: 'SET_IMPORT_ERROR',
+                  payload: {
+                    code: 'IMPORT_041',
+                    message: 'Import failed',
+                    details: job.errors.map(e => e.error).join(', '),
+                    suggestion: 'Check the errors and try again',
+                    severity: 'error' as const,
+                    blocking: false,
+                  },
+                });
+              }
+            } else {
+              // Continue polling
+              setTimeout(pollProgress, 2000);
+            }
+          }
+        } catch (error) {
+          console.error('Progress polling error:', error);
+          setTimeout(pollProgress, 5000); // Retry with longer delay
+        }
+      };
+
+      // Start polling
+      setTimeout(pollProgress, 1000);
     } catch (error) {
       dispatch({
         type: 'SET_IMPORT_ERROR',
@@ -2699,6 +2757,8 @@ export function ImportPanel({
           message: 'Import failed',
           details: error instanceof Error ? error.message : 'Unknown error',
           suggestion: 'Try importing again or contact support',
+          severity: 'error' as const,
+          blocking: false,
         },
       });
     }

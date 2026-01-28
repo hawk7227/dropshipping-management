@@ -366,19 +366,19 @@ function applyFilters(
       const searchLower = filters.search.toLowerCase();
       const matches = 
         product.title.toLowerCase().includes(searchLower) ||
-        product.asin.toLowerCase().includes(searchLower);
+        (product.asin?.toLowerCase().includes(searchLower) ?? false);
       if (!matches) return false;
     }
 
     // Profit status
     if (filters.profitStatus !== 'all') {
-      const status = getProfitStatus(product.profit_margin);
+      const status = getProfitStatus(product.profit_margin ?? null);
       if (status !== filters.profitStatus) return false;
     }
 
     // Alert status
     if (filters.alertStatus !== 'all') {
-      const hasAlerts = alerts.some(a => a.productId === product.id);
+      const hasAlerts = alerts.some(a => a.product_id === product.id);
       if (filters.alertStatus === 'has_alerts' && !hasAlerts) return false;
       if (filters.alertStatus === 'no_alerts' && hasAlerts) return false;
     }
@@ -446,7 +446,7 @@ function sortProducts(
  */
 function generateCompetitorAnalysis(products: Product[]): CompetitorAnalysis[] {
   return products
-    .filter(p => p.retail_price && p.competitor_prices)
+    .filter(p => p.retail_price && p.competitor_prices && p.asin)
     .map(product => {
       const prices = Object.values(product.competitor_prices || {}) as number[];
       const avgCompetitor = prices.length > 0
@@ -460,10 +460,16 @@ function generateCompetitorAnalysis(products: Product[]): CompetitorAnalysis[] {
 
       return {
         productId: product.id,
-        asin: product.asin,
+        asin: product.asin || '',
         title: product.title,
         yourPrice: product.retail_price || 0,
-        competitorPrices: product.competitor_prices || {},
+        competitorPrices: (product.competitor_prices as CompetitorPrices) || {
+          amazon: 0,
+          costco: 0,
+          ebay: 0,
+          sams: 0,
+          highest: 0,
+        },
         averageCompetitor: avgCompetitor,
         lowestCompetitor,
         highestCompetitor,
@@ -477,23 +483,33 @@ function generateCompetitorAnalysis(products: Product[]): CompetitorAnalysis[] {
  */
 function generateMockAlerts(products: Product[]): EnrichedPriceAlert[] {
   const lowMarginProducts = products.filter(
-    p => p.profit_margin !== null && p.profit_margin < MARGIN_THRESHOLD
+    p => p.profit_margin !== null && (p.profit_margin ?? 0) < MARGIN_THRESHOLD
   );
 
-  return lowMarginProducts.slice(0, 10).map((product, i) => ({
-    id: `alert-${product.id}-${i}`,
-    productId: product.id,
-    asin: product.asin,
-    type: 'margin_drop' as const,
-    message: `Profit margin dropped below ${MARGIN_THRESHOLD}%`,
-    severity: product.profit_margin! < MARGIN_THRESHOLD / 2 ? 'critical' as const : 'warning' as const,
-    timestamp: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString(),
-    acknowledged: false,
-    product,
-    previousPrice: (product.amazon_price || 10) * 0.9,
-    currentPrice: product.amazon_price || 10,
-    changePercent: 11.1,
-  }));
+  return lowMarginProducts.slice(0, 10).map((product, i) => {
+    const previousPrice = (product.amazon_price || 10) * 0.9;
+    const currentPrice = product.amazon_price || 10;
+    const changePercent = ((currentPrice - previousPrice) / previousPrice) * 100;
+    
+    return {
+      id: `alert-${product.id}-${i}`,
+      product_id: product.id,
+      asin: product.asin ?? undefined,
+      title: product.title,
+      type: 'margin_warning' as const,
+      message: `Profit margin dropped below ${MARGIN_THRESHOLD}%`,
+      severity: (product.profit_margin ?? 0) < MARGIN_THRESHOLD / 2 ? 'critical' as const : 'high' as const,
+      created_at: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString(),
+      acknowledged: false,
+      product,
+      previous_price: previousPrice,
+      current_price: currentPrice,
+      price_change_percent: changePercent,
+      previousPrice,
+      currentPrice,
+      changePercent,
+    };
+  });
 }
 
 /**
@@ -945,7 +961,7 @@ function PriceRow({
   isLoading: boolean;
 }) {
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const productAlerts = alerts.filter(a => a.productId === product.id);
+  const productAlerts = alerts.filter(a => a.product_id === product.id);
   const priceChange = getPriceChangeStatus(product, history);
   const daysSinceCheck = getDaysSinceCheck(product);
   const isStale = isProductStale(product);
@@ -1043,7 +1059,7 @@ function PriceRow({
 
       {/* Profit */}
       <td className="px-3 py-3">
-        <ProfitBadge margin={product.profit_margin} />
+        <ProfitBadge margin={product.profit_margin ?? null} />
       </td>
 
       {/* Last Check */}
@@ -1231,7 +1247,7 @@ function AlertsView({
   isLoading: boolean;
 }) {
   const criticalAlerts = alerts.filter(a => a.severity === 'critical');
-  const warningAlerts = alerts.filter(a => a.severity === 'warning');
+  const warningAlerts = alerts.filter(a => a.severity === 'high' || a.severity === 'medium');
 
   if (alerts.length === 0) {
     return (
@@ -1264,7 +1280,7 @@ function AlertsView({
                 key={alert.id}
                 alert={alert}
                 onDismiss={() => onDismiss(alert.id)}
-                onViewProduct={() => onViewProduct(alert.productId)}
+                onViewProduct={() => onViewProduct(alert.product_id)}
               />
             ))}
           </div>
@@ -1286,7 +1302,7 @@ function AlertsView({
                 key={alert.id}
                 alert={alert}
                 onDismiss={() => onDismiss(alert.id)}
-                onViewProduct={() => onViewProduct(alert.productId)}
+                onViewProduct={() => onViewProduct(alert.product_id)}
               />
             ))}
           </div>
@@ -1331,18 +1347,18 @@ function AlertCard({
             </p>
             <div className="flex items-center gap-4 mt-2 text-sm">
               <span className="text-gray-500">
-                Previous: {formatPrice(alert.previousPrice)}
+                Previous: {formatPrice(alert.previous_price ?? 0)}
               </span>
               <span className="text-gray-500">→</span>
               <span className={textClass}>
-                Current: {formatPrice(alert.currentPrice)}
+                Current: {formatPrice(alert.current_price ?? 0)}
               </span>
-              <span className={`font-medium ${alert.changePercent > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                {alert.changePercent > 0 ? '+' : ''}{alert.changePercent.toFixed(1)}%
+              <span className={`font-medium ${(alert.price_change_percent ?? 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                {(alert.price_change_percent ?? 0) > 0 ? '+' : ''}{(alert.price_change_percent ?? 0).toFixed(1)}%
               </span>
             </div>
             <p className="text-xs text-gray-500 mt-1">
-              {formatRelativeTime(alert.timestamp)}
+              {formatRelativeTime(alert.created_at)}
             </p>
           </div>
         </div>
@@ -1864,7 +1880,7 @@ export function PriceIntelligencePanel({
     error: null,
     alerts: [],
     priceHistory: [],
-    selectedIds: new Set(),
+    selectedIds: new Set<string>(),
     bulkRefresh: INITIAL_BULK_REFRESH,
     toasts: [],
     priceDetailProduct: null,
@@ -1899,7 +1915,7 @@ export function PriceIntelligencePanel({
       amazon_price: newAmazonPrice,
       retail_price: newRetailPrice,
       profit_margin: ((newRetailPrice - newAmazonPrice) / newRetailPrice) * 100,
-      competitor_prices: competitorPrices,
+      competitor_prices: (competitorPrices as unknown as CompetitorPrices),
       last_price_check: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -1942,7 +1958,7 @@ export function PriceIntelligencePanel({
           amazon_price: newAmazonPrice,
           retail_price: newRetailPrice,
           profit_margin: ((newRetailPrice - newAmazonPrice) / newRetailPrice) * 100,
-          competitor_prices: competitorPrices,
+          competitor_prices: (competitorPrices as unknown as CompetitorPrices),
           last_price_check: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         };
@@ -1952,7 +1968,7 @@ export function PriceIntelligencePanel({
       } catch (error) {
         dispatch({
           type: 'ADD_BULK_ERROR',
-          payload: { asin: product.asin, error: error instanceof Error ? error.message : 'Unknown error' },
+          payload: { asin: product.asin || 'Unknown', error: error instanceof Error ? error.message : 'Unknown error' },
         });
       }
 
@@ -2094,14 +2110,7 @@ export function PriceIntelligencePanel({
       {/* Error Banner */}
       {state.error && (
         <FeatureStatusBanner
-          status={{
-            code: state.error.code,
-            status: 'error',
-            message: state.error.message,
-            details: state.error.details,
-            suggestion: state.error.suggestion,
-            blocking: false,
-          }}
+          error={state.error}
           onDismiss={() => dispatch({ type: 'SET_ERROR', payload: null })}
         />
       )}
@@ -2159,7 +2168,7 @@ export function PriceIntelligencePanel({
               const product = products.find(p => p.id === productId);
               if (product) {
                 dispatch({ type: 'SET_VIEW_MODE', payload: 'overview' });
-                dispatch({ type: 'SET_FILTERS', payload: { search: product.asin } });
+                dispatch({ type: 'SET_FILTERS', payload: { search: product.asin || '' } });
               }
             }}
             isLoading={state.isLoading}

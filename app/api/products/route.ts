@@ -260,18 +260,35 @@ export async function POST(request: NextRequest) {
       }
 
       case 'sync-shopify': {
-        const { fullSync = false } = body;
+        try {
+          const { fullSync = false } = body;
 
-        const result = await syncProductsFromShopify(fullSync);
+          console.log('[Products API] Starting Shopify sync...');
+          const result = await syncProductsFromShopify(fullSync);
+          
+          console.log('[Products API] Shopify sync result:', result);
 
-        return NextResponse.json({
-          success: true,
-          data: {
-            synced: result.synced,
-            errors: result.errors,
-            message: `Synced ${result.synced} products from Shopify`,
-          },
-        });
+          return NextResponse.json({
+            success: true,
+            data: {
+              synced: result.synced || 0,
+              errors: result.errors || [],
+              message: `Synced ${result.synced || 0} products from Shopify`,
+            },
+          });
+        } catch (syncError) {
+          console.error('[Products API] Shopify sync error:', syncError);
+          
+          return NextResponse.json({
+            success: false,
+            error: {
+              code: 'SHOPIFY_SYNC_ERROR',
+              message: 'Failed to sync products from Shopify',
+              details: syncError instanceof Error ? syncError.message : 'Unknown error',
+              suggestion: 'Check Shopify credentials and connection'
+            }
+          }, { status: 500 });
+        }
       }
 
       case 'update-inventory': {

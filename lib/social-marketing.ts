@@ -61,34 +61,38 @@ interface Contact {
 // SOCIAL POSTS - CRUD
 // ============================================================================
 
-export async function getSocialPosts(filters?: {
+export async function getSocialPosts(filters: {
   platform?: string;
   status?: string;
-  limit?: number;
-}): Promise<SocialPost[]> {
-  let query = supabase.from('social_posts').select('*');
-  
-  if (filters?.platform) {
+  page?: number;
+  pageSize?: number;
+}): Promise<{ posts: SocialPost[]; total: number }> {
+  const page = filters.page || 1;
+  const pageSize = filters.pageSize || 20;
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+
+  let query = supabase
+    .from('social_posts')
+    .select('*', { count: 'exact' })
+    .order('created_at', { ascending: false })
+    .range(from, to);
+
+  if (filters.platform) {
     query = query.eq('platform', filters.platform);
   }
-  if (filters?.status) {
+  if (filters.status) {
     query = query.eq('status', filters.status);
   }
-  
-  query = query.order('created_at', { ascending: false });
-  
-  if (filters?.limit) {
-    query = query.limit(filters.limit);
-  }
-  
-  const { data, error } = await query;
-  
+
+  const { data, error, count } = await query;
+
   if (error) {
     console.error('Error fetching social posts:', error);
-    return [];
+    return { posts: [], total: 0 };
   }
-  
-  return data || [];
+
+  return { posts: (data as SocialPost[]) || [], total: count || 0 };
 }
 
 export async function createSocialPost(post: Omit<SocialPost, 'id'>): Promise<SocialPost | null> {
@@ -145,8 +149,15 @@ export async function deleteSocialPost(postId: string): Promise<boolean> {
 
 export async function generateSocialPost(
   product: { title: string; description?: string; price?: number },
-  platform: 'instagram' | 'facebook' | 'tiktok' | 'twitter'
-): Promise<{ content: string; hashtags: string[] }> {
+  options: {
+    platform?: 'instagram' | 'facebook' | 'tiktok' | 'twitter';
+    tone?: string;
+    includeHashtags?: boolean;
+    includeEmoji?: boolean;
+    customPrompt?: string;
+  } = {}
+): Promise<string> {
+  const platform = options.platform || 'instagram';
   const platformLimits: Record<string, number> = {
     instagram: 2200,
     facebook: 500,
@@ -163,39 +174,42 @@ Requirements:
 - Max ${platformLimits[platform]} characters
 - Engaging hook
 - Call to action
-- Return JSON: { "content": "...", "hashtags": ["tag1", "tag2", ...] }`;
+- Tone: ${options.tone || 'engaging, friendly'}
+${options.includeEmoji === false ? '- Do NOT use emojis' : '- Emojis allowed if helpful'}
+${options.customPrompt ? `Additional instructions: ${options.customPrompt}` : ''}
+
+Return only the post text.`;
 
   try {
     const response = await openai.chat.completions.create({
       model: 'gpt-4-turbo-preview',
       messages: [{ role: 'user', content: prompt }],
-      response_format: { type: 'json_object' },
     });
-    
-    return JSON.parse(response.choices[0].message.content || '{"content":"","hashtags":[]}');
+
+    const content = response.choices[0].message.content || '';
+    return content.trim();
   } catch (error) {
     console.error('Error generating social post:', error);
-    return { content: product.title, hashtags: [] };
+    return product.title;
   }
 }
 
 export async function generateMultiPlatformContent(
-  product: { title: string; description?: string; price?: number }
-): Promise<Record<string, { content: string; hashtags: string[] }>> {
-  const platforms: ('instagram' | 'facebook' | 'tiktok' | 'twitter')[] = 
-    ['instagram', 'facebook', 'tiktok', 'twitter'];
-  
-  const results: Record<string, { content: string; hashtags: string[] }> = {};
+  product: { title: string; description?: string; price?: number },
+  platforms: ('instagram' | 'facebook' | 'tiktok' | 'twitter')[] = ['instagram', 'facebook', 'twitter'],
+  tone?: string
+): Promise<Record<string, string>> {
+  const results: Record<string, string> = {};
   
   for (const platform of platforms) {
-    results[platform] = await generateSocialPost(product, platform);
+    results[platform] = await generateSocialPost(product, { platform, tone });
   }
   
   return results;
 }
 
 export async function generateHashtags(
-  topic: string,
+  topic: { title: string; description?: string },
   count: number = 10
 ): Promise<string[]> {
   try {
@@ -203,7 +217,11 @@ export async function generateHashtags(
       model: 'gpt-4-turbo-preview',
       messages: [{
         role: 'user',
-        content: `Generate ${count} relevant hashtags for: ${topic}. Return JSON: { "hashtags": ["tag1", "tag2", ...] }`
+        content: `Generate ${count} relevant hashtags for this product.
+Title: ${topic.title}
+Description: ${topic.description || 'N/A'}
+
+Return JSON: { "hashtags": ["tag1", "tag2", ...] }`
       }],
       response_format: { type: 'json_object' },
     });
@@ -258,27 +276,38 @@ export async function publishToFacebook(
 // CAMPAIGNS
 // ============================================================================
 
-export async function getCampaigns(filters?: {
+export async function getCampaigns(filters: {
   status?: string;
   type?: string;
-}): Promise<Campaign[]> {
-  let query = supabase.from('campaigns').select('*');
+  page?: number;
+  pageSize?: number;
+}): Promise<{ campaigns: Campaign[]; total: number }> {
+  const page = filters.page || 1;
+  const pageSize = filters.pageSize || 20;
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+
+  let query = supabase
+    .from('campaigns')
+    .select('*', { count: 'exact' })
+    .order('created_at', { ascending: false })
+    .range(from, to);
   
-  if (filters?.status) {
+  if (filters.status) {
     query = query.eq('status', filters.status);
   }
-  if (filters?.type) {
+  if (filters.type) {
     query = query.eq('type', filters.type);
   }
   
-  const { data, error } = await query.order('created_at', { ascending: false });
+  const { data, error, count } = await query;
   
   if (error) {
     console.error('Error fetching campaigns:', error);
-    return [];
+    return { campaigns: [], total: 0 };
   }
   
-  return data || [];
+  return { campaigns: (data as Campaign[]) || [], total: count || 0 };
 }
 
 export async function createCampaign(campaign: Omit<Campaign, 'id'>): Promise<Campaign | null> {
@@ -293,7 +322,7 @@ export async function createCampaign(campaign: Omit<Campaign, 'id'>): Promise<Ca
     return null;
   }
   
-  return data;
+  return data as Campaign;
 }
 
 export async function executeCampaign(campaignId: string): Promise<{
@@ -328,7 +357,8 @@ export async function executeCampaign(campaignId: string): Promise<{
 // ============================================================================
 
 export async function getTemplates(type?: string): Promise<Template[]> {
-  let query = supabase.from('templates').select('*');
+  // Use a dedicated message_templates table for all template types
+  let query = supabase.from('message_templates').select('*');
   
   if (type) {
     query = query.eq('type', type);
@@ -346,7 +376,7 @@ export async function getTemplates(type?: string): Promise<Template[]> {
 
 export async function createTemplate(template: Omit<Template, 'id'>): Promise<Template | null> {
   const { data, error } = await supabase
-    .from('templates')
+    .from('message_templates')
     .insert(template)
     .select()
     .single();
@@ -363,30 +393,68 @@ export async function createTemplate(template: Omit<Template, 'id'>): Promise<Te
 // CONTACTS
 // ============================================================================
 
-export async function getContacts(filters?: {
-  subscribed?: boolean;
+export async function getContacts(filters: {
   tags?: string[];
-}): Promise<Contact[]> {
-  let query = supabase.from('contacts').select('*');
-  
-  if (filters?.subscribed !== undefined) {
-    query = query.eq('subscribed', filters.subscribed);
+  search?: string;
+  page?: number;
+  pageSize?: number;
+}): Promise<{ contacts: Contact[]; total: number }> {
+  const page = filters.page || 1;
+  const pageSize = filters.pageSize || 50;
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+
+  let query = supabase
+    .from('marketing_contacts')
+    .select('*', { count: 'exact' })
+    .range(from, to)
+    .order('created_at', { ascending: false });
+
+  if (filters.tags && filters.tags.length > 0) {
+    query = query.contains('tags', filters.tags);
   }
-  
-  const { data, error } = await query;
-  
+
+  if (filters.search) {
+    const term = `%${filters.search}%`;
+    query = query.or(
+      `email.ilike.${term},phone.ilike.${term},first_name.ilike.${term},last_name.ilike.${term}`
+    );
+  }
+
+  const { data, error, count } = await query;
+
   if (error) {
     console.error('Error fetching contacts:', error);
-    return [];
+    return { contacts: [], total: 0 };
   }
-  
-  return data || [];
+
+  return { contacts: (data as Contact[]) || [], total: count || 0 };
 }
 
-export async function upsertContact(contact: Contact): Promise<Contact | null> {
+export async function upsertContact(contact: {
+  email?: string;
+  phone?: string;
+  first_name?: string;
+  last_name?: string;
+  tags?: string[];
+  metadata?: Record<string, unknown>;
+  is_subscribed?: boolean;
+}): Promise<Contact | null> {
   const { data, error } = await supabase
-    .from('contacts')
-    .upsert(contact, { onConflict: 'email' })
+    .from('marketing_contacts')
+    .upsert(
+      {
+        email: contact.email || null,
+        phone: contact.phone || null,
+        first_name: contact.first_name || null,
+        last_name: contact.last_name || null,
+        tags: contact.tags || [],
+        metadata: contact.metadata || {},
+        is_subscribed: contact.is_subscribed ?? true,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'email' }
+    )
     .select()
     .single();
   
@@ -403,47 +471,71 @@ export async function upsertContact(contact: Contact): Promise<Contact | null> {
 // ============================================================================
 
 export async function generateEmailContent(
-  subject: string,
-  context: Record<string, any>
-): Promise<{ subject: string; body: string }> {
+  product: { title: string; description?: string; vendor?: string; product_type?: string; images?: any[] },
+  options: {
+    purpose?: string;
+    tone?: string;
+    includeUnsubscribe?: boolean;
+  } = {}
+): Promise<{ subject: string; html: string; text: string }> {
   try {
     const response = await openai.chat.completions.create({
       model: 'gpt-4-turbo-preview',
       messages: [{
         role: 'user',
-        content: `Generate an email with subject "${subject}". Context: ${JSON.stringify(context)}. Return JSON: { "subject": "...", "body": "..." }`
+        content: `Generate a marketing email for this product.
+Product: ${product.title}
+Description: ${product.description || 'N/A'}
+Vendor: ${product.vendor || 'N/A'}
+Type: ${product.product_type || 'N/A'}
+
+Purpose: ${options.purpose || 'promotion'}
+Tone: ${options.tone || 'professional, friendly'}
+${options.includeUnsubscribe === false ? 'Do NOT include unsubscribe language.' : 'Include a short unsubscribe note at the end.'}
+
+Return JSON: { "subject": "...", "html": "<p>...</p>", "text": "..." }`
       }],
       response_format: { type: 'json_object' },
     });
-    
-    return JSON.parse(response.choices[0].message.content || '{"subject":"","body":""}');
+
+    const parsed = JSON.parse(response.choices[0].message.content || '{}');
+    return {
+      subject: parsed.subject || product.title,
+      html: parsed.html || `<p>${parsed.text || ''}</p>`,
+      text: parsed.text || '',
+    };
   } catch (error) {
     console.error('Error generating email:', error);
-    return { subject, body: '' };
+    return { subject: product.title, html: '', text: '' };
   }
 }
 
 export async function sendEmail(
   to: string,
   subject: string,
-  body: string
+  html: string,
+  text?: string
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
   // Would integrate with SendGrid, etc.
   console.log(`Sending email to ${to}: ${subject}`);
+  void html;
+  void text;
   return { success: true, messageId: `msg_${Date.now()}` };
 }
 
 export async function sendBulkEmails(
-  contacts: Contact[],
+  recipients: { email?: string; first_name?: string; last_name?: string }[],
   subject: string,
-  body: string
+  html: string,
+  text?: string,
+  _personalize?: boolean
 ): Promise<{ sent: number; failed: number }> {
   let sent = 0;
   let failed = 0;
   
-  for (const contact of contacts) {
+  for (const contact of recipients) {
     if (contact.email) {
-      const result = await sendEmail(contact.email, subject, body);
+      const result = await sendEmail(contact.email, subject, html, text);
       if (result.success) {
         sent++;
       } else {
@@ -460,14 +552,20 @@ export async function sendBulkEmails(
 // ============================================================================
 
 export async function generateSMS(
-  context: Record<string, any>
+  product: { title: string; description?: string; handle?: string },
+  link?: string
 ): Promise<string> {
   try {
     const response = await openai.chat.completions.create({
       model: 'gpt-4-turbo-preview',
       messages: [{
         role: 'user',
-        content: `Generate a short SMS (max 160 chars) for: ${JSON.stringify(context)}. Return JSON: { "message": "..." }`
+        content: `Generate a short SMS (max 160 chars) promoting this product.
+Title: ${product.title}
+Description: ${product.description || 'N/A'}
+${link ? `Link: ${link}` : ''}
+
+Return JSON: { "message": "..." }`
       }],
       response_format: { type: 'json_object' },
     });
@@ -490,13 +588,14 @@ export async function sendSMS(
 }
 
 export async function sendBulkSMS(
-  contacts: Contact[],
-  message: string
+  recipients: { phone?: string }[],
+  message: string,
+  _personalize?: boolean
 ): Promise<{ sent: number; failed: number }> {
   let sent = 0;
   let failed = 0;
   
-  for (const contact of contacts) {
+  for (const contact of recipients) {
     if (contact.phone) {
       const result = await sendSMS(contact.phone, message);
       if (result.success) {

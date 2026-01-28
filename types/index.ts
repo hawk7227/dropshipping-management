@@ -19,18 +19,51 @@ export interface Product {
   // Identity
   id: string;
   shopify_product_id?: string | null;
-  title: string;
+  /**
+   * Shopify handle (for storefront URLs)
+   */
   handle?: string | null;
+  /**
+   * Human‑readable product title
+   */
+  title: string;
+  /**
+   * Long‑form description / body_html
+   */
+  description?: string | null;
 
   // Source tracking
   source: ProductSource;
-  source_product_id?: string | null; // ASIN for Amazon products
+  /**
+   * Upstream source identifier – ASIN for Amazon products, etc.
+   */
+  source_product_id?: string | null;
   source_url?: string | null;
 
+  /**
+   * Amazon ASIN (shortcut used throughout the UI)
+   */
+  asin?: string | null;
+
   // Pricing: Your costs
-  cost_price: number | null; // What you pay (Amazon cost)
-  retail_price: number | null; // Your list price
-  member_price?: number | null; // Discounted price (optional)
+  /**
+   * Base cost (typically Amazon cost)
+   */
+  cost_price: number | null;
+  /**
+   * Your list / retail price
+   */
+  retail_price: number | null;
+  /**
+   * Optional member price
+   */
+  member_price?: number | null;
+
+  /**
+   * Direct Amazon cost used by price‑intelligence views.
+   * When present, this mirrors or complements cost_price.
+   */
+  amazon_price?: number | null;
 
   // Pricing: Competitor displays (randomized, 80%+ higher)
   amazon_display_price?: number | null;
@@ -39,9 +72,25 @@ export interface Product {
   sams_display_price?: number | null;
   compare_at_price?: number | null; // Highest competitor (for strikethrough)
 
+  /**
+   * Structured competitor prices used by pricing UIs.
+   */
+  competitor_prices?: CompetitorPrices | null;
+
   // Profit tracking
+  /**
+   * Absolute profit in currency units
+   */
   profit_amount?: number | null;
+  /**
+   * Profit margin percentage
+   */
   profit_percent?: number | null;
+  /**
+   * Convenience margin field used in Products / Prices pages.
+   * When present, this is typically the same as profit_percent.
+   */
+  profit_margin?: number | null;
   profit_status: ProfitStatus;
 
   // Product attributes
@@ -61,6 +110,16 @@ export interface Product {
   status: ProductStatus;
   lifecycle_status: LifecycleStatus;
   below_threshold_since?: string | null; // ISO timestamp
+
+  // Shopify integration helpers
+  /**
+   * Linked Shopify product id (stringified)
+   */
+  shopify_id?: string | null;
+  /**
+   * Shopify handle stored separately for convenience
+   */
+  shopify_handle?: string | null;
 
   // Timestamps
   created_at: string; // ISO timestamp

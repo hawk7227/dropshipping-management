@@ -200,7 +200,13 @@ export async function getProducts(options: {
   query = query.order(sortBy, { ascending: sortOrder });
 
   if (options.status) {
-    query = query.eq('status', options.status);
+    // Handle comma-separated status values (e.g., "active,draft")
+    const statuses = options.status.split(',').map(s => s.trim());
+    if (statuses.length === 1) {
+      query = query.eq('status', statuses[0]);
+    } else {
+      query = query.in('status', statuses);
+    }
   }
 
   if (options.search) {

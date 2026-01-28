@@ -3,14 +3,21 @@
 // components/navigation/Navigation.tsx
 // Main navigation component with sidebar and mobile support
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 
 interface NavItem {
   label: string;
   href: string;
   icon: React.ReactNode;
+}
+
+interface User {
+  id: string;
+  email: string;
+  name?: string | null;
 }
 
 const NAV_ITEMS: NavItem[] = [
@@ -100,10 +107,52 @@ const NAV_ITEMS: NavItem[] = [
 
 export function Navigation({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+  const supabase = createClientComponentClient();
 
-  // Don't show navigation on membership checkout/success pages
-  const hideNav = pathname?.startsWith('/membership/checkout') || pathname?.startsWith('/membership/success');
+  useEffect(() => {
+    const fetchUser = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          const response = await fetch('/api/auth/me');
+          if (response.ok) {
+            const userData = await response.json();
+            setUser(userData);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch user:', error);
+      }
+    };
+
+    fetchUser();
+
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
+      fetchUser();
+    });
+
+    return () => subscription.unsubscribe();
+  }, [supabase]);
+
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+      router.push('/login');
+    } catch (error) {
+      console.error('Logout error:', error);
+      router.push('/login');
+    }
+  };
+
+  // Don't show navigation on membership checkout/success pages or login page
+  const hideNav =
+    pathname?.startsWith('/membership/checkout') ||
+    pathname?.startsWith('/membership/success') ||
+    pathname === '/login';
 
   if (hideNav) {
     return <>{children}</>;
@@ -159,17 +208,30 @@ export function Navigation({ children }: { children: React.ReactNode }) {
 
         {/* Bottom section */}
         <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-gray-200">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 mb-3">
             <div className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center">
               <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
               </svg>
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-gray-900 truncate">Store Admin</p>
-              <p className="text-xs text-gray-500 truncate">admin@store.com</p>
+              <p className="text-sm font-medium text-gray-900 truncate">
+                {user?.name || 'User'}
+              </p>
+              <p className="text-xs text-gray-500 truncate">
+                {user?.email || 'Loading...'}
+              </p>
             </div>
           </div>
+          <button
+            onClick={handleLogout}
+            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+            </svg>
+            Sign Out
+          </button>
         </div>
       </aside>
 

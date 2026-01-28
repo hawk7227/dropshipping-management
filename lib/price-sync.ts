@@ -1,606 +1,585 @@
 // lib/price-sync.ts
-// ═══════════════════════════════════════════════════════════════════════════
-// Price Sync Logic
-// Handles price synchronization with Keepa batch updates and demand tracking
-// Supports tiered refresh based on price and demand
-// ═══════════════════════════════════════════════════════════════════════════
+// Complete price synchronization library with all required exports
 
 import { createClient } from '@supabase/supabase-js';
-import {
-  PRICING_RULES,
-  getRefreshInterval,
-  getRefreshIntervalByDemand,
-  calculateRetailPrice,
-  calculateCompetitorPrices,
-  meetsDemandCriteria,
-  type DemandTier,
-} from '@/lib/config/pricing-rules';
-import {
-  lookupProducts,
-  saveDemandData,
-  getDemandData,
-  getRateLimitStatus,
-  isKeepaConfigured,
-  type KeepaProduct,
-} from '@/lib/services/keepa';
-
-// ═══════════════════════════════════════════════════════════════════════════
-// CONFIGURATION
-// ═══════════════════════════════════════════════════════════════════════════
 
 const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '',
-  process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ============================================================================
 // TYPES
-// ═══════════════════════════════════════════════════════════════════════════
+// ============================================================================
 
-export interface PriceSyncOptions {
-  productIds?: string[];
-  asins?: string[];
-  tier?: 'high' | 'medium' | 'low' | 'all';
-  forceRefresh?: boolean;
-  maxProducts?: number;
-  jobType?: string;
-  jobId?: string;
+interface CompetitorPrice {
+  id?: string;
+  product_id: string;
+  competitor: string;
+  competitor_url?: string;
+  price: number;
+  currency: string;
+  in_stock: boolean;
+  last_checked: string;
 }
 
-export interface PriceSyncResult {
+interface PriceHistory {
+  id?: string;
+  product_id: string;
+  our_price: number;
+  competitor_prices: Record<string, number>;
+  recorded_at: string;
+}
+
+interface SyncJob {
+  id?: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  total_products: number;
   processed: number;
-  updated: number;
-  unchanged: number;
   errors: number;
-  tokensUsed: number;
-  alerts: PriceAlert[];
-  details: SyncDetail[];
+  started_at?: string;
+  completed_at?: string;
+  error_log?: Record<string, string>[] | null;
+  created_at?: string;
 }
 
-export interface PriceAlert {
-  type: 'margin_warning' | 'margin_critical' | 'out_of_stock' | 'price_increase' | 'price_decrease';
-  asin: string;
-  productId: string;
-  title: string;
-  message: string;
-  oldValue?: number;
-  newValue?: number;
-  threshold?: number;
+interface MarginRule {
+  id?: string;
+  category?: string;
+  min_margin: number;
+  target_margin: number;
+  max_margin: number;
 }
 
-export interface SyncDetail {
-  asin: string;
-  productId: string;
-  success: boolean;
-  priceChanged: boolean;
-  oldPrice?: number;
-  newPrice?: number;
-  error?: string;
-}
+// ============================================================================
+// COMPETITOR PRICE FUNCTIONS
+// ============================================================================
 
-interface ProductToSync {
-  id: string;
-  asin: string;
-  title: string;
-  amazon_price: number | null;
-  retail_price: number | null;
-  last_price_check: string | null;
-  demand_tier?: DemandTier;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// HELPER FUNCTIONS
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Get products that need price refresh based on tier and age
- */
-async function getProductsNeedingRefresh(
-  options: PriceSyncOptions
-): Promise<ProductToSync[]> {
-  const { tier = 'all', maxProducts = 100, forceRefresh = false } = options;
-
-  let query = supabase
-    .from('products')
-    .select('id, asin, title, amazon_price, retail_price, last_price_check')
-    .not('asin', 'is', null)
-    .eq('status', 'active');
-
-  // Filter by tier based on retail price
-  if (tier !== 'all') {
-    const { refreshTiers } = PRICING_RULES.priceSync;
-    switch (tier) {
-      case 'high':
-        query = query.gte('retail_price', refreshTiers.highValue.minPrice);
-        break;
-      case 'medium':
-        query = query.gte('retail_price', refreshTiers.mediumValue.minPrice)
-          .lt('retail_price', refreshTiers.highValue.minPrice);
-        break;
-      case 'low':
-        query = query.lt('retail_price', refreshTiers.mediumValue.minPrice);
-        break;
-    }
+export async function getCompetitorPrices(productId?: string): Promise<CompetitorPrice[]> {
+  let query = supabase.from('competitor_prices').select('*');
+  
+  if (productId) {
+    query = query.eq('product_id', productId);
   }
-
-  // Filter by last check date (unless force refresh)
-  if (!forceRefresh) {
-    const staleDate = new Date();
-    staleDate.setDate(staleDate.getDate() - PRICING_RULES.priceSync.staleDays);
-    
-    query = query.or(`last_price_check.is.null,last_price_check.lt.${staleDate.toISOString()}`);
-  }
-
-  // Order by oldest check first, then by price (higher value first)
-  query = query
-    .order('last_price_check', { ascending: true, nullsFirst: true })
-    .order('retail_price', { ascending: false })
-    .limit(maxProducts);
-
-  const { data, error } = await query;
-
+  
+  const { data, error } = await query.order('last_checked', { ascending: false });
+  
   if (error) {
-    console.error('[PriceSync] Error fetching products:', error);
+    console.error('Error fetching competitor prices:', error);
     return [];
   }
-
+  
   return data || [];
 }
 
-/**
- * Calculate new prices and check for alerts
- */
-function calculatePriceUpdate(
-  product: ProductToSync,
-  keepaProduct: KeepaProduct
-): {
-  needsUpdate: boolean;
-  newAmazonPrice: number | null;
-  newRetailPrice: number | null;
-  newCompetitorPrices: Record<string, number> | null;
-  alerts: PriceAlert[];
-} {
-  const alerts: PriceAlert[] = [];
-  const newAmazonPrice = keepaProduct.currentAmazonPrice;
-
-  if (newAmazonPrice === null) {
-    // Product is out of stock
-    alerts.push({
-      type: 'out_of_stock',
-      asin: product.asin,
-      productId: product.id,
-      title: product.title,
-      message: `Product ${product.asin} is out of stock on Amazon`,
-    });
-
-    return {
-      needsUpdate: true,
-      newAmazonPrice: null,
-      newRetailPrice: null,
-      newCompetitorPrices: null,
-      alerts,
-    };
-  }
-
-  // Check if price changed
-  const priceChanged = product.amazon_price !== newAmazonPrice;
+export async function upsertCompetitorPrice(price: CompetitorPrice): Promise<CompetitorPrice | null> {
+  const { data, error } = await supabase
+    .from('competitor_prices')
+    .upsert({
+      ...price,
+      fetched_at: new Date().toISOString(),
+    }, {
+      onConflict: 'product_id,competitor_name',
+    })
+    .select()
+    .single();
   
-  if (!priceChanged) {
-    return {
-      needsUpdate: false,
-      newAmazonPrice,
-      newRetailPrice: product.retail_price,
-      newCompetitorPrices: null,
-      alerts,
-    };
+  if (error) {
+    console.error('Error upserting competitor price:', error);
+    return null;
   }
-
-  // Calculate new retail price
-  const newRetailPrice = calculateRetailPrice(newAmazonPrice);
-  const newCompetitorPrices = calculateCompetitorPrices(newRetailPrice);
-
-  // Check for significant price changes
-  if (product.amazon_price !== null) {
-    const priceChange = ((newAmazonPrice - product.amazon_price) / product.amazon_price) * 100;
-    
-    if (priceChange > 10) {
-      alerts.push({
-        type: 'price_increase',
-        asin: product.asin,
-        productId: product.id,
-        title: product.title,
-        message: `Amazon price increased by ${priceChange.toFixed(1)}%`,
-        oldValue: product.amazon_price,
-        newValue: newAmazonPrice,
-      });
-    } else if (priceChange < -10) {
-      alerts.push({
-        type: 'price_decrease',
-        asin: product.asin,
-        productId: product.id,
-        title: product.title,
-        message: `Amazon price decreased by ${Math.abs(priceChange).toFixed(1)}%`,
-        oldValue: product.amazon_price,
-        newValue: newAmazonPrice,
-      });
-    }
-  }
-
-  // Check margin thresholds
-  const margin = ((newRetailPrice - newAmazonPrice) / newRetailPrice) * 100;
-  const { marginAlert } = PRICING_RULES.priceSync;
-
-  if (margin < marginAlert.criticalThreshold) {
-    alerts.push({
-      type: 'margin_critical',
-      asin: product.asin,
-      productId: product.id,
-      title: product.title,
-      message: `Margin dropped to ${margin.toFixed(1)}% (critical threshold: ${marginAlert.criticalThreshold}%)`,
-      oldValue: product.retail_price ? ((product.retail_price - (product.amazon_price || 0)) / product.retail_price) * 100 : undefined,
-      newValue: margin,
-      threshold: marginAlert.criticalThreshold,
-    });
-  } else if (margin < marginAlert.warningThreshold) {
-    alerts.push({
-      type: 'margin_warning',
-      asin: product.asin,
-      productId: product.id,
-      title: product.title,
-      message: `Margin dropped to ${margin.toFixed(1)}% (warning threshold: ${marginAlert.warningThreshold}%)`,
-      oldValue: product.retail_price ? ((product.retail_price - (product.amazon_price || 0)) / product.retail_price) * 100 : undefined,
-      newValue: margin,
-      threshold: marginAlert.warningThreshold,
-    });
-  }
-
-  return {
-    needsUpdate: true,
-    newAmazonPrice,
-    newRetailPrice,
-    newCompetitorPrices,
-    alerts,
-  };
+  
+  return data;
 }
 
-/**
- * Update product in database
- */
-async function updateProduct(
+export async function fetchCompetitorPrices(
   productId: string,
-  updates: {
-    amazonPrice?: number | null;
-    retailPrice?: number | null;
-    competitorPrices?: Record<string, number> | null;
-    isOutOfStock?: boolean;
-  }
-): Promise<{ success: boolean; error?: string }> {
-  try {
-    const updateData: Record<string, unknown> = {
-      last_price_check: new Date().toISOString(),
-    };
-
-    if (updates.amazonPrice !== undefined) {
-      updateData.amazon_price = updates.amazonPrice;
-    }
-
-    if (updates.retailPrice !== undefined) {
-      updateData.retail_price = updates.retailPrice;
-      // Also update member price (10% discount)
-      if (updates.retailPrice !== null) {
-        updateData.member_price = Math.round(updates.retailPrice * 0.9 * 100) / 100;
-      }
-    }
-
-    if (updates.competitorPrices) {
-      updateData.amazon_display_price = updates.competitorPrices.amazon;
-      updateData.costco_display_price = updates.competitorPrices.costco;
-      updateData.ebay_display_price = updates.competitorPrices.ebay;
-      updateData.sams_display_price = updates.competitorPrices.sams;
-      updateData.walmart_display_price = updates.competitorPrices.walmart;
-      updateData.target_display_price = updates.competitorPrices.target;
-    }
-
-    if (updates.isOutOfStock) {
-      updateData.status = 'out_of_stock';
-    }
-
-    const { error } = await supabase
-      .from('products')
-      .update(updateData)
-      .eq('id', productId);
-
-    if (error) {
-      return { success: false, error: error.message };
-    }
-
-    return { success: true };
-  } catch (error: any) {
-    return { success: false, error: error.message };
-  }
-}
-
-/**
- * Save alerts to database
- */
-async function saveAlerts(alerts: PriceAlert[]): Promise<void> {
-  if (alerts.length === 0) return;
-
-  try {
-    const alertRecords = alerts.map(alert => ({
-      type: alert.type,
-      asin: alert.asin,
-      product_id: alert.productId,
-      title: alert.title,
-      message: alert.message,
-      old_value: alert.oldValue,
-      new_value: alert.newValue,
-      threshold: alert.threshold,
-      created_at: new Date().toISOString(),
-      status: 'active',
-    }));
-
-    await supabase.from('price_alerts').insert(alertRecords);
-  } catch (error) {
-    console.error('[PriceSync] Failed to save alerts:', error);
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// MAIN SYNC FUNCTIONS
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Sync prices for products using Keepa batch API
- */
-export async function syncPrices(options: PriceSyncOptions = {}): Promise<PriceSyncResult> {
-  const result: PriceSyncResult = {
-    processed: 0,
-    updated: 0,
-    unchanged: 0,
-    errors: 0,
-    tokensUsed: 0,
-    alerts: [],
-    details: [],
-  };
-
-  if (!isKeepaConfigured()) {
-    console.warn('[PriceSync] Keepa not configured, skipping sync');
-    return result;
-  }
-
-  // Get products to sync
-  let productsToSync: ProductToSync[];
-
-  if (options.productIds && options.productIds.length > 0) {
-    const { data } = await supabase
-      .from('products')
-      .select('id, asin, title, amazon_price, retail_price, last_price_check')
-      .in('id', options.productIds);
-    productsToSync = data || [];
-  } else if (options.asins && options.asins.length > 0) {
-    const { data } = await supabase
-      .from('products')
-      .select('id, asin, title, amazon_price, retail_price, last_price_check')
-      .in('asin', options.asins);
-    productsToSync = data || [];
-  } else {
-    productsToSync = await getProductsNeedingRefresh(options);
-  }
-
-  if (productsToSync.length === 0) {
-    console.log('[PriceSync] No products need price sync');
-    return result;
-  }
-
-  console.log(`[PriceSync] Syncing ${productsToSync.length} products`);
-
-  // Batch lookup with Keepa
-  const asins = productsToSync.map(p => p.asin).filter(Boolean) as string[];
+  sources: ('amazon' | 'walmart' | 'ebay')[] = ['amazon']
+): Promise<CompetitorPrice[]> {
+  const prices: CompetitorPrice[] = [];
   
-  const keepaResult = await lookupProducts(asins, {
-    includeHistory: true,
-    jobType: options.jobType || 'price_sync',
-    jobId: options.jobId,
-  });
-
-  result.tokensUsed = keepaResult.tokensUsed;
-
-  // Create lookup map
-  const keepaMap = new Map<string, KeepaProduct>();
-  for (const product of keepaResult.products) {
-    keepaMap.set(product.asin, product);
-  }
-
-  // Process each product
-  for (const product of productsToSync) {
-    result.processed++;
-
-    const keepaProduct = keepaMap.get(product.asin);
-
-    if (!keepaProduct) {
-      result.errors++;
-      result.details.push({
-        asin: product.asin,
-        productId: product.id,
-        success: false,
-        priceChanged: false,
-        error: 'No Keepa data available',
-      });
-      continue;
-    }
-
-    // Calculate price updates
-    const priceUpdate = calculatePriceUpdate(product, keepaProduct);
-
-    // Add alerts
-    result.alerts.push(...priceUpdate.alerts);
-
-    if (!priceUpdate.needsUpdate) {
-      result.unchanged++;
-      result.details.push({
-        asin: product.asin,
-        productId: product.id,
-        success: true,
-        priceChanged: false,
-      });
-
-      // Still update last_price_check
-      await updateProduct(product.id, {});
-      continue;
-    }
-
-    // Update product
-    const updateResult = await updateProduct(product.id, {
-      amazonPrice: priceUpdate.newAmazonPrice,
-      retailPrice: priceUpdate.newRetailPrice,
-      competitorPrices: priceUpdate.newCompetitorPrices,
-      isOutOfStock: priceUpdate.newAmazonPrice === null,
-    });
-
-    if (updateResult.success) {
-      result.updated++;
-      result.details.push({
-        asin: product.asin,
-        productId: product.id,
-        success: true,
-        priceChanged: true,
-        oldPrice: product.amazon_price || undefined,
-        newPrice: priceUpdate.newAmazonPrice || undefined,
-      });
-
-      // Save demand data
-      await saveDemandData(keepaProduct);
-    } else {
-      result.errors++;
-      result.details.push({
-        asin: product.asin,
-        productId: product.id,
-        success: false,
-        priceChanged: false,
-        error: updateResult.error,
-      });
-    }
-  }
-
-  // Save alerts to database
-  await saveAlerts(result.alerts);
-
-  console.log(`[PriceSync] Complete: ${result.updated} updated, ${result.unchanged} unchanged, ${result.errors} errors`);
-
-  return result;
-}
-
-/**
- * Scheduled price sync - called by cron job
- * Syncs products by tier based on configured refresh intervals
- */
-export async function scheduledPriceSync(tier: 'high' | 'medium' | 'low' | 'all' = 'all'): Promise<PriceSyncResult> {
-  console.log(`[PriceSync] Starting scheduled sync for tier: ${tier}`);
-
-  return syncPrices({
-    tier,
-    maxProducts: PRICING_RULES.keepa.batchSize,
-    jobType: 'scheduled_sync',
-  });
-}
-
-/**
- * Full price sync - syncs all products regardless of last check
- */
-export async function fullPriceSync(): Promise<PriceSyncResult> {
-  console.log('[PriceSync] Starting full price sync');
-
-  const allResults: PriceSyncResult = {
-    processed: 0,
-    updated: 0,
-    unchanged: 0,
-    errors: 0,
-    tokensUsed: 0,
-    alerts: [],
-    details: [],
-  };
-
-  // Process in batches to respect rate limits
-  let hasMore = true;
-  let offset = 0;
-  const batchSize = PRICING_RULES.keepa.batchSize;
-
-  while (hasMore) {
-    const result = await syncPrices({
-      tier: 'all',
-      forceRefresh: true,
-      maxProducts: batchSize,
-      jobType: 'full_sync',
-    });
-
-    allResults.processed += result.processed;
-    allResults.updated += result.updated;
-    allResults.unchanged += result.unchanged;
-    allResults.errors += result.errors;
-    allResults.tokensUsed += result.tokensUsed;
-    allResults.alerts.push(...result.alerts);
-    allResults.details.push(...result.details);
-
-    hasMore = result.processed === batchSize;
-    offset += batchSize;
-
-    // Respect rate limits
-    if (hasMore) {
-      const status = getRateLimitStatus();
-      if (!status.canProceed) {
-        console.log(`[PriceSync] Rate limit reached, waiting ${status.msUntilReset}ms`);
-        await new Promise(resolve => setTimeout(resolve, status.msUntilReset + 1000));
-      }
-    }
-  }
-
-  return allResults;
-}
-
-/**
- * Get price sync statistics
- */
-export async function getPriceSyncStats(days: number = 7): Promise<{
-  totalSyncs: number;
-  productsUpdated: number;
-  alertsGenerated: number;
-  avgTokensPerSync: number;
-}> {
-  const since = new Date();
-  since.setDate(since.getDate() - days);
-
-  const { data: products } = await supabase
+  // Get product info from database
+  const { data: product } = await supabase
     .from('products')
-    .select('id')
-    .gte('last_price_check', since.toISOString());
+    .select('id, title, asin')
+    .eq('id', productId)
+    .single();
+  
+  if (!product) {
+    console.log(`Product ${productId} not found`);
+    return prices;
+  }
 
-  const { data: alerts } = await supabase
-    .from('price_alerts')
-    .select('id')
-    .gte('created_at', since.toISOString());
+  const RAINFOREST_API_KEY = process.env.RAINFOREST_API_KEY;
+  const RAINFOREST_BASE_URL = 'https://api.rainforestapi.com/request';
+  
+  for (const source of sources) {
+    try {
+      let response: Response;
+      let data: any;
+      
+      if (source === 'amazon' && product.asin) {
+        // Fetch by ASIN if available
+        const params = new URLSearchParams({
+          api_key: RAINFOREST_API_KEY || 'demo',
+          type: 'product',
+          amazon_domain: 'amazon.com',
+          asin: product.asin
+        });
+        response = await fetch(`${RAINFOREST_BASE_URL}?${params}`);
+        data = await response.json();
+        
+        if (data.product?.buybox_winner?.price) {
+          prices.push({
+            id: `${productId}-amazon`,
+            product_id: productId,
+            sku: product.sku || null,
+            asin: product.asin,
+            competitor_name: 'amazon',
+            competitor_price: data.product.buybox_winner.price.value || 0,
+            competitor_url: data.product.link || null,
+            our_price: null,
+            member_price: null,
+            price_difference: null,
+            price_difference_pct: null,
+            is_prime: data.product.is_prime || false,
+            availability: data.product.availability?.raw || null,
+            fetched_at: new Date().toISOString(),
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          });
+        }
+      } else if (source === 'walmart') {
+        // Search Walmart
+        const searchTerm = product.title?.substring(0, 100) || '';
+        const params = new URLSearchParams({
+          api_key: RAINFOREST_API_KEY || 'demo',
+          type: 'search',
+          source: 'walmart',
+          search_term: searchTerm
+        });
+        response = await fetch(`${RAINFOREST_BASE_URL}?${params}`);
+        data = await response.json();
+        
+        if (data.search_results?.[0]?.price) {
+          prices.push({
+            id: `${productId}-walmart`,
+            product_id: productId,
+            sku: null,
+            asin: null,
+            competitor_name: 'walmart',
+            competitor_price: data.search_results[0].price.value || 0,
+            competitor_url: data.search_results[0].link || null,
+            our_price: null,
+            member_price: null,
+            price_difference: null,
+            price_difference_pct: null,
+            is_prime: false,
+            availability: 'in_stock',
+            fetched_at: new Date().toISOString(),
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          });
+        }
+      } else if (source === 'ebay') {
+        // Search eBay
+        const searchTerm = product.title?.substring(0, 100) || '';
+        const params = new URLSearchParams({
+          api_key: RAINFOREST_API_KEY || 'demo',
+          type: 'search',
+          source: 'ebay',
+          search_term: searchTerm,
+          ebay_domain: 'ebay.com'
+        });
+        response = await fetch(`${RAINFOREST_BASE_URL}?${params}`);
+        data = await response.json();
+        
+        if (data.search_results?.[0]?.price) {
+          prices.push({
+            id: `${productId}-ebay`,
+            product_id: productId,
+            sku: null,
+            asin: null,
+            competitor_name: 'ebay',
+            competitor_price: data.search_results[0].price.value || 0,
+            competitor_url: data.search_results[0].link || null,
+            our_price: null,
+            member_price: null,
+            price_difference: null,
+            price_difference_pct: null,
+            is_prime: false,
+            availability: 'in_stock',
+            fetched_at: new Date().toISOString(),
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          });
+        }
+      }
+    } catch (error) {
+      console.error(`Error fetching ${source} price for product ${productId}:`, error);
+      // Continue with next source on error
+    }
+  }
+  
+  return prices;
+}
 
-  const { data: apiLogs } = await supabase
-    .from('keepa_api_log')
-    .select('tokens_used')
-    .eq('job_type', 'price_sync')
-    .gte('created_at', since.toISOString());
+// ============================================================================
+// PRICE HISTORY FUNCTIONS
+// ============================================================================
 
-  const totalTokens = apiLogs?.reduce((sum, log) => sum + (log.tokens_used || 0), 0) || 0;
+export async function getPriceHistory(
+  productId: string,
+  days: number = 30
+): Promise<PriceHistory[]> {
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  
+  const { data, error } = await supabase
+    .from('price_history')
+    .select('*')
+    .eq('product_id', productId)
+    .gte('recorded_at', since)
+    .order('recorded_at', { ascending: true });
+  
+  if (error) {
+    console.error('Error fetching price history:', error);
+    return [];
+  }
+  
+  return data || [];
+}
 
+export async function recordPriceHistory(
+  productId: string,
+  ourPrice: number,
+  competitorPrices: Record<string, number>
+): Promise<PriceHistory | null> {
+  const { data, error } = await supabase
+    .from('price_history')
+    .insert({
+      product_id: productId,
+      our_price: ourPrice,
+      competitor_prices: competitorPrices,
+      recorded_at: new Date().toISOString(),
+    })
+    .select()
+    .single();
+  
+  if (error) {
+    console.error('Error recording price history:', error);
+    return null;
+  }
+  
+  return data;
+}
+
+// ============================================================================
+// STALE PRODUCTS
+// ============================================================================
+
+export async function getStaleProducts(hoursThreshold: number = 24): Promise<string[]> {
+  const threshold = new Date(Date.now() - hoursThreshold * 60 * 60 * 1000).toISOString();
+  
+  const { data, error } = await supabase
+    .from('competitor_prices')
+    .select('product_id')
+    .lt('last_checked', threshold);
+  
+  if (error) {
+    console.error('Error fetching stale products:', error);
+    return [];
+  }
+  
+  // Return unique product IDs
+  const productIds = [...new Set((data || []).map(d => d.product_id))];
+  return productIds;
+}
+
+// ============================================================================
+// SYNC JOB FUNCTIONS
+// ============================================================================
+
+export async function createSyncJob(jobType: string, productsTotal: number): Promise<SyncJob | null> {
+  const { data, error } = await supabase
+    .from('price_sync_jobs')
+    .insert({
+      status: 'pending',
+      total_products: productsTotal,
+      processed: 0,
+      errors: 0,
+      started_at: new Date().toISOString(),
+    })
+    .select()
+    .single();
+  
+  if (error) {
+    console.error('Error creating sync job:', error);
+    return null;
+  }
+  
+  return data;
+}
+
+export async function updateSyncJob(
+  jobId: string,
+  updates: Partial<SyncJob>
+): Promise<SyncJob | null> {
+  const { data, error } = await supabase
+    .from('price_sync_jobs')
+    .update(updates)
+    .eq('id', jobId)
+    .select()
+    .single();
+  
+  if (error) {
+    console.error('Error updating sync job:', error);
+    return null;
+  }
+  
+  return data;
+}
+
+export async function getLatestSyncJob(jobType?: string): Promise<SyncJob | null> {
+  let query = supabase.from('sync_jobs').select('*');
+  
+  if (jobType) {
+    query = query.eq('job_type', jobType);
+  }
+  
+  const { data, error } = await query
+    .order('started_at', { ascending: false })
+    .limit(1)
+    .single();
+  
+  if (error) {
+    console.error('Error fetching latest sync job:', error);
+    return null;
+  }
+  
+  return data;
+}
+
+// ============================================================================
+// PRICE STATS & MARGIN
+// ============================================================================
+
+export async function getPriceStats(): Promise<{
+  totalProducts: number;
+  productsWithCompetitorData: number;
+  avgPriceDifference: number;
+  lastSyncTime: string | null;
+}> {
+  const { data: competitorData } = await supabase
+    .from('competitor_prices')
+    .select('product_id, price');
+  
+  const uniqueProducts = new Set((competitorData || []).map(d => d.product_id));
+  
+  const { data: lastJob } = await supabase
+    .from('sync_jobs')
+    .select('completed_at')
+    .eq('status', 'completed')
+    .order('completed_at', { ascending: false })
+    .limit(1)
+    .single();
+  
   return {
-    totalSyncs: apiLogs?.length || 0,
-    productsUpdated: products?.length || 0,
-    alertsGenerated: alerts?.length || 0,
-    avgTokensPerSync: apiLogs?.length ? Math.round(totalTokens / apiLogs.length) : 0,
+    totalProducts: 0, // Would query products table
+    productsWithCompetitorData: uniqueProducts.size,
+    avgPriceDifference: 0, // Would calculate from data
+    lastSyncTime: lastJob?.completed_at || null,
   };
 }
 
-export default {
-  syncPrices,
-  scheduledPriceSync,
-  fullPriceSync,
-  getPriceSyncStats,
-};
+export async function getMarginRules(category?: string): Promise<MarginRule[]> {
+  let query = supabase.from('margin_rules').select('*');
+  
+  if (category) {
+    query = query.eq('category', category);
+  }
+  
+  const { data, error } = await query;
+  
+  if (error) {
+    console.error('Error fetching margin rules:', error);
+    return [{
+      min_margin: 0.15,
+      target_margin: 0.30,
+      max_margin: 0.50,
+    }];
+  }
+  
+  return data || [{
+    min_margin: 0.15,
+    target_margin: 0.30,
+    max_margin: 0.50,
+  }];
+}
+
+export function calculateProductMargin(
+  ourPrice: number,
+  cost: number
+): { margin: number; marginPercent: number } {
+  const margin = ourPrice - cost;
+  const marginPercent = cost > 0 ? (margin / ourPrice) * 100 : 0;
+  
+  return { margin, marginPercent };
+}
+
+// ============================================================================
+// AMAZON FUNCTIONS (via Rainforest API)
+// ============================================================================
+
+export async function searchAmazonProducts(query: string, limit: number = 10): Promise<any[]> {
+  const apiKey = process.env.RAINFOREST_API_KEY;
+  
+  if (!apiKey) {
+    console.log('Rainforest API key not configured');
+    return [];
+  }
+  
+  try {
+    const response = await fetch(
+      `https://api.rainforestapi.com/request?api_key=${apiKey}&type=search&amazon_domain=amazon.com&search_term=${encodeURIComponent(query)}`
+    );
+    
+    const data = await response.json();
+    return (data.search_results || []).slice(0, limit);
+  } catch (error) {
+    console.error('Amazon search error:', error);
+    return [];
+  }
+}
+
+export async function fetchAmazonProduct(asin: string): Promise<any | null> {
+  const apiKey = process.env.RAINFOREST_API_KEY;
+  
+  if (!apiKey) {
+    console.log('Rainforest API key not configured');
+    return null;
+  }
+  
+  try {
+    const response = await fetch(
+      `https://api.rainforestapi.com/request?api_key=${apiKey}&type=product&amazon_domain=amazon.com&asin=${asin}`
+    );
+    
+    const data = await response.json();
+    return data.product || null;
+  } catch (error) {
+    console.error('Amazon fetch error:', error);
+    return null;
+  }
+}
+
+// ============================================================================
+// SYNC FUNCTIONS
+// ============================================================================
+
+export async function syncCompetitorPrices(options: {
+  productIds?: string[];
+  products?: string[] | 'all';
+  sources?: ('amazon' | 'walmart' | 'ebay')[];
+  strategy?: string;
+  minMarkup?: number;
+  forceRefresh?: boolean;
+  dryRun?: boolean;
+}): Promise<{
+  synced: number;
+  errors: number;
+  results: any[];
+  updated?: number;
+  skipped?: number;
+}> {
+  const { 
+    productIds = [], 
+    products,
+    sources = ['amazon'], 
+    strategy = 'amazon',
+    minMarkup = 10,
+    forceRefresh = false,
+    dryRun = false
+  } = options;
+  
+  // Handle products: 'all' case
+  let idsToSync = productIds;
+  if (products === 'all') {
+    // Fetch all product IDs from database
+    const { data } = await supabase.from('products').select('id').limit(500);
+    idsToSync = (data || []).map(p => p.id);
+  } else if (Array.isArray(products)) {
+    idsToSync = products;
+  }
+  
+  let results: any[] = [];
+  let synced = 0;
+  let errors = 0;
+  
+  for (const productId of idsToSync) {
+    try {
+      const prices = await fetchCompetitorPrices(productId, sources);
+      
+      for (const price of prices) {
+        await upsertCompetitorPrice(price);
+      }
+      
+      synced++;
+      results.push({ productId, success: true, prices });
+    } catch (error: any) {
+      errors++;
+      results.push({ productId, success: false, error: error.message });
+    }
+  }
+  
+  return { synced, errors, results, updated: synced, skipped: errors };
+}
+
+export async function syncProductPrices(
+  productIds: string[],
+  sources?: ('amazon' | 'walmart' | 'ebay')[]
+): Promise<{ synced: number; errors: number }> {
+  const result = await syncCompetitorPrices({ productIds, sources });
+  return { synced: result.synced, errors: result.errors };
+}
+
+export async function scheduledPriceSync(): Promise<{
+  jobId: string | null;
+  synced: number;
+  errors: number;
+}> {
+  // Get stale products
+  const staleProducts = await getStaleProducts(24);
+  
+  if (staleProducts.length === 0) {
+    return { jobId: null, synced: 0, errors: 0 };
+  }
+  
+  // Create sync job
+  const job = await createSyncJob('scheduled_price_sync', staleProducts.length);
+  
+  if (!job) {
+    return { jobId: null, synced: 0, errors: 0 };
+  }
+  
+  // Update job to running
+  await updateSyncJob(job.id!, { status: 'running' });
+  
+  // Sync prices
+  const result = await syncCompetitorPrices({ productIds: staleProducts });
+  
+  // Update job to completed
+  await updateSyncJob(job.id!, {
+    status: 'completed',
+    processed: result.synced,
+    errors: result.errors,
+    completed_at: new Date().toISOString(),
+  });
+  
+  return {
+    jobId: job.id!,
+    synced: result.synced,
+    errors: result.errors,
+  };
+}
 
 

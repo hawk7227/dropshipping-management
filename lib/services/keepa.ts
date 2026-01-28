@@ -1,1106 +1,697 @@
 // lib/services/keepa.ts
-// ═══════════════════════════════════════════════════════════════════════════
-// Complete Keepa API client with rate limiting, queue management, and batch processing
-// Handles 60 tokens/minute limit for batch product processing
-// ═══════════════════════════════════════════════════════════════════════════
+// Keepa API service for Amazon historical price and sales rank data
+// Falls back to mock data when API key is not configured
 
-import { createClient } from '@supabase/supabase-js';
-import { 
-  PRICING_RULES, 
-  isValidASIN, 
-  calculateDemandScore,
-  estimateMonthlySales,
-  calculateProcessingPriority,
-} from '@/lib/config/pricing-rules';
+import type { ApiResponse } from '@/types/errors';
+import type { KeepaProductData } from '@/types';
+import { createSuccessResponse, createResponseFromCode, logError } from '@/lib/utils/api-error-handler';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CONFIGURATION
 // ═══════════════════════════════════════════════════════════════════════════
 
-const KEEPA_API_KEY = process.env.KEEPA_API_KEY || '';
-const KEEPA_BASE_URL = 'https://api.keepa.com';
+const KEEPA_API_BASE = 'https://api.keepa.com';
+
+// Token costs per request type
+export const KEEPA_COSTS = {
+  product: 1,           // Single product lookup
+  productBatch: 1,      // Per product in batch (up to 100)
+  deals: 10,            // Deals endpoint
+  categories: 0,        // Free
+  trackingAdd: 1,       // Add product tracking
+  trackingList: 0,      // Free
+} as const;
+
+// Rate limiting
+const RATE_LIMIT = {
+  maxBatchSize: 100,    // Max ASINs per batch request
+  requestsPerMinute: 60,
+} as const;
 
 // Keepa uses minutes since epoch (Jan 1, 2011)
 const KEEPA_EPOCH = new Date('2011-01-01T00:00:00Z').getTime();
-
-// Supabase client
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '',
-  process.env.SUPABASE_SERVICE_ROLE_KEY || ''
-);
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TYPES
 // ═══════════════════════════════════════════════════════════════════════════
 
-export interface KeepaProduct {
-  asin: string;
-  title: string;
-  brand: string | null;
-  category: string | null;
-  categoryTree: string[];
-  
-  // Current prices (in dollars)
-  currentAmazonPrice: number | null;
-  currentNewPrice: number | null;
-  currentUsedPrice: number | null;
-  
-  // Price history (recent values in dollars)
-  priceHistory: { timestamp: Date; price: number }[];
-  
-  // Sales rank / BSR
-  currentBSR: number | null;
-  bsrCategory: string | null;
-  bsrHistory: { timestamp: Date; rank: number }[];
-  
-  // Stock status
-  isInStock: boolean;
-  stockStatus: 'in_stock' | 'out_of_stock' | 'limited' | 'unknown';
-  
-  // Prime and sellers
-  isPrime: boolean;
-  sellerCount: number;
-  
-  // Reviews
-  rating: number | null;
-  reviewCount: number | null;
-  
-  // Demand metrics (calculated)
-  demandScore: number;
-  bsrVolatility: number;
-  estimatedMonthlySales: number;
-  
-  // Metadata
-  lastUpdate: Date;
-  imageUrl: string | null;
-  amazonUrl: string;
+interface KeepaConfig {
+  apiKey: string | undefined;
+  isConfigured: boolean;
 }
 
-interface KeepaQueueItem {
-  asin: string;
-  priority: number;
-  originalCost: number;
-  originalPrice: number;
-  addedAt: Date;
-  jobId?: string;
-  jobType?: string;
-}
-
-interface QueueStatus {
-  queueLength: number;
-  isProcessing: boolean;
-  tokensUsed: number;
-  tokensRemaining: number;
-  canProceed: boolean;
-  estimatedTimeMinutes: number;
-  nextResetAt: Date | null;
-}
-
-interface KeepaRawProduct {
+// Keepa API response format
+interface KeepaAPIProduct {
   asin: string;
   title?: string;
-  brand?: string;
-  categoryTree?: Array<{ catId: number; name: string }>;
-  rootCategory?: number;
-  csv?: Array<number[] | null>;
+  domainId?: number;
+  csv?: Array<number[] | null>; // Price history arrays
+  salesRankReference?: number;
   salesRanks?: Record<string, number[]>;
-  lastUpdate?: number;
-  imagesCSV?: string;
   stats?: {
     avg30?: number[];
     avg90?: number[];
+    avg180?: number[];
+    avg365?: number[];
     current?: number[];
   };
 }
 
-interface KeepaRawResponse {
+interface KeepaAPIResponse {
   timestamp?: number;
   tokensLeft?: number;
   refillIn?: number;
   refillRate?: number;
-  products?: KeepaRawProduct[];
-  error?: { type: string; message: string };
-}
-
-interface RateLimitState {
-  tokensUsed: number;
-  windowStart: number;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// STATE MANAGEMENT
-// ═══════════════════════════════════════════════════════════════════════════
-
-let rateLimitState: RateLimitState = {
-  tokensUsed: 0,
-  windowStart: Date.now(),
-};
-
-let processingQueue: KeepaQueueItem[] = [];
-let isProcessing = false;
-
-// ═══════════════════════════════════════════════════════════════════════════
-// RATE LIMITING
-// ═══════════════════════════════════════════════════════════════════════════
-
-function resetRateLimitIfNeeded(): void {
-  const now = Date.now();
-  const windowDuration = 60 * 1000; // 1 minute
-  
-  if (now - rateLimitState.windowStart >= windowDuration) {
-    rateLimitState = {
-      tokensUsed: 0,
-      windowStart: now,
-    };
-  }
-}
-
-function recordTokenUsage(tokens: number): void {
-  resetRateLimitIfNeeded();
-  rateLimitState.tokensUsed += tokens;
-}
-
-export function getRateLimitStatus(): {
-  tokensUsed: number;
-  tokensRemaining: number;
-  msUntilReset: number;
-  canProceed: boolean;
-} {
-  resetRateLimitIfNeeded();
-  
-  const tokensRemaining = PRICING_RULES.keepa.tokensPerMinute - rateLimitState.tokensUsed;
-  const msUntilReset = Math.max(0, 60000 - (Date.now() - rateLimitState.windowStart));
-  
-  return {
-    tokensUsed: rateLimitState.tokensUsed,
-    tokensRemaining,
-    msUntilReset,
-    canProceed: tokensRemaining > 0,
+  products?: KeepaAPIProduct[];
+  error?: {
+    message: string;
+    type?: string;
   };
 }
 
-async function waitForRateLimit(tokensNeeded: number): Promise<void> {
-  const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-  
-  while (true) {
-    resetRateLimitIfNeeded();
-    const status = getRateLimitStatus();
-    
-    if (status.tokensRemaining >= tokensNeeded) {
-      return;
-    }
-    
-    console.log(`[Keepa] Rate limit: waiting ${status.msUntilReset}ms for reset...`);
-    await sleep(Math.min(status.msUntilReset + 100, 60000));
-  }
+export interface KeepaServiceResult {
+  products: KeepaProductData[];
+  tokensUsed: number;
+  tokensRemaining?: number;
+  isMock: boolean;
+  found: number;
+  notFound: string[];
 }
 
-export function checkRateLimit(): { canProceed: boolean; waitMs: number } {
-  const status = getRateLimitStatus();
+export interface SingleKeepaResult {
+  product: KeepaProductData | null;
+  tokensUsed: number;
+  isMock: boolean;
+}
+
+export interface PriceHistoryPoint {
+  timestamp: number;
+  price: number;
+  date: Date;
+}
+
+export interface EnrichedKeepaData extends KeepaProductData {
+  priceHistoryDates: PriceHistoryPoint[];
+  lowestPrice30d?: number;
+  highestPrice30d?: number;
+  priceStability: 'stable' | 'volatile' | 'unknown';
+  salesRankTrend: 'improving' | 'declining' | 'stable' | 'unknown';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CONFIGURATION HELPER
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Get Keepa API configuration status
+ */
+export function getKeepaConfig(): KeepaConfig {
+  const apiKey = process.env.KEEPA_API_KEY;
   return {
-    canProceed: status.canProceed,
-    waitMs: status.canProceed ? 0 : status.msUntilReset,
+    apiKey,
+    isConfigured: !!apiKey && apiKey.length > 0,
   };
 }
 
-export function recordApiCall(tokens: number): void {
-  recordTokenUsage(tokens);
+/**
+ * Check if Keepa API is configured
+ */
+export function hasKeepaConfig(): boolean {
+  return getKeepaConfig().isConfigured;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// DATA PARSING
+// TIME CONVERSION UTILITIES
 // ═══════════════════════════════════════════════════════════════════════════
 
-export function keepaTimeToDate(keepaTime: number): Date {
-  if (keepaTime < 0) return new Date(0);
-  return new Date(KEEPA_EPOCH + keepaTime * 60 * 1000);
+/**
+ * Convert Keepa time (minutes since Jan 1, 2011) to JavaScript timestamp
+ */
+export function keepaTimeToTimestamp(keepaTime: number): number {
+  return KEEPA_EPOCH + (keepaTime * 60 * 1000);
 }
 
-export function parseKeepaTimestamp(keepaTime: number): Date {
-  return keepaTimeToDate(keepaTime);
+/**
+ * Convert JavaScript timestamp to Keepa time
+ */
+export function timestampToKeepaTime(timestamp: number): number {
+  return Math.floor((timestamp - KEEPA_EPOCH) / (60 * 1000));
 }
 
-export function keepaPriceToUSD(keepaPrice: number): number | null {
-  if (keepaPrice < 0) return null;
+/**
+ * Convert Keepa price (in cents) to dollars
+ */
+export function keepaPriceToDollars(keepaPrice: number): number {
+  if (keepaPrice < 0) return 0; // Keepa uses -1 for unavailable
   return keepaPrice / 100;
 }
 
-export function parseKeepaPrice(keepaPrice: number): number {
-  const result = keepaPriceToUSD(keepaPrice);
-  return result ?? 0;
+// ═══════════════════════════════════════════════════════════════════════════
+// MOCK DATA GENERATOR
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Generate seeded random number for consistent mock data
+ */
+function seededRandom(seed: string): number {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    const char = seed.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return Math.abs((Math.sin(hash) + 1) / 2);
 }
 
-function parseKeepaTimeSeries(
-  csv: number[] | undefined,
-  valueTransform: (v: number) => number | null = (v) => v
-): { timestamp: Date; value: number }[] {
-  if (!csv || csv.length < 2) return [];
+/**
+ * Generate mock price history for a product
+ */
+function generateMockPriceHistory(
+  asin: string,
+  basePrice: number,
+  days: number = 90
+): Array<{ timestamp: number; price: number }> {
+  const history: Array<{ timestamp: number; price: number }> = [];
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
   
-  const result: { timestamp: Date; value: number }[] = [];
+  // Generate price points every 3 days for volatility
+  for (let i = days; i >= 0; i -= 3) {
+    const timestamp = now - (i * dayMs);
+    // Price varies by ±15% around base price
+    const random = seededRandom(asin + i.toString());
+    const variance = (random - 0.5) * 0.3; // -15% to +15%
+    const price = Math.round((basePrice * (1 + variance)) * 100) / 100;
+    
+    history.push({ timestamp, price: Math.max(price, 1) });
+  }
   
-  for (let i = 0; i < csv.length - 1; i += 2) {
-    const time = csv[i];
-    const value = csv[i + 1];
-    
-    if (time < 0 || value < 0) continue;
-    
-    const transformedValue = valueTransform(value);
-    if (transformedValue !== null) {
-      result.push({
-        timestamp: keepaTimeToDate(time),
-        value: transformedValue,
-      });
+  return history;
+}
+
+/**
+ * Generate mock Keepa product data
+ */
+function generateMockKeepaProduct(asin: string): KeepaProductData {
+  const random = seededRandom(asin);
+  const basePrice = 5 + (random * 20); // $5-$25
+  const history = generateMockPriceHistory(asin, basePrice, 90);
+  
+  // Calculate averages from mock history
+  const last30Days = history.filter(h => h.timestamp > Date.now() - (30 * 24 * 60 * 60 * 1000));
+  const last90Days = history;
+  
+  const avg30d = last30Days.length > 0
+    ? Math.round((last30Days.reduce((sum, h) => sum + h.price, 0) / last30Days.length) * 100) / 100
+    : undefined;
+  
+  const avg90d = last90Days.length > 0
+    ? Math.round((last90Days.reduce((sum, h) => sum + h.price, 0) / last90Days.length) * 100) / 100
+    : undefined;
+
+  // Sales rank between 1000 and 100000
+  const salesRank = Math.floor(1000 + (random * 99000));
+
+  return {
+    asin,
+    priceHistory: history,
+    salesRank,
+    avgPrice30d: avg30d,
+    avgPrice90d: avg90d,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// API RESPONSE TRANSFORMER
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Transform Keepa API response to our format
+ * Keepa uses array indices for different price types:
+ * 0: Amazon Price
+ * 1: New 3rd Party
+ * 2: Used
+ * etc.
+ */
+function transformKeepaProduct(apiProduct: KeepaAPIProduct): KeepaProductData {
+  const priceHistory: Array<{ timestamp: number; price: number }> = [];
+  
+  // Extract Amazon price history (index 0 in csv array)
+  if (apiProduct.csv && apiProduct.csv[0]) {
+    const amazonPrices = apiProduct.csv[0];
+    // Keepa stores as [time, price, time, price, ...]
+    for (let i = 0; i < amazonPrices.length - 1; i += 2) {
+      const keepaTime = amazonPrices[i];
+      const keepaPrice = amazonPrices[i + 1];
+      
+      if (keepaTime !== -1 && keepaPrice !== -1) {
+        priceHistory.push({
+          timestamp: keepaTimeToTimestamp(keepaTime),
+          price: keepaPriceToDollars(keepaPrice),
+        });
+      }
     }
   }
-  
-  return result;
-}
 
-function calculateBSRVolatility(bsrHistory: { timestamp: Date; value: number }[]): number {
-  if (bsrHistory.length < 2) return 0;
+  // Extract averages
+  let avgPrice30d: number | undefined;
+  let avgPrice90d: number | undefined;
   
-  const values = bsrHistory.map(h => h.value).filter(v => v > 0);
-  if (values.length < 2) return 0;
-  
-  const avg = values.reduce((a, b) => a + b, 0) / values.length;
-  const maxDeviation = Math.max(...values.map(v => Math.abs(v - avg)));
-  
-  return Math.round((maxDeviation / avg) * 100);
-}
+  if (apiProduct.stats) {
+    // Amazon price average is index 0
+    if (apiProduct.stats.avg30?.[0] && apiProduct.stats.avg30[0] > 0) {
+      avgPrice30d = keepaPriceToDollars(apiProduct.stats.avg30[0]);
+    }
+    if (apiProduct.stats.avg90?.[0] && apiProduct.stats.avg90[0] > 0) {
+      avgPrice90d = keepaPriceToDollars(apiProduct.stats.avg90[0]);
+    }
+  }
 
-function detectSeasonality(salesRankHistory: number[]): {
-  isSeasonalProduct: boolean;
-  peakMonth: number | null;
-  lowMonth: number | null;
-  seasonalityScore: number;
-} {
-  if (salesRankHistory.length < 30) {
-    return { isSeasonalProduct: false, peakMonth: null, lowMonth: null, seasonalityScore: 0 };
-  }
-  
-  // Group by month and calculate averages
-  const monthlyAvg: Record<number, { sum: number; count: number }> = {};
-  
-  salesRankHistory.forEach((rank, index) => {
-    const month = index % 12;
-    if (!monthlyAvg[month]) monthlyAvg[month] = { sum: 0, count: 0 };
-    monthlyAvg[month].sum += rank;
-    monthlyAvg[month].count++;
-  });
-  
-  const monthlyAverages = Object.entries(monthlyAvg).map(([month, data]) => ({
-    month: parseInt(month),
-    avg: data.sum / data.count,
-  }));
-  
-  if (monthlyAverages.length < 4) {
-    return { isSeasonalProduct: false, peakMonth: null, lowMonth: null, seasonalityScore: 0 };
-  }
-  
-  const sorted = [...monthlyAverages].sort((a, b) => a.avg - b.avg);
-  const peakMonth = sorted[0].month; // Lowest BSR = peak sales
-  const lowMonth = sorted[sorted.length - 1].month; // Highest BSR = low sales
-  
-  const overallAvg = monthlyAverages.reduce((a, b) => a + b.avg, 0) / monthlyAverages.length;
-  const variance = monthlyAverages.reduce((a, b) => a + Math.pow(b.avg - overallAvg, 2), 0) / monthlyAverages.length;
-  const seasonalityScore = Math.min(100, Math.round((Math.sqrt(variance) / overallAvg) * 100));
-  
   return {
-    isSeasonalProduct: seasonalityScore > 30,
-    peakMonth,
-    lowMonth,
-    seasonalityScore,
+    asin: apiProduct.asin,
+    priceHistory,
+    salesRank: apiProduct.salesRankReference ?? null,
+    avgPrice30d,
+    avgPrice90d,
   };
 }
 
-function transformKeepaProduct(raw: KeepaRawProduct): KeepaProduct {
-  // Parse price history (Amazon price is index 0)
-  const amazonPriceHistory = raw.csv?.[0] 
-    ? parseKeepaTimeSeries(raw.csv[0], keepaPriceToUSD)
-    : [];
-  
-  // Parse BSR history
-  const bsrData = raw.salesRanks 
-    ? Object.values(raw.salesRanks)[0] 
-    : undefined;
-  const bsrHistory = bsrData 
-    ? parseKeepaTimeSeries(bsrData, (v) => v > 0 ? v : null)
-    : [];
-  
-  // Get current values
-  const currentAmazonPrice = amazonPriceHistory.length > 0 
-    ? amazonPriceHistory[amazonPriceHistory.length - 1].value 
-    : null;
-  
-  const currentBSR = bsrHistory.length > 0 
-    ? bsrHistory[bsrHistory.length - 1].value 
-    : null;
-  
-  // Calculate demand metrics
-  const bsrVolatility = calculateBSRVolatility(bsrHistory);
-  const estimatedSales = estimateMonthlySales(currentBSR);
-  const demandScore = calculateDemandScore({
-    currentBSR,
-    bsrHistory: bsrHistory.map(h => h.value),
-    priceHistory: amazonPriceHistory.map(h => h.price),
-  });
-  
-  // Get category info
-  const categoryTree = raw.categoryTree?.map(c => c.name) || [];
-  const category = categoryTree.length > 0 ? categoryTree[0] : null;
-  const bsrCategory = raw.salesRanks ? Object.keys(raw.salesRanks)[0] : null;
-  
-  // Get image URL
-  const imageUrl = raw.imagesCSV 
-    ? `https://images-na.ssl-images-amazon.com/images/I/${raw.imagesCSV.split(',')[0]}`
-    : null;
-  
-  // Determine stock status
-  const isInStock = currentAmazonPrice !== null && currentAmazonPrice > 0;
-  let stockStatus: 'in_stock' | 'out_of_stock' | 'limited' | 'unknown' = 'unknown';
-  if (isInStock) {
-    stockStatus = 'in_stock';
-  } else if (currentAmazonPrice === null) {
-    stockStatus = 'out_of_stock';
-  }
-  
-  // Get rating and review count from stats
-  const rating = raw.stats?.current?.[18] ? raw.stats.current[18] / 10 : null;
-  const reviewCount = raw.stats?.current?.[19] || null;
-  
-  return {
-    asin: raw.asin,
-    title: raw.title || '',
-    brand: raw.brand || null,
-    category,
-    categoryTree,
-    
-    currentAmazonPrice,
-    currentNewPrice: raw.csv?.[1] ? keepaPriceToUSD(raw.csv[1][raw.csv[1].length - 1]) : null,
-    currentUsedPrice: raw.csv?.[2] ? keepaPriceToUSD(raw.csv[2][raw.csv[2].length - 1]) : null,
-    
-    priceHistory: amazonPriceHistory.map(h => ({ timestamp: h.timestamp, price: h.value })),
-    
-    currentBSR,
-    bsrCategory,
-    bsrHistory: bsrHistory.map(h => ({ timestamp: h.timestamp, rank: h.value })),
-    
-    isInStock,
-    stockStatus,
-    
-    isPrime: isInStock, // Assume Prime if Amazon has stock
-    sellerCount: 1, // Would need additional API call for accurate count
-    
-    rating,
-    reviewCount,
-    demandScore,
-    bsrVolatility,
-    estimatedMonthlySales: estimatedSales,
-    
-    lastUpdate: raw.lastUpdate ? keepaTimeToDate(raw.lastUpdate) : new Date(),
-    imageUrl,
-    amazonUrl: `https://www.amazon.com/dp/${raw.asin}`,
-  };
-}
-
-export function keepaToProduct(keepaData: any): KeepaProduct {
-  return transformKeepaProduct(keepaData);
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
-// API CALLS
+// API REQUEST HELPERS
 // ═══════════════════════════════════════════════════════════════════════════
 
-async function keepaRequest(
+/**
+ * Make request to Keepa API
+ */
+async function makeKeepaRequest(
   endpoint: string,
-  params: Record<string, string | number>
-): Promise<KeepaRawResponse> {
-  if (!KEEPA_API_KEY) {
-    throw new Error('KEEPA_API_KEY not configured');
+  params: Record<string, string>
+): Promise<ApiResponse<KeepaAPIResponse>> {
+  const config = getKeepaConfig();
+  
+  if (!config.isConfigured) {
+    return createResponseFromCode('KEEPA_001');
   }
-  
-  const url = new URL(`${KEEPA_BASE_URL}/${endpoint}`);
-  url.searchParams.set('key', KEEPA_API_KEY);
-  
-  for (const [key, value] of Object.entries(params)) {
-    url.searchParams.set(key, String(value));
-  }
-  
-  console.log(`[Keepa] Request: ${endpoint}`, Object.keys(params));
-  
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), PRICING_RULES.keepa.requestTimeoutMs);
-  
+
   try {
+    const url = new URL(`${KEEPA_API_BASE}/${endpoint}`);
+    url.searchParams.set('key', config.apiKey!);
+    
+    for (const [key, value] of Object.entries(params)) {
+      url.searchParams.set(key, value);
+    }
+
     const response = await fetch(url.toString(), {
       method: 'GET',
-      signal: controller.signal,
+      headers: {
+        'Accept': 'application/json',
+      },
     });
-    
-    clearTimeout(timeout);
-    
+
     if (!response.ok) {
-      throw new Error(`Keepa API error: ${response.status} ${response.statusText}`);
+      if (response.status === 401 || response.status === 403) {
+        return createResponseFromCode('KEEPA_002');
+      }
+      if (response.status === 429) {
+        return createResponseFromCode('KEEPA_004');
+      }
+      if (response.status === 402) {
+        return createResponseFromCode('KEEPA_003');
+      }
+      return createResponseFromCode('KEEPA_001');
     }
-    
-    const data = await response.json() as KeepaRawResponse;
-    
+
+    const data = await response.json() as KeepaAPIResponse;
+
     if (data.error) {
-      throw new Error(`Keepa API error: ${data.error.type} - ${data.error.message}`);
+      logError('KEEPA_002', new Error(data.error.message));
+      if (data.error.type === 'UNAUTHORIZED') {
+        return createResponseFromCode('KEEPA_002');
+      }
+      if (data.error.type === 'INSUFFICIENT_TOKENS') {
+        return createResponseFromCode('KEEPA_003');
+      }
+      return createResponseFromCode('KEEPA_004');
     }
-    
-    return data;
-  } catch (error: any) {
-    clearTimeout(timeout);
-    
-    if (error.name === 'AbortError') {
-      throw new Error('Keepa API request timed out');
-    }
-    
-    throw error;
-  }
-}
 
-async function logApiCall(
-  tokensUsed: number,
-  asinsRequested: number,
-  asinsReturned: number,
-  jobType: string | null,
-  jobId: string | null,
-  success: boolean,
-  errorMessage: string | null = null,
-  durationMs: number = 0
-): Promise<void> {
-  try {
-    await supabase.from('keepa_api_log').insert({
-      tokens_used: tokensUsed,
-      asins_requested: asinsRequested,
-      asins_returned: asinsReturned,
-      asin_count: asinsRequested,
-      job_type: jobType,
-      job_id: jobId,
-      success,
-      error_message: errorMessage,
-      duration_ms: durationMs,
-      estimated_cost_usd: tokensUsed * PRICING_RULES.apiCosts.keepa.tokenCostUsd,
-      requested_at: new Date().toISOString(),
-    });
+    return createSuccessResponse(data);
   } catch (error) {
-    console.error('[Keepa] Failed to log API call:', error);
+    logError('KEEPA_004', error instanceof Error ? error : new Error(String(error)));
+    return createResponseFromCode('KEEPA_004');
   }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// PUBLIC API FUNCTIONS
+// PUBLIC API: SINGLE PRODUCT LOOKUP
 // ═══════════════════════════════════════════════════════════════════════════
 
-export async function lookupProduct(
+/**
+ * Get historical price data for a single ASIN
+ */
+export async function getProductHistory(
   asin: string,
   options: {
-    includeHistory?: boolean;
-    jobType?: string;
-    jobId?: string;
+    domain?: number; // 1 = US (amazon.com)
+    days?: number;   // History days (default 90)
   } = {}
-): Promise<{ success: boolean; product?: KeepaProduct; error?: string }> {
-  if (!isValidASIN(asin)) {
-    return { success: false, error: `Invalid ASIN format: ${asin}` };
-  }
-  
-  const tokensNeeded = PRICING_RULES.keepa.tokenCosts.product;
-  await waitForRateLimit(tokensNeeded);
-  
-  const startTime = Date.now();
-  
-  try {
-    const historyDays = options.includeHistory ? PRICING_RULES.keepa.historyDays : 0;
-    
-    const response = await keepaRequest('product', {
-      domain: PRICING_RULES.keepa.domains.US,
-      asin,
-      stats: historyDays,
-      history: options.includeHistory ? 1 : 0,
-      offers: 0,
+): Promise<ApiResponse<SingleKeepaResult>> {
+  const { domain = 1, days = 90 } = options;
+  const config = getKeepaConfig();
+
+  // Validate ASIN format
+  if (!/^B[A-Z0-9]{9}$/.test(asin)) {
+    return createSuccessResponse({
+      product: null,
+      tokensUsed: 0,
+      isMock: !config.isConfigured,
     });
-    
-    recordTokenUsage(tokensNeeded);
-    
-    const duration = Date.now() - startTime;
-    
-    if (!response.products || response.products.length === 0) {
-      await logApiCall(tokensNeeded, 1, 0, options.jobType || null, options.jobId || null, false, 'Product not found', duration);
-      return { success: false, error: 'Product not found' };
-    }
-    
-    const product = transformKeepaProduct(response.products[0]);
-    
-    await logApiCall(tokensNeeded, 1, 1, options.jobType || null, options.jobId || null, true, null, duration);
-    
-    return { success: true, product };
-    
-  } catch (error: any) {
-    const duration = Date.now() - startTime;
-    await logApiCall(tokensNeeded, 1, 0, options.jobType || null, options.jobId || null, false, error.message, duration);
-    return { success: false, error: error.message };
   }
+
+  // MOCK MODE
+  if (!config.isConfigured) {
+    console.log(`[Keepa] Using mock data for ASIN: ${asin}`);
+    
+    return createSuccessResponse({
+      product: generateMockKeepaProduct(asin),
+      tokensUsed: 0,
+      isMock: true,
+    });
+  }
+
+  // LIVE MODE
+  const response = await makeKeepaRequest('product', {
+    domain: domain.toString(),
+    asin: asin,
+    history: '1',
+    days: days.toString(),
+    stats: days.toString(),
+  });
+
+  if (!response.success) {
+    return response as ApiResponse<SingleKeepaResult>;
+  }
+
+  const data = response.data;
+  const product = data.products?.[0] ? transformKeepaProduct(data.products[0]) : null;
+
+  return createSuccessResponse({
+    product,
+    tokensUsed: KEEPA_COSTS.product,
+    isMock: false,
+  });
 }
 
-export async function lookupSingleProduct(asin: string): Promise<KeepaProduct | null> {
-  const result = await lookupProduct(asin, { includeHistory: true });
-  return result.success && result.product ? result.product : null;
-}
+// ═══════════════════════════════════════════════════════════════════════════
+// PUBLIC API: BATCH PRODUCT LOOKUP
+// ═══════════════════════════════════════════════════════════════════════════
 
-export async function lookupProducts(
+/**
+ * Get historical price data for multiple ASINs
+ * Automatically batches for efficiency
+ */
+export async function getProductsHistory(
   asins: string[],
   options: {
-    includeHistory?: boolean;
-    jobType?: string;
-    jobId?: string;
+    domain?: number;
+    days?: number;
   } = {}
-): Promise<{
-  success: boolean;
-  products: KeepaProduct[];
-  errors: Array<{ asin: string; error: string }>;
-  tokensUsed: number;
-}> {
-  // Validate and dedupe ASINs
-  const validAsins = [...new Set(asins.filter(isValidASIN))];
-  
+): Promise<ApiResponse<KeepaServiceResult>> {
+  const { domain = 1, days = 90 } = options;
+  const config = getKeepaConfig();
+
+  // Filter valid ASINs
+  const validAsins = asins.filter(asin => /^B[A-Z0-9]{9}$/.test(asin));
+  const invalidAsins = asins.filter(asin => !/^B[A-Z0-9]{9}$/.test(asin));
+
   if (validAsins.length === 0) {
-    return { success: false, products: [], errors: [], tokensUsed: 0 };
+    return createSuccessResponse({
+      products: [],
+      tokensUsed: 0,
+      tokensRemaining: undefined,
+      isMock: !config.isConfigured,
+      found: 0,
+      notFound: invalidAsins,
+    });
   }
-  
-  // Split into batches of max 100
-  const batchSize = PRICING_RULES.keepa.batchSize;
+
+  // MOCK MODE
+  if (!config.isConfigured) {
+    console.log(`[Keepa] Using mock data for ${validAsins.length} ASINs`);
+    
+    const products = validAsins.map(asin => generateMockKeepaProduct(asin));
+    
+    return createSuccessResponse({
+      products,
+      tokensUsed: 0,
+      tokensRemaining: undefined,
+      isMock: true,
+      found: products.length,
+      notFound: invalidAsins,
+    });
+  }
+
+  // LIVE MODE: Process in batches
+  const products: KeepaProductData[] = [];
+  const notFound: string[] = [...invalidAsins];
+  let totalTokens = 0;
+  let tokensRemaining: number | undefined;
+
+  // Split into batches
   const batches: string[][] = [];
-  
-  for (let i = 0; i < validAsins.length; i += batchSize) {
-    batches.push(validAsins.slice(i, i + batchSize));
+  for (let i = 0; i < validAsins.length; i += RATE_LIMIT.maxBatchSize) {
+    batches.push(validAsins.slice(i, i + RATE_LIMIT.maxBatchSize));
   }
-  
-  const allProducts: KeepaProduct[] = [];
-  const allErrors: Array<{ asin: string; error: string }> = [];
-  let totalTokensUsed = 0;
-  
+
+  // Process each batch
   for (const batch of batches) {
-    const tokensNeeded = batch.length * PRICING_RULES.keepa.tokenCosts.productBatch;
-    await waitForRateLimit(tokensNeeded);
-    
-    const startTime = Date.now();
-    
-    try {
-      const historyDays = options.includeHistory ? PRICING_RULES.keepa.historyDays : 0;
+    const response = await makeKeepaRequest('product', {
+      domain: domain.toString(),
+      asin: batch.join(','),
+      history: '1',
+      days: days.toString(),
+      stats: days.toString(),
+    });
+
+    if (!response.success) {
+      // On error, mark all batch items as not found but continue
+      notFound.push(...batch);
+      continue;
+    }
+
+    const data = response.data;
+    tokensRemaining = data.tokensLeft;
+    totalTokens += batch.length * KEEPA_COSTS.productBatch;
+
+    if (data.products) {
+      const foundAsins = new Set<string>();
+      for (const apiProduct of data.products) {
+        products.push(transformKeepaProduct(apiProduct));
+        foundAsins.add(apiProduct.asin);
+      }
       
-      const response = await keepaRequest('product', {
-        domain: PRICING_RULES.keepa.domains.US,
-        asin: batch.join(','),
-        stats: historyDays,
-        history: options.includeHistory ? 1 : 0,
-        offers: 0,
-      });
-      
-      recordTokenUsage(tokensNeeded);
-      totalTokensUsed += tokensNeeded;
-      
-      const duration = Date.now() - startTime;
-      
-      if (response.products) {
-        const products = response.products.map(transformKeepaProduct);
-        allProducts.push(...products);
-        
-        // Track which ASINs weren't found
-        const foundAsins = new Set(products.map(p => p.asin));
-        for (const asin of batch) {
-          if (!foundAsins.has(asin)) {
-            allErrors.push({ asin, error: 'Product not found' });
-          }
+      // Track ASINs not returned
+      for (const asin of batch) {
+        if (!foundAsins.has(asin)) {
+          notFound.push(asin);
         }
       }
-      
-      await logApiCall(
-        tokensNeeded,
-        batch.length,
-        response.products?.length || 0,
-        options.jobType || null,
-        options.jobId || null,
-        true,
-        null,
-        duration
-      );
-      
-    } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      for (const asin of batch) {
-        allErrors.push({ asin, error: error.message });
-      }
-      
-      await logApiCall(
-        tokensNeeded,
-        batch.length,
-        0,
-        options.jobType || null,
-        options.jobId || null,
-        false,
-        error.message,
-        duration
-      );
     }
   }
-  
-  return {
-    success: allProducts.length > 0,
-    products: allProducts,
-    errors: allErrors,
-    tokensUsed: totalTokensUsed,
-  };
-}
 
-export async function getBestSellers(
-  categoryId: string,
-  options: {
-    jobType?: string;
-    jobId?: string;
-  } = {}
-): Promise<{ success: boolean; products: KeepaProduct[]; error?: string }> {
-  const tokensNeeded = PRICING_RULES.keepa.tokenCosts.bestSellers;
-  await waitForRateLimit(tokensNeeded);
-  
-  const startTime = Date.now();
-  
-  try {
-    const response = await keepaRequest('bestsellers', {
-      domain: PRICING_RULES.keepa.domains.US,
-      category: categoryId,
-    });
-    
-    recordTokenUsage(tokensNeeded);
-    
-    const duration = Date.now() - startTime;
-    
-    // Best sellers returns ASIN list, need to look up details
-    if (response.products) {
-      const products = response.products.map(transformKeepaProduct);
-      await logApiCall(tokensNeeded, products.length, products.length, options.jobType || null, options.jobId || null, true, null, duration);
-      return { success: true, products };
-    }
-    
-    return { success: false, products: [], error: 'No best sellers found' };
-    
-  } catch (error: any) {
-    const duration = Date.now() - startTime;
-    await logApiCall(tokensNeeded, 0, 0, options.jobType || null, options.jobId || null, false, error.message, duration);
-    return { success: false, products: [], error: error.message };
-  }
-}
-
-export async function getDeals(options: {
-  priceMin?: number;
-  priceMax?: number;
-  percentOff?: number;
-  jobType?: string;
-  jobId?: string;
-} = {}): Promise<{ success: boolean; products: KeepaProduct[]; error?: string }> {
-  const tokensNeeded = PRICING_RULES.keepa.tokenCosts.deals;
-  await waitForRateLimit(tokensNeeded);
-  
-  const startTime = Date.now();
-  
-  try {
-    const params: Record<string, string | number> = {
-      domain: PRICING_RULES.keepa.domains.US,
-    };
-    
-    if (options.priceMin) params.priceMin = Math.round(options.priceMin * 100);
-    if (options.priceMax) params.priceMax = Math.round(options.priceMax * 100);
-    if (options.percentOff) params.percentOff = options.percentOff;
-    
-    const response = await keepaRequest('deals', params);
-    
-    recordTokenUsage(tokensNeeded);
-    
-    const duration = Date.now() - startTime;
-    
-    if (response.products) {
-      const products = response.products.map(transformKeepaProduct);
-      await logApiCall(tokensNeeded, products.length, products.length, options.jobType || null, options.jobId || null, true, null, duration);
-      return { success: true, products };
-    }
-    
-    return { success: false, products: [], error: 'No deals found' };
-    
-  } catch (error: any) {
-    const duration = Date.now() - startTime;
-    await logApiCall(tokensNeeded, 0, 0, options.jobType || null, options.jobId || null, false, error.message, duration);
-    return { success: false, products: [], error: error.message };
-  }
+  return createSuccessResponse({
+    products,
+    tokensUsed: totalTokens,
+    tokensRemaining,
+    isMock: false,
+    found: products.length,
+    notFound,
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// QUEUE MANAGEMENT
+// PUBLIC API: PRICE ANALYSIS
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * Add items to the processing queue
- * Items are sorted by priority (higher = process first)
+ * Analyze price history and return enriched data
  */
-export function addToQueue(items: Array<{
-  asin: string;
-  originalCost?: number;
-  originalPrice?: number;
-  jobId?: string;
-  jobType?: string;
-}>): void {
-  const queueItems: KeepaQueueItem[] = items.map(item => ({
-    asin: item.asin,
-    priority: calculateProcessingPriority(
-      item.originalCost || 0,
-      item.originalPrice || 0,
-      'high-margin-first'
-    ),
-    originalCost: item.originalCost || 0,
-    originalPrice: item.originalPrice || 0,
-    addedAt: new Date(),
-    jobId: item.jobId,
-    jobType: item.jobType,
+export function analyzeHistory(product: KeepaProductData): EnrichedKeepaData {
+  const now = Date.now();
+  const thirtyDaysAgo = now - (30 * 24 * 60 * 60 * 1000);
+  
+  // Filter to last 30 days
+  const recent = product.priceHistory.filter(h => h.timestamp >= thirtyDaysAgo);
+  
+  // Convert to dates
+  const priceHistoryDates: PriceHistoryPoint[] = product.priceHistory.map(h => ({
+    ...h,
+    date: new Date(h.timestamp),
   }));
   
-  // Add to queue and sort by priority (highest first)
-  processingQueue.push(...queueItems);
-  processingQueue.sort((a, b) => b.priority - a.priority);
+  // Calculate 30-day min/max
+  let lowestPrice30d: number | undefined;
+  let highestPrice30d: number | undefined;
   
-  console.log(`[Keepa] Added ${items.length} items to queue. Queue size: ${processingQueue.length}`);
-}
+  if (recent.length > 0) {
+    const prices = recent.map(h => h.price);
+    lowestPrice30d = Math.min(...prices);
+    highestPrice30d = Math.max(...prices);
+  }
+  
+  // Calculate price stability
+  let priceStability: 'stable' | 'volatile' | 'unknown' = 'unknown';
+  
+  if (recent.length >= 3 && lowestPrice30d && highestPrice30d) {
+    const avgPrice = recent.reduce((sum, h) => sum + h.price, 0) / recent.length;
+    const variance = (highestPrice30d - lowestPrice30d) / avgPrice;
+    
+    if (variance < 0.10) {
+      priceStability = 'stable'; // Less than 10% variance
+    } else {
+      priceStability = 'volatile';
+    }
+  }
+  
+  // Determine sales rank trend (simplified)
+  let salesRankTrend: 'improving' | 'declining' | 'stable' | 'unknown' = 'unknown';
+  
+  if (product.salesRank !== null && product.salesRank !== undefined) {
+    // Lower sales rank = better
+    // Without historical rank data, we can't determine trend
+    // In a real implementation, we'd compare against historical rank
+    salesRankTrend = 'stable';
+  }
 
-/**
- * Get current queue status
- */
-export function getQueueStatus(): QueueStatus {
-  const status = getRateLimitStatus();
-  const tokensPerItem = PRICING_RULES.keepa.tokenCosts.productBatch;
-  const tokensPerMinute = PRICING_RULES.keepa.tokensPerMinute;
-  const itemsPerMinute = Math.floor(tokensPerMinute / tokensPerItem);
-  
   return {
-    queueLength: processingQueue.length,
-    isProcessing,
-    tokensUsed: status.tokensUsed,
-    tokensRemaining: status.tokensRemaining,
-    canProceed: status.canProceed,
-    estimatedTimeMinutes: Math.ceil(processingQueue.length / itemsPerMinute),
-    nextResetAt: status.msUntilReset > 0 
-      ? new Date(Date.now() + status.msUntilReset) 
-      : null,
+    ...product,
+    priceHistoryDates,
+    lowestPrice30d,
+    highestPrice30d,
+    priceStability,
+    salesRankTrend,
   };
 }
 
 /**
- * Process the next batch from the queue
+ * Check if current price is a good deal based on history
  */
-export async function processNextBatch(
-  options: {
-    jobType?: string;
-    jobId?: string;
-    onProgress?: (processed: number, total: number) => void;
-  } = {}
-): Promise<{
-  processed: KeepaProduct[];
-  errors: { asin: string; error: string }[];
-  remaining: number;
-}> {
-  const { jobType = 'queue', jobId = null, onProgress } = options;
+export function isPriceGoodDeal(
+  currentPrice: number,
+  history: KeepaProductData
+): { isGoodDeal: boolean; savingsPercent: number; reason: string } {
+  const enriched = analyzeHistory(history);
   
-  if (processingQueue.length === 0) {
-    return { processed: [], errors: [], remaining: 0 };
-  }
-  
-  if (isProcessing) {
-    console.log('[Keepa] Already processing, skipping');
-    return { processed: [], errors: [], remaining: processingQueue.length };
-  }
-  
-  isProcessing = true;
-  
-  try {
-    // Take up to batchSize items from queue
-    const batchSize = PRICING_RULES.keepa.batchSize;
-    const batch = processingQueue.splice(0, batchSize);
-    
-    console.log(`[Keepa] Processing batch of ${batch.length} items`);
-    
-    const asins = batch.map(item => item.asin);
-    const result = await lookupProducts(asins, { includeHistory: true, jobType, jobId: jobId || undefined });
-    
-    if (onProgress) {
-      onProgress(batch.length, processingQueue.length + batch.length);
-    }
-    
+  if (!enriched.avgPrice90d) {
     return {
-      processed: result.products,
-      errors: result.errors,
-      remaining: processingQueue.length,
+      isGoodDeal: false,
+      savingsPercent: 0,
+      reason: 'Insufficient price history',
     };
-    
-  } finally {
-    isProcessing = false;
   }
+  
+  const avgPrice = enriched.avgPrice90d;
+  const savingsPercent = Math.round(((avgPrice - currentPrice) / avgPrice) * 100);
+  
+  if (savingsPercent >= 15) {
+    return {
+      isGoodDeal: true,
+      savingsPercent,
+      reason: `${savingsPercent}% below 90-day average ($${avgPrice.toFixed(2)})`,
+    };
+  }
+  
+  if (enriched.lowestPrice30d && currentPrice <= enriched.lowestPrice30d * 1.05) {
+    return {
+      isGoodDeal: true,
+      savingsPercent,
+      reason: `Near 30-day low of $${enriched.lowestPrice30d.toFixed(2)}`,
+    };
+  }
+  
+  return {
+    isGoodDeal: false,
+    savingsPercent,
+    reason: savingsPercent < 0 
+      ? `${Math.abs(savingsPercent)}% above average` 
+      : 'Price within normal range',
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COST ESTIMATION
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Estimate token cost for a Keepa operation
+ */
+export function estimateTokenCost(options: {
+  singleLookups?: number;
+  batchLookups?: number;
+  dealsRequests?: number;
+}): number {
+  const { singleLookups = 0, batchLookups = 0, dealsRequests = 0 } = options;
+  
+  return (
+    singleLookups * KEEPA_COSTS.product +
+    batchLookups * KEEPA_COSTS.productBatch +
+    dealsRequests * KEEPA_COSTS.deals
+  );
 }
 
 /**
- * Process entire queue with progress callback
+ * Get rate limit information
  */
-export async function processQueue(
-  options: {
-    jobType?: string;
-    jobId?: string;
-    onProgress?: (processed: number, total: number, products: KeepaProduct[]) => void;
-    onComplete?: (totalProcessed: number, totalErrors: number) => void;
-  } = {}
-): Promise<{
-  totalProcessed: number;
-  totalErrors: number;
-  products: KeepaProduct[];
-}> {
-  const allProducts: KeepaProduct[] = [];
-  let totalProcessed = 0;
-  let totalErrors = 0;
-  const originalTotal = processingQueue.length;
+export function getRateLimitInfo(): typeof RATE_LIMIT {
+  return { ...RATE_LIMIT };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SERVICE STATUS
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface KeepaServiceStatus {
+  isConfigured: boolean;
+  mode: 'live' | 'mock';
+  tokenCostPerProduct: number;
+  maxBatchSize: number;
+}
+
+/**
+ * Get service status information
+ */
+export function getServiceStatus(): KeepaServiceStatus {
+  const config = getKeepaConfig();
   
-  while (processingQueue.length > 0) {
-    const result = await processNextBatch({
-      jobType: options.jobType,
-      jobId: options.jobId,
+  return {
+    isConfigured: config.isConfigured,
+    mode: config.isConfigured ? 'live' : 'mock',
+    tokenCostPerProduct: KEEPA_COSTS.product,
+    maxBatchSize: RATE_LIMIT.maxBatchSize,
+  };
+}
+
+/**
+ * Get current token balance (requires API call)
+ */
+export async function getTokenBalance(): Promise<ApiResponse<{ tokensLeft: number; refillIn: number }>> {
+  const config = getKeepaConfig();
+  
+  if (!config.isConfigured) {
+    return createSuccessResponse({
+      tokensLeft: 0,
+      refillIn: 0,
     });
-    
-    allProducts.push(...result.processed);
-    totalProcessed += result.processed.length;
-    totalErrors += result.errors.length;
-    
-    if (options.onProgress) {
-      options.onProgress(totalProcessed, originalTotal, result.processed);
-    }
-    
-    // Respect rate limits between batches
-    const status = getRateLimitStatus();
-    if (!status.canProceed && processingQueue.length > 0) {
-      console.log(`[Keepa] Waiting ${status.msUntilReset}ms for rate limit reset`);
-      await new Promise(resolve => setTimeout(resolve, status.msUntilReset + 100));
-    }
   }
   
-  if (options.onComplete) {
-    options.onComplete(totalProcessed, totalErrors);
+  // Make a minimal request just to get token info
+  const response = await makeKeepaRequest('token', {});
+  
+  if (!response.success) {
+    return response as ApiResponse<{ tokensLeft: number; refillIn: number }>;
   }
   
-  return { totalProcessed, totalErrors, products: allProducts };
+  return createSuccessResponse({
+    tokensLeft: response.data.tokensLeft ?? 0,
+    refillIn: response.data.refillIn ?? 0,
+  });
 }
-
-/**
- * Clear the processing queue
- */
-export function clearQueue(): void {
-  const count = processingQueue.length;
-  processingQueue = [];
-  console.log(`[Keepa] Cleared ${count} items from queue`);
-}
-
-/**
- * Pause queue processing
- */
-export function pauseQueue(): void {
-  isProcessing = false;
-  console.log('[Keepa] Processing paused');
-}
-
-export function pauseProcessing(): void {
-  pauseQueue();
-}
-
-/**
- * Resume queue processing
- */
-export function resumeQueue(): void {
-  console.log('[Keepa] Processing resumed');
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// DEMAND DATA MANAGEMENT
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Save or update demand data for a product
- */
-export async function saveDemandData(product: KeepaProduct): Promise<void> {
-  try {
-    const bsrHistoryJson = product.bsrHistory.map(h => ({
-      timestamp: h.timestamp.toISOString(),
-      value: h.rank,
-    }));
-    
-    const priceHistoryJson = product.priceHistory.map(h => ({
-      timestamp: h.timestamp.toISOString(),
-      value: h.price,
-    }));
-    
-    // Calculate 30-day and 90-day averages from history
-    const now = new Date();
-    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-    const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
-    
-    const recent30 = product.bsrHistory.filter(h => h.timestamp >= thirtyDaysAgo);
-    const recent90 = product.bsrHistory.filter(h => h.timestamp >= ninetyDaysAgo);
-    
-    const avg30 = recent30.length > 0 
-      ? Math.round(recent30.reduce((a, b) => a + b.rank, 0) / recent30.length)
-      : null;
-    
-    const avg90 = recent90.length > 0
-      ? Math.round(recent90.reduce((a, b) => a + b.rank, 0) / recent90.length)
-      : null;
-    
-    // Determine BSR trend
-    let bsrTrend: 'improving' | 'declining' | 'stable' = 'stable';
-    if (avg30 !== null && avg90 !== null) {
-      const changePercent = ((avg90 - avg30) / avg90) * 100;
-      if (changePercent > 10) bsrTrend = 'improving';
-      else if (changePercent < -10) bsrTrend = 'declining';
-    }
-    
-    await supabase.from('product_demand').upsert({
-      asin: product.asin,
-      current_bsr: product.currentBSR,
-      avg_bsr_30d: avg30,
-      avg_bsr_90d: avg90,
-      bsr_volatility: product.bsrVolatility,
-      bsr_trend: bsrTrend,
-      demand_score: product.demandScore,
-      estimated_monthly_sales: product.estimatedMonthlySales,
-      stock_status: product.stockStatus,
-      bsr_history: bsrHistoryJson.slice(-90),
-      price_history: priceHistoryJson.slice(-90),
-      last_updated: new Date().toISOString(),
-      last_checked_at: new Date().toISOString(),
-    }, {
-      onConflict: 'asin',
-    });
-  } catch (error) {
-    console.error('[Keepa] Failed to save demand data:', error);
-  }
-}
-
-export async function getDemandData(asin: string): Promise<{
-  currentBSR: number | null;
-  demandScore: number | null;
-  estimatedMonthlySales: number | null;
-  lastUpdated: Date | null;
-  bsrTrend: string | null;
-  stockStatus: string | null;
-} | null> {
-  try {
-    const { data, error } = await supabase
-      .from('product_demand')
-      .select('current_bsr, demand_score, estimated_monthly_sales, last_updated, bsr_trend, stock_status')
-      .eq('asin', asin)
-      .single();
-    
-    if (error || !data) return null;
-    
-    return {
-      currentBSR: data.current_bsr,
-      demandScore: data.demand_score,
-      estimatedMonthlySales: data.estimated_monthly_sales,
-      lastUpdated: data.last_updated ? new Date(data.last_updated) : null,
-      bsrTrend: data.bsr_trend,
-      stockStatus: data.stock_status,
-    };
-  } catch {
-    return null;
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// API STATUS
-// ═══════════════════════════════════════════════════════════════════════════
-
-export function isKeepaConfigured(): boolean {
-  return !!KEEPA_API_KEY;
-}
-
-export async function testKeepaConnection(): Promise<{
-  success: boolean;
-  message: string;
-  tokensRemaining?: number;
-}> {
-  if (!KEEPA_API_KEY) {
-    return {
-      success: false,
-      message: 'KEEPA_API_KEY not configured in environment variables',
-    };
-  }
-  
-  try {
-    // Test with a known ASIN (Amazon Basics product)
-    const result = await lookupProduct('B07K5CXQJT', { jobType: 'test' });
-    
-    if (result.success) {
-      const status = getRateLimitStatus();
-      return {
-        success: true,
-        message: `Keepa API connected successfully. Tokens remaining: ${status.tokensRemaining}`,
-        tokensRemaining: status.tokensRemaining,
-      };
-    } else {
-      return {
-        success: false,
-        message: `Keepa API test failed: ${result.error}`,
-      };
-    }
-    
-  } catch (error: any) {
-    return {
-      success: false,
-      message: `Keepa API connection failed: ${error.message}`,
-    };
-  }
-}
-
-export default {
-  // API Functions
-  lookupProduct,
-  lookupSingleProduct,
-  lookupProducts,
-  getBestSellers,
-  getDeals,
-  
-  // Queue Management
-  addToQueue,
-  getQueueStatus,
-  processQueue,
-  processNextBatch,
-  clearQueue,
-  pauseQueue,
-  pauseProcessing,
-  resumeQueue,
-  
-  // Rate Limiting
-  checkRateLimit,
-  recordApiCall,
-  getRateLimitStatus,
-  
-  // Demand Analysis
-  calculateDemandScore,
-  detectSeasonality,
-  estimateMonthlySales,
-  saveDemandData,
-  getDemandData,
-  
-  // Data Transformation
-  keepaToProduct,
-  parseKeepaTimestamp,
-  parseKeepaPrice,
-  keepaTimeToDate,
-  keepaPriceToUSD,
-  
-  // Status
-  isKeepaConfigured,
-  testKeepaConnection,
-};
