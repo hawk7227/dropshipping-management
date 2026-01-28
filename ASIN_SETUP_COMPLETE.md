@@ -8,7 +8,7 @@ I've created a complete system for populating ASINs for your products. Here's wh
 
 ### **1. Database Schema Update**
 ✅ Added to `supabase/schema.sql`:
-- `asin` field (text) - Stores the 10-char Amazon ASIN
+- `asin` field (text) - Stores the 10-char Amazon ASINa
 - `competitor_link` field (text) - Stores full Amazon product URL
 - Index on `asin` for faster lookups
 
