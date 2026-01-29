@@ -355,6 +355,63 @@ export interface ChannelListing {
   updated_at: string;
 }
 
+export interface PlatformListing {
+  id: string;
+  product_id: string;
+  platform: string; // 'shopify', 'ebay', 'tiktok', 'google'
+  platform_listing_id: string;
+  platform_url: string | null;
+  status: 'active' | 'paused' | 'error' | 'pending';
+  synced_at: string | null;
+  sync_error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ShopifyQueue {
+  id: string;
+  product_ids: string[];
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  processed: number;
+  created: number;
+  updated: number;
+  failed: number;
+  error_log: Record<string, string>[] | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChannelPerformance {
+  id: string;
+  date: string;
+  channel: string;
+  orders: number;
+  revenue: number;
+  items_sold: number;
+  avg_order_value: number;
+  returns: number;
+  created_at: string;
+}
+
+export interface ChannelStatus {
+  name: string;
+  configured: boolean;
+  active: boolean;
+  listings_count: number;
+  last_sync: string | null;
+  monthly_revenue: number;
+}
+
+export interface SyncJobStatus {
+  total: number;
+  processed: number;
+  created: number;
+  updated: number;
+  failed: number;
+  status: string;
+  estimated_remaining_seconds: number;
+}
+
 export interface UnifiedOrder {
   id: string;
   channel: string;

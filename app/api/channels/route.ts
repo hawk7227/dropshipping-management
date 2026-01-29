@@ -1,20 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
-  getChannels,
-  updateChannel,
-  getChannelStatus,
-  createEbayListing,
-  getEbayOrders,
-  createTikTokListing,
-  getTikTokOrders,
-  generateGoogleFeed,
-  submitToGoogleMerchant,
-  syncAllChannelOrders,
-  getChannelOrders,
-  updateOrderFulfillment,
+  syncProductToShopify,
+  getShopifyOrders,
+  createShopifyQueueJob,
+  getShopifyQueueStatus,
+  generateEbayExport,
+  syncChannelOrders,
+  getUnifiedOrders,
   getChannelListings,
-  syncListingInventory,
-} from '@/lib/multichannel';
+  getChannelsStatus,
+} from '@/lib/services/channels-service';
 
 export async function GET(request: NextRequest) {
   try {
@@ -22,56 +17,62 @@ export async function GET(request: NextRequest) {
     const action = searchParams.get('action');
 
     switch (action) {
-      case 'channels': {
-        const channels = await getChannels();
-        return NextResponse.json({ data: channels });
-      }
-
-      case 'channel-status': {
-        const channelId = searchParams.get('channelId');
-        if (!channelId) {
-          return NextResponse.json({ error: 'channelId required' }, { status: 400 });
-        }
-        const status = await getChannelStatus(channelId);
+      case 'channels-status': {
+        const status = await getChannelsStatus();
         return NextResponse.json({ data: status });
       }
 
       case 'orders': {
-        const page = parseInt(searchParams.get('page') || '1');
-        const pageSize = parseInt(searchParams.get('pageSize') || '20');
-        const channelId = searchParams.get('channelId') || undefined;
+        const limit = parseInt(searchParams.get('limit') || '50');
+        const offset = parseInt(searchParams.get('offset') || '0');
+        const channel = searchParams.get('channel') || undefined;
         const status = searchParams.get('status') || undefined;
-        const result = await getChannelOrders(page, pageSize, channelId, status);
+        const date_from = searchParams.get('date_from') || undefined;
+        const date_to = searchParams.get('date_to') || undefined;
+
+        const result = await getUnifiedOrders(limit, offset, {
+          channel,
+          status,
+          date_from,
+          date_to,
+        });
         return NextResponse.json(result);
       }
 
       case 'listings': {
-        const page = parseInt(searchParams.get('page') || '1');
-        const pageSize = parseInt(searchParams.get('pageSize') || '20');
-        const channelId = searchParams.get('channelId') || undefined;
-        const status = searchParams.get('status') as 'active' | 'inactive' | 'pending' | 'error' | undefined;
-        const result = await getChannelListings(page, pageSize, channelId, status);
+        const limit = parseInt(searchParams.get('limit') || '50');
+        const offset = parseInt(searchParams.get('offset') || '0');
+        const platform = searchParams.get('platform') || undefined;
+        const status = searchParams.get('status') || undefined;
+
+        const result = await getChannelListings(limit, offset, {
+          channel: platform,
+          status,
+        });
         return NextResponse.json(result);
       }
 
-      case 'ebay-orders': {
-        const daysBack = parseInt(searchParams.get('daysBack') || '7');
-        const orders = await getEbayOrders(daysBack);
-        return NextResponse.json({ data: orders });
+      case 'queue-status': {
+        const jobId = searchParams.get('jobId');
+        if (!jobId) {
+          return NextResponse.json(
+            { error: 'jobId required' },
+            { status: 400 }
+          );
+        }
+        const status = await getShopifyQueueStatus(jobId);
+        return NextResponse.json({ data: status });
       }
 
-      case 'tiktok-orders': {
-        const daysBack = parseInt(searchParams.get('daysBack') || '7');
-        const orders = await getTikTokOrders(daysBack);
-        return NextResponse.json({ data: orders });
-      }
-
-      case 'google-feed': {
-        const feed = await generateGoogleFeed();
-        return new NextResponse(feed, {
+      case 'ebay-export': {
+        const productIds = searchParams.get('productIds')
+          ? JSON.parse(searchParams.get('productIds')!)
+          : undefined;
+        const csv = await generateEbayExport(productIds);
+        return new NextResponse(csv, {
           headers: {
-            'Content-Type': 'application/xml',
-            'Content-Disposition': 'attachment; filename="google-shopping-feed.xml"',
+            'Content-Type': 'text/csv',
+            'Content-Disposition': `attachment; filename="ebay-export-${new Date().toISOString().split('T')[0]}.csv"`,
           },
         });
       }
@@ -94,58 +95,47 @@ export async function POST(request: NextRequest) {
     const { action } = body;
 
     switch (action) {
-      case 'update-channel': {
-        const { channelId, updates } = body;
-        if (!channelId || !updates) {
-          return NextResponse.json({ error: 'channelId and updates required' }, { status: 400 });
+      case 'sync-shopify': {
+        const { productIds } = body;
+        if (!productIds || !Array.isArray(productIds)) {
+          return NextResponse.json(
+            { error: 'productIds array required' },
+            { status: 400 }
+          );
         }
-        const updated = await updateChannel(channelId, updates);
-        return NextResponse.json({ data: updated });
-      }
 
-      case 'create-ebay-listing': {
-        const { productId, listingConfig } = body;
-        if (!productId) {
-          return NextResponse.json({ error: 'productId required' }, { status: 400 });
-        }
-        const listing = await createEbayListing(productId, listingConfig);
-        return NextResponse.json({ data: listing });
-      }
-
-      case 'create-tiktok-listing': {
-        const { productId, listingConfig } = body;
-        if (!productId) {
-          return NextResponse.json({ error: 'productId required' }, { status: 400 });
-        }
-        const listing = await createTikTokListing(productId, listingConfig);
-        return NextResponse.json({ data: listing });
-      }
-
-      case 'submit-google-feed': {
-        const result = await submitToGoogleMerchant();
-        return NextResponse.json({ data: result });
+        const { job_id, status } = await createShopifyQueueJob(productIds);
+        return NextResponse.json({
+          data: { job_id, status, total: productIds.length },
+        });
       }
 
       case 'sync-orders': {
-        const result = await syncAllChannelOrders();
+        const result = await syncChannelOrders();
         return NextResponse.json({ data: result });
       }
 
-      case 'update-fulfillment': {
-        const { orderId, fulfillment } = body;
-        if (!orderId || !fulfillment) {
-          return NextResponse.json({ error: 'orderId and fulfillment required' }, { status: 400 });
-        }
-        const updated = await updateOrderFulfillment(orderId, fulfillment);
-        return NextResponse.json({ data: updated });
+      case 'export-ebay': {
+        const { productIds } = body;
+        const csv = await generateEbayExport(productIds);
+        return new NextResponse(csv, {
+          headers: {
+            'Content-Type': 'text/csv',
+            'Content-Disposition': `attachment; filename="ebay-export-${new Date().toISOString().split('T')[0]}.csv"`,
+          },
+        });
       }
 
-      case 'sync-inventory': {
-        const { productId, channelId } = body;
-        if (!productId) {
-          return NextResponse.json({ error: 'productId required' }, { status: 400 });
+      case 'sync-product-shopify': {
+        const { productId, productData } = body;
+        if (!productId || !productData) {
+          return NextResponse.json(
+            { error: 'productId and productData required' },
+            { status: 400 }
+          );
         }
-        const result = await syncListingInventory(productId, channelId);
+
+        const result = await syncProductToShopify(productId, productData);
         return NextResponse.json({ data: result });
       }
 
