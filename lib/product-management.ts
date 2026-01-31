@@ -64,11 +64,13 @@ export async function syncAllProducts(): Promise<{ synced: number; errors: numbe
       if (!response.ok) throw new Error(`API error: ${response.status}`);
 
       const data = await response.json();
+      console.log("Shopify DATA: ",data);
       const products = data.products || [];
 
       // Upsert products and variants
       for (const shopifyProduct of products) {
         try {
+          console.log(JSON.stringify(shopifyProduct));
           await upsertProduct(shopifyProduct);
           synced++;
         } catch (error) {

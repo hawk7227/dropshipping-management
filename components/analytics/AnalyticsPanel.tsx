@@ -91,9 +91,9 @@ export default function AnalyticsPanel() {
 
   const fetchOverview = useCallback(async () => {
     try {
-      const res = await fetch('/api/analytics?action=dashboard');
+      const res = await fetch('/api/dashboard');
       const data = await res.json();
-      if (data.success) {
+      if (data.data) {
         setOverview(data.data);
       }
     } catch (err) {
@@ -104,13 +104,40 @@ export default function AnalyticsPanel() {
   const fetchRevenueChart = useCallback(async () => {
     try {
       const days = dateRange === '7d' ? 7 : dateRange === '30d' ? 30 : dateRange === '90d' ? 90 : 365;
-      const res = await fetch(`/api/analytics?action=revenue-chart&days=${days}`);
+      const res = await fetch(`/api/analytics-advanced?type=revenue-chart&days=${days}`);
       const data = await res.json();
       if (data.success) {
         setRevenueChart(data.data);
       }
     } catch (err) {
       console.error('Failed to fetch revenue chart:', err);
+    }
+  }, [dateRange]);
+
+  const fetchScoreTrends = useCallback(async () => {
+    try {
+      const days = dateRange === '7d' ? 7 : dateRange === '30d' ? 30 : dateRange === '90d' ? 90 : 365;
+      const res = await fetch(`/api/analytics-advanced?type=score-trends&days=${days}`);
+      const data = await res.json();
+      if (data.success) {
+        setMemberGrowth(data.data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch score trends:', err);
+    }
+  }, [dateRange]);
+
+  const fetchHistoricalPricing = useCallback(async () => {
+    try {
+      const days = dateRange === '7d' ? 7 : dateRange === '30d' ? 30 : dateRange === '90d' ? 90 : 365;
+      const res = await fetch(`/api/analytics-advanced?type=historical-pricing&days=${days}`);
+      const data = await res.json();
+      if (data.success) {
+        // Use this for pricing trends
+        setMemberGrowth(data.data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch historical pricing:', err);
     }
   }, [dateRange]);
 

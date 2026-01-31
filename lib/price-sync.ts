@@ -128,7 +128,7 @@ export async function fetchCompetitorPrices(
         });
         response = await fetch(`${RAINFOREST_BASE_URL}?${params}`);
         data = await response.json();
-        
+        console.log("Amazon Data: ",data);
         if (data.product?.buybox_winner?.price) {
           prices.push({
             id: `${productId}-amazon`,

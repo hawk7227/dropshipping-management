@@ -435,13 +435,18 @@ export default function ProductsPage() {
       }
       
       const result = await response.json();
+      // Debug: log raw API response for troubleshooting
+      // eslint-disable-next-line no-console
+      console.debug('[ProductsPage] /api/products result:', result);
       
       if (!result.success) {
         throw new Error(result.error || 'API request failed');
       }
       
       // Map API response to Product format
-      const mappedProducts = (result.data || []).map((item: any) => ({
+      // result.data is an object with { products: [...], total: ..., etc. }
+      const productsArray = result.data?.products || result.data || [];
+      const mappedProducts = (Array.isArray(productsArray) ? productsArray : []).map((item: any) => ({
         id: item.id,
         shopify_product_id: item.id,
         title: item.title,
@@ -480,6 +485,9 @@ export default function ProductsPage() {
         admin_override_by: item.admin_override_by || null,
         admin_override_at: item.admin_override_at || null,
       }));
+      // Debug: mapped products count
+      // eslint-disable-next-line no-console
+      console.debug('[ProductsPage] mappedProducts count:', mappedProducts.length);
       
       dispatch({ type: 'SET_PRODUCTS', payload: mappedProducts });
     } catch (error) {

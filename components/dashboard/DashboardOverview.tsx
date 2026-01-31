@@ -66,7 +66,7 @@ export function DashboardOverviewPanel() {
     try {
       setLoading(true);
       setError(null);
-      const response = await fetch('/api/analytics?action=dashboard');
+      const response = await fetch('/api/dashboard');
       if (!response.ok) throw new Error('Failed to fetch dashboard');
       const result = await response.json();
       setData(result.data);

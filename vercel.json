@@ -1,8 +1,16 @@
 {
   "crons": [
     {
+      "path": "/api/cron?job=product-discovery",
+      "schedule": "0 4 * * *"
+    },
+    {
       "path": "/api/cron?job=price-sync",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron?job=full-price-sync",
+      "schedule": "0 3 * * *"
     },
     {
       "path": "/api/cron?job=shopify-sync",
@@ -17,15 +25,19 @@
       "schedule": "0 0 * * *"
     },
     {
-      "path": "/api/cron?job=full-price-sync",
-      "schedule": "0 3 * * *"
+      "path": "/api/cron?job=ai-scoring",
+      "schedule": "0 2 * * *"
     },
     {
-      "path": "/api/cron/omnipresence",
+      "path": "/api/cron?job=google-shopping",
+      "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/cron?job=omnipresence",
       "schedule": "0 6 * * *"
     },
     {
-      "path": "/api/cron/daily-learning",
+      "path": "/api/cron?job=daily-learning",
       "schedule": "0 23 * * *"
     }
   ],

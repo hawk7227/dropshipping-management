@@ -456,7 +456,8 @@ export default function PricesPage() {
 
       // Use products directly - Price Intelligence can track and analyze any product
       // Pricing data will be fetched and populated by the sync jobs
-      const products: Product[] = (result.data || []);
+      // result.data is an object with { products: [...], total: ..., etc. }
+      const products: Product[] = result.data?.products || (Array.isArray(result.data) ? result.data : []);
 
       dispatch({ type: 'SET_PRODUCTS', payload: products });
     } catch (error) {
@@ -480,7 +481,17 @@ export default function PricesPage() {
 
     try {
       // Get all product IDs to sync
-      const productIds = state.products.map(p => p.id);
+      const productIds = state.products.map(p => p.id).filter(Boolean);
+      
+      console.log('Refreshing prices for products:', { 
+        totalProducts: state.products.length, 
+        productIdsCount: productIds.length,
+        sampleIds: productIds.slice(0, 3),
+      });
+
+      if (!productIds || productIds.length === 0) {
+        throw new Error('No products found to sync. Make sure you have products loaded.');
+      }
       
       // Call the real sync API
       const response = await fetch('/api/prices?action=sync-all', {
@@ -497,6 +508,8 @@ export default function PricesPage() {
 
       const result = await response.json();
       
+      console.log('Sync result:', result);
+      
       if (!result.success) {
         throw new Error(result.error || 'Sync failed');
       }
@@ -505,6 +518,7 @@ export default function PricesPage() {
       await fetchProducts();
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Refresh error:', error);
       dispatch({
         type: 'SET_ERROR',
         payload: {
@@ -517,7 +531,7 @@ export default function PricesPage() {
     } finally {
       dispatch({ type: 'SET_REFRESHING', payload: false });
     }
-  }, [fetchProducts]);
+  }, [fetchProducts, state.products]);
 
   // Initial fetch
   useEffect(() => {

@@ -53,8 +53,11 @@ create table if not exists price_sync_jobs (
   started_at timestamptz,
   completed_at timestamptz,
   error_log jsonb,
-  created_at timestamptz default now()
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
 );
+
+create trigger price_sync_jobs_updated_at before update on price_sync_jobs for each row execute function update_updated_at();
 
 -- Margin alerts
 create table if not exists margin_alerts (
@@ -107,9 +110,13 @@ create table if not exists products (
   handle text not null,
   vendor text,
   product_type text,
+  brand text,
   status text not null default 'active',
   tags text[],
   category text,
+  main_image text,
+  current_price numeric(10,2),
+  compare_at_price numeric(10,2),
   body_html text,
   images jsonb,
   options jsonb,
@@ -186,6 +193,58 @@ create table if not exists product_imports (
   created_at timestamptz default now(),
   processed_at timestamptz
 );
+
+-- ==================================================
+-- PRODUCT DISCOVERY: demand, runs and rejection log
+-- ==================================================
+
+-- Product demand metrics (one row per product)
+create table if not exists product_demand (
+  id uuid primary key default gen_random_uuid(),
+  product_id text not null references products(id) on delete cascade,
+  asin text,
+  demand_tier text not null default 'low', -- e.g. high/medium/low
+  demand_score numeric(6,2) default 0, -- normalized demand score
+  volatility numeric(6,4) default 0, -- price volatility measure
+  current_bsr int,
+  last_evaluated_at timestamptz default now(),
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  unique(product_id)
+);
+
+create index if not exists idx_product_demand_product on product_demand(product_id);
+create index if not exists idx_product_demand_tier on product_demand(demand_tier);
+
+-- Discovery runs metadata
+create table if not exists discovery_runs (
+  id uuid primary key default gen_random_uuid(),
+  run_name text,
+  run_date timestamptz default now(),
+  source text,
+  products_found int default 0,
+  products_imported int default 0,
+  status text not null default 'pending', -- pending, running, completed, failed
+  error_log jsonb,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+create index if not exists idx_discovery_runs_date on discovery_runs(run_date desc);
+
+-- Rejection log for discovery/import pipeline
+create table if not exists rejection_log (
+  id uuid primary key default gen_random_uuid(),
+  product_id text references products(id) on delete set null,
+  asin text,
+  run_id uuid references discovery_runs(id) on delete set null,
+  reason text not null,
+  details jsonb,
+  created_at timestamptz default now()
+);
+
+create index if not exists idx_rejection_log_product on rejection_log(product_id);
+create index if not exists idx_rejection_log_run on rejection_log(run_id);
 
 -- =====================
 -- 3. SOCIAL & MARKETING

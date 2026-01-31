@@ -56,7 +56,7 @@ interface Alert {
 }
 
 const QUICK_ACTIONS = [
-  { label: 'Add Product', href: '/products?action=create', icon: '📦' },
+  { label: 'Products', href: '/products', icon: '📦' },
   { label: 'Sync Prices', href: '/prices?action=sync', icon: '💰' },
   { label: 'Create Post', href: '/social?action=create', icon: '📱' },
   { label: 'View Orders', href: '/channels', icon: '🛒' },
@@ -121,9 +121,37 @@ export default function DashboardPage() {
         // Fetch overview stats
         const overviewRes = await fetch('/api/analytics?action=overview');
         const overviewData = await overviewRes.json();
-        if (overviewData.success) {
-          setStats(overviewData.data);
+        let mergedStats = overviewData.success && overviewData.data ? overviewData.data : null;
+
+        // Also fetch total products count from products API (use pageSize=1 to get total)
+        try {
+          const productsRes = await fetch('/api/products?action=list&page=1&pageSize=1');
+          const productsData = await productsRes.json();
+          const productsTotal = productsData?.data?.total ?? productsData?.pagination?.total ?? 0;
+
+          if (mergedStats) {
+            mergedStats = {
+              ...mergedStats,
+              products: {
+                ...(mergedStats.products || {}),
+                active: productsTotal,
+              },
+            };
+          } else {
+            mergedStats = {
+              revenue: { today: 0, thisMonth: 0, monthOverMonthChange: 0 },
+              orders: { today: 0, pending: 0 },
+              members: { total: 0, active: 0, newThisMonth: 0 },
+              products: { active: productsTotal, lowStock: 0 },
+              priceTracking: { tracked: 0, avgSavings: 0 },
+            } as any;
+          }
+        } catch (err) {
+          // If product count fetch fails, fall back to overview value (if any)
+          console.warn('Failed to fetch products count:', err);
         }
+
+        if (mergedStats) setStats(mergedStats);
 
         // Fetch recent orders
         const ordersRes = await fetch('/api/channels?action=orders&limit=5');

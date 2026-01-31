@@ -1886,12 +1886,47 @@ export function PriceIntelligencePanel({
     priceDetailProduct: null,
   });
 
-  // Generate mock data on mount
+  // Fetch real price alerts and history on mount
   useEffect(() => {
-    const alerts = generateMockAlerts(products);
-    const history = generateMockHistory(products);
-    dispatch({ type: 'SET_ALERTS', payload: alerts });
-    dispatch({ type: 'SET_HISTORY', payload: history });
+    const fetchPriceData = async () => {
+      try {
+        dispatch({ type: 'SET_LOADING', payload: true });
+        
+        // Fetch price alerts from database
+        const alertsResponse = await fetch('/api/price-intelligence?type=alerts');
+        const alertsData = await alertsResponse.json();
+        
+        // Fetch price history from database
+        const historyResponse = await fetch('/api/price-intelligence?type=history');
+        const historyData = await historyResponse.json();
+        
+        if (alertsData.success) {
+          dispatch({ type: 'SET_ALERTS', payload: alertsData.data || [] });
+        }
+        
+        if (historyData.success) {
+          dispatch({ type: 'SET_HISTORY', payload: historyData.data || [] });
+        }
+        
+      } catch (error) {
+        console.error('Failed to fetch price data:', error);
+        dispatch({ 
+          type: 'SET_ERROR', 
+          payload: { 
+            message: 'Failed to load price data',
+            code: 'FETCH_ERROR',
+            details: error instanceof Error ? error.message : 'Unknown error',
+            suggestion: 'Please try refreshing the page',
+            severity: 'error' as const,
+            blocking: false
+          }
+        });
+      } finally {
+        dispatch({ type: 'SET_LOADING', payload: false });
+      }
+    };
+
+    fetchPriceData();
   }, [products]);
 
   // ─────────────────────────────────────────────────────────────────────────

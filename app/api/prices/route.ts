@@ -17,6 +17,7 @@ import {
   getMarginRules,
   calculateProductMargin,
   syncProductPrices,
+  syncCompetitorPrices,
   getPriceStats,
 } from '@/lib/price-sync';
 
@@ -449,10 +450,17 @@ export async function POST(request: NextRequest) {
       }
 
       case 'sync-all': {
-        const { productIds, batchSize = 10 } = body;
+        const { productIds, sources = ['amazon', 'walmart', 'ebay'] } = body;
+
+        if (!productIds || !Array.isArray(productIds) || productIds.length === 0) {
+          return NextResponse.json(
+            { success: false, error: 'Product IDs array required' },
+            { status: 400 }
+          );
+        }
 
         // Create sync job
-        const job = await createSyncJob('sync-all', productIds?.length || 0);
+        const job = await createSyncJob('sync-all', productIds.length);
 
         try {
           if (!job || !job.id) {
@@ -462,7 +470,8 @@ export async function POST(request: NextRequest) {
             );
           }
 
-          const result = await syncProductPrices(productIds, batchSize);
+          // Call the proper sync function that calls fetchCompetitorPrices
+          const result = await syncCompetitorPrices({ productIds, sources });
 
           await updateSyncJob(job.id, {
             status: 'completed',

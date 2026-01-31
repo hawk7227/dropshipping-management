@@ -268,6 +268,14 @@ export interface KeepaProductData {
   salesRank?: number | null;
   avgPrice30d?: number | null;
   avgPrice90d?: number | null;
+  // Additional fields provided by Keepa used across the system
+  rating?: number | null;
+  review_count?: number | null;
+  is_prime?: boolean;
+  // Current Amazon price (in dollars) — used as `cost_price` when importing
+  amazon_price?: number | null;
+  title?: string | null;
+  domainId?: number | null;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -2,9 +2,18 @@
 // Discovers products from Amazon via Rainforest API that meet 80%+ markup criteria
 // Auto-publishes to Shopify with proper pricing
 
+import { createClient } from '@supabase/supabase-js';
+import { PRICING_RULES, meetsDiscoveryCriteria as rulesMeetsDiscoveryCriteria, getRefreshInterval } from '@/lib/config/pricing-rules';
+import { getProductHistory } from '@/lib/services/keepa';
+
 const RAINFOREST_API_KEY = process.env.RAINFOREST_API_KEY!;
 const SHOPIFY_SHOP_DOMAIN = process.env.SHOPIFY_SHOP_DOMAIN!;
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN!;
+
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 
 // Discovery criteria
 const DISCOVERY_CONFIG = {
@@ -249,6 +258,7 @@ export async function discoverProducts(options?: {
   searchTerms?: string[];
   maxProducts?: number;
   dryRun?: boolean;
+  runId?: string | null;
 }): Promise<DiscoveryResult> {
   const {
     searchTerms = SEARCH_TERMS,
@@ -276,38 +286,89 @@ export async function discoverProducts(options?: {
       for (const item of searchResults) {
         if (result.found >= maxProducts) break;
 
-        // Quick filter on search results
-        const price = item.price?.value || 0;
-        if (price < DISCOVERY_CONFIG.minPrice || price > DISCOVERY_CONFIG.maxPrice) continue;
+        // Prefer Keepa lookup for robust data; fallback to Rainforest item data
+        const asin = item.asin;
+        let keepaRes;
+        try {
+          keepaRes = await getProductHistory(asin, { days: 90 });
+        } catch (e) {
+          keepaRes = null;
+        }
 
-        // Get detailed product info
-        const product = await getProductDetails(item.asin);
-        if (!product) continue;
+        let price = item.price?.value || 0;
+        let rating = item.rating || null;
+        let reviews = item.ratings_total || item.reviews_total || null;
+        let isPrime = item.is_prime || false;
+        let imageUrl = item.main_image?.link || '';
+        let title = item.title || term;
 
-        // Check criteria
-        if (!meetsDiscoveryCriteria(product)) continue;
+        if (keepaRes && keepaRes.success && keepaRes.data.product) {
+          const kp = keepaRes.data.product;
+          price = kp.amazon_price ?? price;
+          rating = kp.rating ?? rating;
+          reviews = kp.review_count ?? reviews;
+          isPrime = kp.is_prime ?? isPrime;
+          imageUrl = kp.priceHistory?.[0]?.imageUrl || imageUrl;
+          title = kp.title ?? title;
+        }
+
+        // Validate against configured rules
+        const { meets, reasons } = rulesMeetsDiscoveryCriteria({
+          price: price ?? null,
+          rating: rating ?? null,
+          reviews: reviews ?? null,
+          isPrime: Boolean(isPrime),
+          title: title || term,
+        });
+
+        if (!meets) {
+          // Log rejection
+          await supabase.from('rejection_log').insert({
+            asin,
+            reason: 'FAILED_DISCOVERY_CRITERIA',
+            details: { reasons },
+            created_at: new Date().toISOString(),
+          });
+          result.skipped++;
+          continue;
+        }
 
         // Calculate pricing
-        const amazonPrice = product.buybox_winner?.price?.value || product.price?.value || 0;
+        const amazonPrice = price || 0;
         const { salesPrice, profitAmount, profitPercent } = calculatePricing(amazonPrice);
 
         const discoveredProduct: DiscoveredProduct = {
-          asin: product.asin,
-          title: product.title,
+          asin,
+          title,
           amazonPrice,
           salesPrice,
           profitAmount,
           profitPercent,
-          rating: product.rating || 0,
-          reviewCount: product.ratings_total || 0,
-          imageUrl: product.main_image?.link || '',
-          amazonUrl: product.link || `https://amazon.com/dp/${product.asin}`,
-          category: product.categories?.[0]?.name || term,
-          isPrime: product.buybox_winner?.is_prime || false
+          rating: rating || 0,
+          reviewCount: reviews || 0,
+          imageUrl: imageUrl || '',
+          amazonUrl: `https://amazon.com/dp/${asin}`,
+          category: term,
+          isPrime: Boolean(isPrime)
         };
 
         result.products.push(discoveredProduct);
         result.found++;
+
+        // Import into our DB (upsert products & product_demand)
+        if (!dryRun) {
+          try {
+            const pid = await importDiscoveredProduct(discoveredProduct, options?.runId ?? undefined);
+            if (!pid) {
+              result.skipped++;
+              result.errors.push(`DB import failed for ${discoveredProduct.asin}`);
+              continue;
+            }
+          } catch (e: any) {
+            result.errors.push(`DB import error for ${discoveredProduct.asin}: ${e.message || String(e)}`);
+            continue;
+          }
+        }
 
         // Check if already in Shopify
         const exists = await productExistsInShopify(product.asin);
@@ -331,7 +392,7 @@ export async function discoverProducts(options?: {
         }
 
         // Rate limiting
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise(resolve => setTimeout(resolve, 500));
       }
     } catch (error: any) {
       result.errors.push(`Search "${term}" failed: ${error.message}`);
@@ -342,6 +403,59 @@ export async function discoverProducts(options?: {
   }
 
   return result;
+}
+
+/**
+ * Insert discovered product and related demand/run records
+ */
+export async function importDiscoveredProduct(product: DiscoveredProduct, runId?: string) {
+  // Upsert product record
+  const productId = `prod_${product.asin}_${Date.now()}`;
+  const { data, error } = await supabase.from('products').upsert({
+    id: productId,
+    title: product.title,
+    asin: product.asin,
+    source: 'keepa',
+    cost_price: product.amazonPrice,
+    retail_price: product.salesPrice,
+    rating: product.rating,
+    review_count: product.reviewCount,
+    is_prime: product.isPrime,
+    image_url: product.imageUrl,
+    category: product.category,
+    status: 'draft',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'id' }).select().single();
+
+  if (error) {
+    await supabase.from('rejection_log').insert({ asin: product.asin, reason: 'DB_UPSERT_FAILED', details: { error: error.message }, created_at: new Date().toISOString(), run_id: runId });
+    return null;
+  }
+
+  const pid = data.id;
+
+  // Insert/update product_demand
+  const demandScore = Math.round((100000 / (product.profitPercent + 1)) * 100) / 100; // simplistic score
+  const demandTier = product.profitPercent >= 70 ? 'high' : (product.profitPercent >= 40 ? 'medium' : 'low');
+
+  await supabase.from('product_demand').upsert({
+    product_id: pid,
+    asin: product.asin,
+    demand_tier: demandTier,
+    demand_score: demandScore,
+    volatility: 0,
+    current_bsr: null,
+    last_evaluated_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'product_id' });
+
+  // Associate to discovery_runs counts
+  if (runId) {
+    await supabase.from('discovery_runs').update({ products_imported: (supabase.raw('products_imported + 1') as any) }).eq('id', runId);
+  }
+
+  return pid;
 }
 
 /**

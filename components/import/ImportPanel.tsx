@@ -2591,7 +2591,11 @@ export function ImportPanel({
       }
 
       // Transform results to RainforestSearchResult format
-      const discoveredProducts: RainforestSearchResult[] = result.data.map((item: any) => ({
+      // Handle both array and object with products property
+      const dataArray = Array.isArray(result.data) 
+        ? result.data 
+        : (result.data?.products || result.data?.data || []);
+      const discoveredProducts: RainforestSearchResult[] = (Array.isArray(dataArray) ? dataArray : []).map((item: any) => ({
         asin: item.asin,
         title: item.title,
         price: item.price,

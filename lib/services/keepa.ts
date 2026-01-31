@@ -146,80 +146,8 @@ export function keepaPriceToDollars(keepaPrice: number): number {
   return keepaPrice / 100;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// MOCK DATA GENERATOR
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Generate seeded random number for consistent mock data
- */
-function seededRandom(seed: string): number {
-  let hash = 0;
-  for (let i = 0; i < seed.length; i++) {
-    const char = seed.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash;
-  }
-  return Math.abs((Math.sin(hash) + 1) / 2);
-}
-
-/**
- * Generate mock price history for a product
- */
-function generateMockPriceHistory(
-  asin: string,
-  basePrice: number,
-  days: number = 90
-): Array<{ timestamp: number; price: number }> {
-  const history: Array<{ timestamp: number; price: number }> = [];
-  const now = Date.now();
-  const dayMs = 24 * 60 * 60 * 1000;
-  
-  // Generate price points every 3 days for volatility
-  for (let i = days; i >= 0; i -= 3) {
-    const timestamp = now - (i * dayMs);
-    // Price varies by ±15% around base price
-    const random = seededRandom(asin + i.toString());
-    const variance = (random - 0.5) * 0.3; // -15% to +15%
-    const price = Math.round((basePrice * (1 + variance)) * 100) / 100;
-    
-    history.push({ timestamp, price: Math.max(price, 1) });
-  }
-  
-  return history;
-}
-
-/**
- * Generate mock Keepa product data
- */
-function generateMockKeepaProduct(asin: string): KeepaProductData {
-  const random = seededRandom(asin);
-  const basePrice = 5 + (random * 20); // $5-$25
-  const history = generateMockPriceHistory(asin, basePrice, 90);
-  
-  // Calculate averages from mock history
-  const last30Days = history.filter(h => h.timestamp > Date.now() - (30 * 24 * 60 * 60 * 1000));
-  const last90Days = history;
-  
-  const avg30d = last30Days.length > 0
-    ? Math.round((last30Days.reduce((sum, h) => sum + h.price, 0) / last30Days.length) * 100) / 100
-    : undefined;
-  
-  const avg90d = last90Days.length > 0
-    ? Math.round((last90Days.reduce((sum, h) => sum + h.price, 0) / last90Days.length) * 100) / 100
-    : undefined;
-
-  // Sales rank between 1000 and 100000
-  const salesRank = Math.floor(1000 + (random * 99000));
-
-  return {
-    asin,
-    priceHistory: history,
-    salesRank,
-    avgPrice30d: avg30d,
-    avgPrice90d: avg90d,
-  };
-}
+// No mock mode: Keepa integration is production-only and requires KEEPA_API_KEY.
+// Mock data and generators were intentionally removed per priority-1 requirements.
 
 // ═══════════════════════════════════════════════════════════════════════════
 // API RESPONSE TRANSFORMER
@@ -273,6 +201,12 @@ function transformKeepaProduct(apiProduct: KeepaAPIProduct): KeepaProductData {
     salesRank: apiProduct.salesRankReference ?? null,
     avgPrice30d,
     avgPrice90d,
+    rating: typeof (apiProduct as any).rating === 'number' ? (apiProduct as any).rating : null,
+    review_count: typeof (apiProduct as any).reviewCount === 'number' ? (apiProduct as any).reviewCount : null,
+    is_prime: Boolean((apiProduct as any).isPrime ?? (apiProduct as any).is_prime ?? false),
+    amazon_price: priceHistory.length > 0 ? priceHistory[priceHistory.length - 1].price : null,
+    title: apiProduct.title ?? null,
+    domainId: apiProduct.domainId ?? null,
   };
 }
 
@@ -288,7 +222,6 @@ async function makeKeepaRequest(
   params: Record<string, string>
 ): Promise<ApiResponse<KeepaAPIResponse>> {
   const config = getKeepaConfig();
-  
   if (!config.isConfigured) {
     return createResponseFromCode('KEEPA_001');
   }
@@ -341,6 +274,31 @@ async function makeKeepaRequest(
   }
 }
 
+/**
+ * Wrapper to call Keepa with retry/backoff on rate limit responses
+ */
+async function requestWithRetries(
+  endpoint: string,
+  params: Record<string, string>,
+  retries = 3,
+  backoffMs = 1000
+): Promise<ApiResponse<KeepaAPIResponse>> {
+  let attempt = 0;
+  while (attempt <= retries) {
+    const res = await makeKeepaRequest(endpoint, params);
+    if (res.success) return res;
+    const code = res.error?.code;
+    if (code === 'KEEPA_004' && attempt < retries) {
+      // Rate limited - wait and retry
+      await new Promise(r => setTimeout(r, backoffMs * Math.pow(2, attempt)));
+      attempt++;
+      continue;
+    }
+    return res;
+  }
+  return createResponseFromCode('KEEPA_004');
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // PUBLIC API: SINGLE PRODUCT LOOKUP
 // ═══════════════════════════════════════════════════════════════════════════
@@ -360,26 +318,14 @@ export async function getProductHistory(
 
   // Validate ASIN format
   if (!/^B[A-Z0-9]{9}$/.test(asin)) {
-    return createSuccessResponse({
-      product: null,
-      tokensUsed: 0,
-      isMock: !config.isConfigured,
-    });
+    return createResponseFromCode('IMPORT_012', `Invalid ASIN: ${asin}`);
   }
 
-  // MOCK MODE
   if (!config.isConfigured) {
-    console.log(`[Keepa] Using mock data for ASIN: ${asin}`);
-    
-    return createSuccessResponse({
-      product: generateMockKeepaProduct(asin),
-      tokensUsed: 0,
-      isMock: true,
-    });
+    return createResponseFromCode('KEEPA_001');
   }
 
-  // LIVE MODE
-  const response = await makeKeepaRequest('product', {
+  const response = await requestWithRetries('product', {
     domain: domain.toString(),
     asin: asin,
     history: '1',
@@ -397,7 +343,6 @@ export async function getProductHistory(
   return createSuccessResponse({
     product,
     tokensUsed: KEEPA_COSTS.product,
-    isMock: false,
   });
 }
 
@@ -434,20 +379,8 @@ export async function getProductsHistory(
     });
   }
 
-  // MOCK MODE
   if (!config.isConfigured) {
-    console.log(`[Keepa] Using mock data for ${validAsins.length} ASINs`);
-    
-    const products = validAsins.map(asin => generateMockKeepaProduct(asin));
-    
-    return createSuccessResponse({
-      products,
-      tokensUsed: 0,
-      tokensRemaining: undefined,
-      isMock: true,
-      found: products.length,
-      notFound: invalidAsins,
-    });
+    return createResponseFromCode('KEEPA_001');
   }
 
   // LIVE MODE: Process in batches
@@ -464,7 +397,7 @@ export async function getProductsHistory(
 
   // Process each batch
   for (const batch of batches) {
-    const response = await makeKeepaRequest('product', {
+    const response = await requestWithRetries('product', {
       domain: domain.toString(),
       asin: batch.join(','),
       history: '1',
@@ -502,7 +435,6 @@ export async function getProductsHistory(
     products,
     tokensUsed: totalTokens,
     tokensRemaining,
-    isMock: false,
     found: products.length,
     notFound,
   });
@@ -664,7 +596,7 @@ export function getServiceStatus(): KeepaServiceStatus {
   
   return {
     isConfigured: config.isConfigured,
-    mode: config.isConfigured ? 'live' : 'mock',
+    mode: 'live',
     tokenCostPerProduct: KEEPA_COSTS.product,
     maxBatchSize: RATE_LIMIT.maxBatchSize,
   };

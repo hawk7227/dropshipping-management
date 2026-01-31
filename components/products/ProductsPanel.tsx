@@ -247,13 +247,20 @@ function panelReducer(state: PanelState, action: PanelAction): PanelState {
       return { ...state, error: action.payload, isLoading: false };
     
     case 'SET_PRODUCTS':
+      // Calculate valid page number
+      const newTotalItems = action.payload.length;
+      const newTotalPages = Math.ceil(newTotalItems / state.pagination.pageSize);
+      // Ensure current page is not out of bounds (e.g., if on page 5 but new data only has 1 page)
+      const validPage = Math.max(1, Math.min(state.pagination.page, newTotalPages || 1));
+
       return { 
         ...state, 
         products: action.payload,
         pagination: {
           ...state.pagination,
-          totalItems: action.payload.length,
-          totalPages: Math.ceil(action.payload.length / state.pagination.pageSize),
+          totalItems: newTotalItems,
+          totalPages: newTotalPages,
+          page: validPage, // <--- ADD THIS FIX
         },
         isLoading: false,
       };
@@ -491,8 +498,8 @@ function applyFilters(products: Product[], filters: ProductFiltersState): Produc
       const searchLower = filters.search.toLowerCase();
       const matchesSearch = 
         product.title.toLowerCase().includes(searchLower) ||
-        product.asin.toLowerCase().includes(searchLower) ||
-        (product.description && product.description.toLowerCase().includes(searchLower));
+        (product.asin != null && product.asin.toLowerCase().includes(searchLower)) ||
+        (product.description != null && product.description.toLowerCase().includes(searchLower));
       if (!matchesSearch) return false;
     }
 
@@ -517,8 +524,9 @@ function applyFilters(products: Product[], filters: ProductFiltersState): Produc
       return false;
     }
 
-    // Synced filter
-    if (filters.showSyncedOnly && !product.shopify_id) {
+    // Synced filter (API returns shopify_product_id; UI may use shopify_id)
+    const shopifyId = product.shopify_id ?? (product as { shopify_product_id?: string | null }).shopify_product_id;
+    if (filters.showSyncedOnly && !shopifyId) {
       return false;
     }
 
@@ -711,9 +719,10 @@ function useUrlSync(
   filters: ProductFiltersState,
   pagination: PaginationState,
   setFilters: (filters: Partial<ProductFiltersState>) => void,
-  setPagination: (pagination: Partial<PaginationState>) => void
+  setPagination: (pagination: Partial<PaginationState>) => void,
+  onSynced?: () => void
 ): void {
-  // Parse URL on mount
+  // Parse URL on mount (runs once so first fetch uses URL state)
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
@@ -734,7 +743,8 @@ function useUrlSync(
 
     if (Object.keys(urlFilters).length > 0) setFilters(urlFilters);
     if (Object.keys(urlPagination).length > 0) setPagination(urlPagination);
-  }, []);
+    onSynced?.();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- run once on mount; onSynced intentionally not in deps
 
   // Update URL when filters change
   useEffect(() => {
@@ -1495,13 +1505,13 @@ function ProductDetailModal({
                         <input
                           type="number"
                           step="0.01"
-                          value={state.editedFields.retail_price ?? product.retail_price ?? ''}
+                          value={state.editedFields.retail_price ?? (product as any).variants?.[0]?.price ?? ''}
                           onChange={(e) => onFieldChange('retail_price', parseFloat(e.target.value))}
                           className="w-24 px-2 py-1 text-right font-mono border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         />
                       ) : (
                         <span className="font-mono font-medium text-lg text-green-600">
-                          {product.retail_price !== null ? formatPrice(product.retail_price) : '-'}
+                          {(product as any).variants?.[0]?.price ? formatPrice(parseFloat((product as any).variants[0].price)) : '-'}
                         </span>
                       )}
                     </div>
@@ -1909,10 +1919,44 @@ function ProductRow({
               </button>
               <div className="flex items-center gap-2 mt-0.5">
                 <span className="text-xs text-gray-500 font-mono">{product.asin}</span>
-                <StaleIndicator product={product} />
-                {product.shopify_id && (
+                
+                {/* AI Score Badge */}
+                {(product as any).ai_score && (
+                  <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium
+                    ${(product as any).ai_score >= 80 ? 'bg-green-100 text-green-800' : 
+                      (product as any).ai_score >= 60 ? 'bg-yellow-100 text-yellow-800' : 
+                      'bg-red-100 text-red-800'}
+                  `}>
+                    AI: {(product as any).ai_score}
+                  </span>
+                )}
+
+                {/* Demand Badge */}
+                {(product as any).demand_level && (
+                  <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium
+                    ${(product as any).demand_level === 'high' ? 'bg-red-100 text-red-800' : 
+                      (product as any).demand_level === 'medium' ? 'bg-orange-100 text-orange-800' : 
+                      'bg-gray-100 text-gray-800'}
+                  `}>
+                    {(product as any).demand_level === 'high' ? '🔥' : 
+                     (product as any).demand_level === 'medium' ? '⚡' : '📊'}
+                  </span>
+                )}
+
+                {/* Sync Status */}
+                {(product as any).shopify_sync_status === 'synced' && (
                   <span className="text-xs text-green-600">✓ Shopify</span>
                 )}
+                
+                {/* Price Freshness */}
+                {(product as any).price_freshness && (product as any).price_freshness !== 'fresh' && (
+                  <span className={`text-xs flex items-center gap-1
+                    ${(product as any).price_freshness === 'very_stale' ? 'text-red-600' : 'text-orange-600'}
+                  `}>
+                    {(product as any).days_since_price_check}d
+                  </span>
+                )}
+
                 {product.review_count && (
                   <span className="text-xs text-gray-400">({product.review_count} reviews)</span>
                 )}
@@ -1943,22 +1987,22 @@ function ProductRow({
           </div>
         </td>
 
-        {/* Amazon Cost */}
+        {/* Cost */}
         <td className="px-3 py-3 whitespace-nowrap text-sm text-gray-900 font-mono">
-          {product.amazon_price !== null ? formatPrice(product.amazon_price) : '-'}
+          {product.cost_price ? formatPrice(product.cost_price) : '-'}
         </td>
 
-        {/* Your Price */}
+        {/* Current Price */}
         <td className="px-3 py-3 whitespace-nowrap text-sm font-mono font-medium text-green-600">
-          {product.retail_price !== null ? formatPrice(product.retail_price) : '-'}
+          {(product as any).variants?.[0]?.price ? formatPrice(parseFloat((product as any).variants[0].price)) : 'N/A'}
         </td>
 
         {/* Profit */}
         <td className="px-3 py-3 whitespace-nowrap">
-          <ProfitBadge margin={product.profit_percent} />
-          {product.profit_amount !== null && (
+          <ProfitBadge margin={(product as any).profit_margin} />
+         {typeof (product as any).profit_margin === 'number' && (
             <div className="text-xs text-gray-500 font-mono">
-              {formatPrice(product.profit_amount)}
+              {((product as any).profit_margin).toFixed(1)}%
             </div>
           )}
         </td>
@@ -2460,14 +2504,14 @@ export function ProductsPanel({
 }: ProductsPanelProps) {
   // Initialize state with reducer
   const [state, dispatch] = useReducer(panelReducer, {
-    isLoading: false,
+   isLoading: initialProducts.length === 0, // Only load if no initial products
     error: null,
-    products: initialProducts,
+    products: initialProducts, // <--- USE PROP HERE
     filters: DEFAULT_FILTERS,
     pagination: {
       ...DEFAULT_PAGINATION,
-      totalItems: initialProducts.length,
-      totalPages: Math.ceil(initialProducts.length / DEFAULT_PAGE_SIZE),
+      totalItems: initialProducts.length, // <--- UPDATE TOTAL
+      totalPages: Math.ceil(initialProducts.length / DEFAULT_PAGE_SIZE), // <--- UPDATE PAGES
     },
     selectedIds: new Set(),
     productDetail: INITIAL_PRODUCT_DETAIL,
@@ -2479,6 +2523,132 @@ export function ProductsPanel({
 
   // Refs
   const tableRef = useRef<HTMLTableElement>(null);
+  const [fetchReady, setFetchReady] = useState(false);
+  const [lastFetchUrl, setLastFetchUrl] = useState<string | null>(null);
+  const [lastFetchResult, setLastFetchResult] = useState<any | null>(null);
+
+  // Fetch products from API (primitive deps only to avoid spurious refetches)
+  const fetchProducts = useCallback(async () => {
+    try {
+      console.log('[ProductsPanel] Starting fetchProducts...');
+      dispatch({ type: 'SET_LOADING', payload: true });
+      dispatch({ type: 'SET_ERROR', payload: null });
+
+      const params = new URLSearchParams();
+      params.set('action', 'list');
+      params.set('page', state.pagination.page.toString());
+      params.set('pageSize', state.pagination.pageSize.toString());
+
+      // Only include non-default / meaningful filters to avoid server-side misinterpretation
+      if (state.filters.search && state.filters.search.trim() !== '') {
+        params.set('search', state.filters.search.trim());
+      }
+      if (state.filters.status && state.filters.status !== 'all') {
+        params.set('status', state.filters.status);
+      }
+      if (state.filters.category && state.filters.category !== 'all') {
+        params.set('category', state.filters.category);
+      }
+      if (state.filters.sortBy && state.filters.sortBy !== 'updated_at') {
+        params.set('sortBy', state.filters.sortBy);
+      }
+      if (state.filters.sortOrder && state.filters.sortOrder !== 'desc') {
+        params.set('sortOrder', state.filters.sortOrder);
+      }
+      if (state.filters.showStaleOnly) params.set('showStaleOnly', 'true');
+      if (state.filters.showSyncedOnly) params.set('showSyncedOnly', 'true');
+
+      if (state.filters.minPrice != null) params.set('minPrice', state.filters.minPrice.toString());
+      if (state.filters.maxPrice != null) params.set('maxPrice', state.filters.maxPrice.toString());
+      if (state.filters.minMargin != null) params.set('minMargin', state.filters.minMargin.toString());
+      if (state.filters.maxMargin != null) params.set('maxMargin', state.filters.maxMargin.toString());
+
+      const url = `/api/products?${params}`;
+      setLastFetchUrl(url);
+      const response = await fetch(url);
+      if (!response.ok) throw new Error('Failed to fetch products');
+
+      const result = await response.json();
+
+      console.log('[ProductsPanel] API Response:', result);
+      setLastFetchResult(result);
+      // Also log for quick inspection in browser console
+      // (useful if the debug button/panel isn't visible in your build)
+      // eslint-disable-next-line no-console
+      console.debug('[ProductsPanel] fetched', url, result);
+      if (result.success) {
+        const rawProducts = result.data?.products ?? [];
+        const products = Array.isArray(rawProducts)
+          ? rawProducts.map((p: any) => {
+              // Normalize common API field differences so UI can render consistently
+              const mainImage = p.main_image ?? (Array.isArray(p.images) && p.images[0]?.src) ?? null;
+              const imageUrl = p.image_url ?? mainImage ?? null;
+              const retailPrice = p.retail_price ?? p.current_price ?? p.price ?? null;
+              const amazonPrice = p.amazon_price ?? p.current_price ?? null;
+
+              return {
+                ...p,
+                // prefer existing keys but provide fallbacks
+                main_image: mainImage,
+                image_url: imageUrl,
+                retail_price: retailPrice,
+                amazon_price: amazonPrice,
+                cost_price: p.cost_price ?? null,
+                shopify_id: p.shopify_id ?? p.shopify_product_id ?? null,
+              } as any;
+            })
+          : [];
+
+        console.log('[ProductsPanel] Processed products:', products.length, products);
+        dispatch({ type: 'SET_PRODUCTS', payload: products });
+        dispatch({ type: 'SET_PAGINATION', payload: {
+          totalItems: result.data?.total ?? products.length,
+          totalPages: result.data?.totalPages ?? Math.ceil((result.data?.total ?? products.length) / state.pagination.pageSize),
+        }});
+      } else {
+        throw new Error(result.error || 'Failed to fetch products');
+      }
+    } catch (error) {
+      dispatch({
+        type: 'SET_ERROR',
+        payload: { message: error instanceof Error ? error.message : 'Failed to load products' }
+      });
+    } finally {
+      dispatch({ type: 'SET_LOADING', payload: false });
+    }
+  }, [
+    state.pagination.page,
+    state.pagination.pageSize,
+    state.filters.search,
+    state.filters.status,
+    state.filters.category,
+    state.filters.sortBy,
+    state.filters.sortOrder,
+    state.filters.showStaleOnly,
+    state.filters.showSyncedOnly,
+    state.filters.minPrice,
+    state.filters.maxPrice,
+    state.filters.minMargin,
+    state.filters.maxMargin,
+  ]);
+
+  // Fetch only after URL sync (avoids double fetch: initial + after URL params)
+  useEffect(() => {
+    if (!fetchReady) return;
+    fetchProducts();
+  }, [fetchReady, fetchProducts]);
+
+  // Fallback: Fetch products if URL sync doesn't complete within 2 seconds
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (!fetchReady && !state.isLoading && state.products.length === 0) {
+        console.log('[ProductsPanel] Fallback: URL sync may have failed, fetching products anyway');
+        setFetchReady(true);
+      }
+    }, 2000);
+
+    return () => clearTimeout(timer);
+  }, [fetchReady, state.isLoading, state.products.length]);
 
   // Computed values
   const categories = useMemo(() => getUniqueCategories(state.products), [state.products]);
@@ -2492,25 +2662,17 @@ export function ProductsPanel({
     return paginateProducts(filteredProducts, state.pagination);
   }, [filteredProducts, state.pagination]);
 
-  // Update pagination when filtered products change
-  useEffect(() => {
-    dispatch({
-      type: 'SET_PAGINATION',
-      payload: {
-        totalItems: filteredProducts.length,
-        totalPages: Math.ceil(filteredProducts.length / state.pagination.pageSize),
-        page: Math.min(state.pagination.page, Math.ceil(filteredProducts.length / state.pagination.pageSize) || 1),
-      },
-    });
-  }, [filteredProducts.length, state.pagination.pageSize]);
-
-  // URL sync
+  // URL sync (onSynced runs after URL is applied so first fetch uses URL state = single fetch)
   useUrlSync(
     state.filters,
     state.pagination,
     (filters) => dispatch({ type: 'SET_FILTERS', payload: filters }),
-    (pagination) => dispatch({ type: 'SET_PAGINATION', payload: pagination })
+    (pagination) => dispatch({ type: 'SET_PAGINATION', payload: pagination }),
+    () => setFetchReady(true)
   );
+
+  // Small developer debug UI: toggleable panel showing last fetch URL/result
+  const [showDebug, setShowDebug] = useState(true);
 
   // Keyboard navigation
   useKeyboardNavigation(
@@ -2605,18 +2767,45 @@ export function ProductsPanel({
         onConfirm: async () => {
           dispatch({ type: 'SET_CONFIRMATION_PROCESSING', payload: true });
           
-          // Simulate API call
-          await new Promise(resolve => setTimeout(resolve, 500));
-          
-          dispatch({ type: 'REMOVE_PRODUCT', payload: productId });
-          dispatch({ type: 'CLOSE_CONFIRMATION' });
-          
-          addToast({
-            type: 'success',
-            title: 'Product Removed',
-            message: 'The product has been removed from your inventory.',
-            duration: TOAST_DURATION,
-          });
+          try {
+            // Call API to remove product
+            const response = await fetch(`/api/products?action=delete&id=${productId}`, {
+              method: 'DELETE',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+            });
+
+            if (!response.ok) {
+              const errorData = await response.json();
+              throw new Error(errorData.error || 'Failed to remove product');
+            }
+
+            const result = await response.json();
+            
+            if (result.success) {
+              dispatch({ type: 'REMOVE_PRODUCT', payload: productId });
+              dispatch({ type: 'CLOSE_CONFIRMATION' });
+              
+              addToast({
+                type: 'success',
+                title: 'Product Removed',
+                message: 'The product has been removed from your inventory.',
+                duration: TOAST_DURATION,
+              });
+            } else {
+              throw new Error(result.error || 'Failed to remove product');
+            }
+          } catch (error) {
+            dispatch({ type: 'SET_CONFIRMATION_PROCESSING', payload: false });
+            
+            addToast({
+              type: 'error',
+              title: 'Remove Failed',
+              message: error instanceof Error ? error.message : 'Failed to remove product. Please try again.',
+              duration: TOAST_DURATION,
+            });
+          }
         },
       },
     });
@@ -2640,6 +2829,24 @@ export function ProductsPanel({
       return;
     }
     
+    // Show confirmation dialog for remove action
+    if (action === 'remove') {
+      dispatch({
+        type: 'OPEN_CONFIRMATION',
+        payload: {
+          title: 'Remove Products',
+          message: `Are you sure you want to remove ${state.selectedIds.size} selected product${state.selectedIds.size > 1 ? 's' : ''}? This action cannot be undone.`,
+          confirmLabel: 'Remove All',
+          confirmVariant: 'danger',
+          onConfirm: () => {
+            dispatch({ type: 'CLOSE_CONFIRMATION' });
+            dispatch({ type: 'OPEN_BULK_ACTION', payload: action });
+          },
+        },
+      });
+      return;
+    }
+    
     dispatch({ type: 'OPEN_BULK_ACTION', payload: action });
   }, [state.selectedIds, state.products, addToast]);
 
@@ -2653,57 +2860,94 @@ export function ProductsPanel({
     let successCount = 0;
     let failCount = 0;
     
-    for (let i = 0; i < ids.length; i++) {
-      const productId = ids[i];
-      const progress = Math.round(((i + 1) / ids.length) * 100);
-      dispatch({ type: 'SET_BULK_PROGRESS', payload: progress });
-      
+    // Handle bulk remove separately for efficiency
+    if (action === 'remove') {
       try {
-        // Simulate API call
-        await new Promise(resolve => setTimeout(resolve, 200));
+        dispatch({ type: 'SET_BULK_PROGRESS', payload: 50 });
         
-        switch (action) {
-          case 'refresh':
-            await handleRefreshProduct(productId);
-            break;
-          case 'pause':
-            const pauseProduct = state.products.find(p => p.id === productId);
-            if (pauseProduct && pauseProduct.status !== 'paused') {
-              dispatch({
-                type: 'UPDATE_PRODUCT',
-                payload: { ...pauseProduct, status: 'paused', updated_at: new Date().toISOString() },
-              });
-            }
-            break;
-          case 'unpause':
-            const unpauseProduct = state.products.find(p => p.id === productId);
-            if (unpauseProduct && unpauseProduct.status === 'paused') {
-              dispatch({
-                type: 'UPDATE_PRODUCT',
-                payload: { ...unpauseProduct, status: 'active', updated_at: new Date().toISOString() },
-              });
-            }
-            break;
-          case 'remove':
-            dispatch({ type: 'REMOVE_PRODUCT', payload: productId });
-            break;
-          case 'push_to_shopify':
-            // Would add to Shopify queue
-            break;
-        }
-        
-        dispatch({ type: 'ADD_BULK_RESULT', payload: { productId, success: true } });
-        successCount++;
-      } catch (error) {
-        dispatch({
-          type: 'ADD_BULK_RESULT',
-          payload: {
-            productId,
-            success: false,
-            error: error instanceof Error ? error.message : 'Unknown error',
+        const response = await fetch('/api/products?bulk=true', {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
           },
+          body: JSON.stringify({ productIds: ids }),
         });
-        failCount++;
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Failed to remove products');
+        }
+
+        const result = await response.json();
+        
+        if (result.success) {
+          // Remove all products from state
+          ids.forEach(productId => {
+            dispatch({ type: 'REMOVE_PRODUCT', payload: productId });
+          });
+          successCount = ids.length;
+          
+          dispatch({ type: 'SET_BULK_PROGRESS', payload: 100 });
+        } else {
+          throw new Error(result.error || 'Failed to remove products');
+        }
+      } catch (error) {
+        failCount = ids.length;
+        addToast({
+          type: 'error',
+          title: 'Bulk Remove Failed',
+          message: error instanceof Error ? error.message : 'Failed to remove products. Please try again.',
+          duration: TOAST_DURATION,
+        });
+      }
+    } else {
+      // Handle other bulk actions individually
+      for (let i = 0; i < ids.length; i++) {
+        const productId = ids[i];
+        const progress = Math.round(((i + 1) / ids.length) * 100);
+        dispatch({ type: 'SET_BULK_PROGRESS', payload: progress });
+        
+        try {
+          switch (action) {
+            case 'refresh':
+              await handleRefreshProduct(productId);
+              break;
+            case 'pause':
+              const pauseProduct = state.products.find(p => p.id === productId);
+              if (pauseProduct && pauseProduct.status !== 'paused') {
+                dispatch({
+                  type: 'UPDATE_PRODUCT',
+                  payload: { ...pauseProduct, status: 'paused', updated_at: new Date().toISOString() },
+                });
+              }
+              break;
+            case 'unpause':
+              const unpauseProduct = state.products.find(p => p.id === productId);
+              if (unpauseProduct && unpauseProduct.status === 'paused') {
+                dispatch({
+                  type: 'UPDATE_PRODUCT',
+                  payload: { ...unpauseProduct, status: 'active', updated_at: new Date().toISOString() },
+                });
+              }
+              break;
+            case 'push_to_shopify':
+              // Would add to Shopify queue
+              break;
+          }
+          
+          dispatch({ type: 'ADD_BULK_RESULT', payload: { productId, success: true } });
+          successCount++;
+        } catch (error) {
+          dispatch({
+            type: 'ADD_BULK_RESULT',
+            payload: {
+              productId,
+              success: false,
+              error: error instanceof Error ? error.message : 'Unknown error',
+            },
+          });
+          failCount++;
+        }
       }
     }
     
@@ -2836,24 +3080,17 @@ export function ProductsPanel({
             <span className="text-sm text-gray-500">
               {state.products.length} total products
             </span>
+            <button
+              onClick={() => setShowDebug(s => !s)}
+              className="ml-3 px-2 py-1 text-xs bg-gray-100 rounded hover:bg-gray-200"
+            >
+              {showDebug ? 'Hide' : 'Show'} debug
+            </button>
           </div>
         </div>
       </div>
 
-      {/* Non-blocking error banner */}
-      {state.error && state.products.length > 0 && (
-        <FeatureStatusBanner
-          status={{
-            code: state.error.code,
-            status: 'error',
-            message: state.error.message,
-            details: state.error.details,
-            suggestion: state.error.suggestion,
-            blocking: false,
-          }}
-          onDismiss={() => dispatch({ type: 'SET_ERROR', payload: null })}
-        />
-      )}
+      
 
       {/* Filters */}
       <div className="px-4 py-4">

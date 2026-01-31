@@ -30,14 +30,17 @@ export default function ShopifySync({ onSyncComplete }: ShopifySyncProps) {
           .filter(id => id.length > 0);
       } else if (syncMode === 'all') {
         // Fetch all active products
-        const res = await fetch('/api/products?status=active&limit=1000');
+        const res = await fetch('/api/products?action=list&status=active&pageSize=1000');
         const data = await res.json();
-        idsToSync = data.data?.map((p: any) => p.id) || [];
+        const products = data.data?.products || (Array.isArray(data.data) ? data.data : []);
+        idsToSync = products.map((p: any) => p.id) || [];
       } else if (syncMode === 'new') {
         // Fetch products without platform listings
-        const res = await fetch('/api/products?status=active&synced=false&limit=1000');
+        const res = await fetch('/api/products?action=list&status=active&pageSize=1000');
         const data = await res.json();
-        idsToSync = data.data?.map((p: any) => p.id) || [];
+        const products = data.data?.products || (Array.isArray(data.data) ? data.data : []);
+        // Filter products that haven't been synced (no shopify_product_id)
+        idsToSync = products.filter((p: any) => !p.shopify_product_id).map((p: any) => p.id) || [];
       }
 
       const res = await fetch('/api/channels', {
