@@ -1,9 +1,19 @@
 // app/api/dashboard/route.ts
-// Real dashboard data API using P1-P3 systems
-// Replaces mock data with actual database queries
+// Real dashboard data API using Supabase and Shopify integration
+// Provides real-time metrics for the dashboard
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import {
+  getDashboardStats,
+  getDiscoveryStats,
+  getDemandDistribution,
+  getRevenueData,
+  getCategoryBreakdown,
+  getProfitTrend,
+  getOrdersToday,
+  getRevenueToday,
+} from '@/lib/services/dashboard-service';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -45,6 +55,17 @@ interface DashboardData {
     avgSavings: number;
     staleCount: number;
   };
+  stats?: {
+    profitMargin: number;
+    productsBelowMargin: number;
+    pendingSync: number;
+    priceAlerts: number;
+  };
+  discovery?: any;
+  demandDistribution?: any;
+  revenueChart?: any[];
+  categoryBreakdown?: any[];
+  profitTrend?: any[];
 }
 
 export async function GET(request: NextRequest) {
@@ -58,23 +79,17 @@ export async function GET(request: NextRequest) {
     
     const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
     const monthStartStr = monthStart.toISOString().split('T')[0];
-    
-    const lastMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-    const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
 
-    // Today's revenue and orders from channel_orders
-    const { data: todayOrders } = await supabase
-      .from('channel_orders')
-      .select('total')
-      .gte('ordered_at', `${todayStr}T00:00:00Z`)
-      .lt('ordered_at', `${todayStr}T23:59:59Z`);
+    // Fetch dashboard stats using the new service
+    const stats = await getDashboardStats();
 
-    const todayRevenue = todayOrders?.reduce((sum, o) => sum + (o.total || 0), 0) || 0;
-    const todayOrderCount = todayOrders?.length || 0;
+    // Today's revenue and orders from orders table (synced from Shopify)
+    const todayRevenue = await getRevenueToday();
+    const todayOrderCount = await getOrdersToday();
 
     // This week's revenue and orders
     const { data: weekOrders } = await supabase
-      .from('channel_orders')
+      .from('orders')
       .select('total')
       .gte('ordered_at', `${weekAgoStr}T00:00:00Z`);
 
@@ -83,22 +98,12 @@ export async function GET(request: NextRequest) {
 
     // This month's revenue and orders
     const { data: monthOrders } = await supabase
-      .from('channel_orders')
+      .from('orders')
       .select('total')
       .gte('ordered_at', `${monthStartStr}T00:00:00Z`);
 
     const monthRevenue = monthOrders?.reduce((sum, o) => sum + (o.total || 0), 0) || 0;
     const monthOrderCount = monthOrders?.length || 0;
-
-    // Product counts from products table
-    const { count: totalProducts } = await supabase
-      .from('products')
-      .select('*', { count: 'exact', head: true });
-
-    const { count: activeProducts } = await supabase
-      .from('products')
-      .select('*', { count: 'exact', head: true })
-      .eq('status', 'active');
 
     // Low stock and out of stock from price_snapshots availability
     const { data: availabilityData } = await supabase
@@ -202,6 +207,13 @@ export async function GET(request: NextRequest) {
     // Member savings (total savings from all orders)
     const memberSavings = weekRevenue * (avgSavings / 100);
 
+    // Get additional dashboard data
+    const discovery = await getDiscoveryStats();
+    const demandDistribution = await getDemandDistribution();
+    const revenueChart = await getRevenueData(30);
+    const categoryBreakdown = await getCategoryBreakdown();
+    const profitTrend = await getProfitTrend(30);
+
     const dashboardData: DashboardData = {
       today: {
         revenue: Math.round(todayRevenue * 100) / 100,
@@ -222,8 +234,8 @@ export async function GET(request: NextRequest) {
         churnedMembers,
       },
       products: {
-        total: totalProducts || 0,
-        active: activeProducts || 0,
+        total: stats.totalProducts,
+        active: stats.activeProducts,
         lowStock,
         outOfStock,
       },
@@ -237,6 +249,17 @@ export async function GET(request: NextRequest) {
         avgSavings: Math.round(avgSavings * 10) / 10,
         staleCount,
       },
+      stats: {
+        profitMargin: stats.profitMargin,
+        productsBelowMargin: stats.productsBelowMargin,
+        pendingSync: stats.pendingSync,
+        priceAlerts: stats.priceAlerts,
+      },
+      discovery,
+      demandDistribution,
+      revenueChart,
+      categoryBreakdown,
+      profitTrend,
     };
 
     return NextResponse.json({ data: dashboardData });

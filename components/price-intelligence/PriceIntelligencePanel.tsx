@@ -304,20 +304,24 @@ function panelReducer(state: PanelState, action: PanelAction): PanelState {
 
 /**
  * Check if product is stale
+ * Prioritizes amazon_fetched_at from competitor_prices table, falls back to last_price_check
  */
 function isProductStale(product: Product): boolean {
-  if (!product.last_price_check) return true;
-  const lastCheck = new Date(product.last_price_check).getTime();
+  const checkDate = product.amazon_fetched_at || product.last_price_check;
+  if (!checkDate) return true;
+  const lastCheck = new Date(checkDate).getTime();
   const thresholdMs = STALE_THRESHOLD_DAYS * 24 * 60 * 60 * 1000;
   return Date.now() - lastCheck > thresholdMs;
 }
 
 /**
  * Get days since last check
+ * Prioritizes amazon_fetched_at from competitor_prices table, falls back to last_price_check
  */
 function getDaysSinceCheck(product: Product): number | null {
-  if (!product.last_price_check) return null;
-  const lastCheck = new Date(product.last_price_check).getTime();
+  const checkDate = product.amazon_fetched_at || product.last_price_check;
+  if (!checkDate) return null;
+  const lastCheck = new Date(checkDate).getTime();
   return Math.floor((Date.now() - lastCheck) / (1000 * 60 * 60 * 24));
 }
 
@@ -999,9 +1003,9 @@ function PriceRow({
       {/* Product */}
       <td className="px-3 py-3">
         <div className="flex items-center gap-3">
-          {product.image_url ? (
-            <img
-              src={product.image_url}
+          {Array.isArray(product.images) && product.images[0]?.src ? (
+          <img
+            src={product.images[0].src}
               alt=""
               className="w-10 h-10 rounded object-cover bg-gray-100"
             />
@@ -1054,12 +1058,19 @@ function PriceRow({
 
       {/* Your Price */}
       <td className="px-3 py-3 text-sm font-mono font-medium text-green-600">
-        {formatPrice(product.retail_price || 0)}
+        {(product as any).variants?.[0]?.price ? formatPrice(parseFloat((product as any).variants[0].price)) : 'N/A'}
       </td>
 
       {/* Profit */}
       <td className="px-3 py-3">
-        <ProfitBadge margin={product.profit_margin ?? null} />
+        <ProfitBadge
+          margin={
+            product.profit_margin ??
+            (product.amazon_price && (product as any).variants?.[0]?.price
+              ? ((parseFloat((product as any).variants[0].price) - product.amazon_price) / parseFloat((product as any).variants[0].price)) * 100
+              : null)
+          }
+        />
       </td>
 
       {/* Last Check */}
@@ -1893,19 +1904,29 @@ export function PriceIntelligencePanel({
         dispatch({ type: 'SET_LOADING', payload: true });
         
         // Fetch price alerts from database
-        const alertsResponse = await fetch('/api/price-intelligence?type=alerts');
+        const alertsResponse = await fetch('/api/prices/intelligence?action=alerts&limit=50');
         const alertsData = await alertsResponse.json();
-        
-        // Fetch price history from database
-        const historyResponse = await fetch('/api/price-intelligence?type=history');
+
+        // Fetch price comparison data (map to history shape)
+        const historyResponse = await fetch('/api/prices/intelligence?action=comparison&limit=200');
         const historyData = await historyResponse.json();
         
         if (alertsData.success) {
           dispatch({ type: 'SET_ALERTS', payload: alertsData.data || [] });
         }
         
-        if (historyData.success) {
-          dispatch({ type: 'SET_HISTORY', payload: historyData.data || [] });
+        if (historyData.success && Array.isArray(historyData.data)) {
+          // Map price_comparison rows to PriceHistoryEntry[] expected by the UI
+          const mapped: PriceHistoryEntry[] = historyData.data.map((row: any) => ({
+            id: `pc-${row.product_id}`,
+            productId: row.product_id,
+            amazonPrice: Number(row.amazon_price) || 0,
+            retailPrice: Number(row.our_price) || 0,
+            profitMargin: Number(row.margin_percentage) || 0,
+            timestamp: row.last_updated || new Date().toISOString(),
+          }));
+
+          dispatch({ type: 'SET_HISTORY', payload: mapped });
         }
         
       } catch (error) {
@@ -2110,7 +2131,7 @@ export function PriceIntelligencePanel({
               Export CSV
             </button>
             {/* Refresh Button */}
-            <button
+            {/* <button
               onClick={() => {
                 dispatch({ type: 'SET_LOADING', payload: true });
                 setTimeout(() => {
@@ -2137,7 +2158,7 @@ export function PriceIntelligencePanel({
                 </svg>
               )}
               Refresh All
-            </button>
+            </button> */}
           </div>
         </div>
       </div>

@@ -222,9 +222,9 @@ CREATE INDEX IF NOT EXISTS idx_bulk_price_jobs_created_at
 -- SOCIAL POSTS TABLE (for AI Command Center create_posts action)
 -- ======================================================================
 
-CREATE TABLE IF NOT EXISTS IF NOT EXISTS social_posts (
+CREATE TABLE IF NOT EXISTS social_posts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  product_id UUID NOT NULL,
+  product_id text NOT NULL,
   platform TEXT NOT NULL CHECK (platform IN ('instagram', 'facebook', 'tiktok', 'pinterest')),
   caption TEXT NOT NULL,
   image_url TEXT,

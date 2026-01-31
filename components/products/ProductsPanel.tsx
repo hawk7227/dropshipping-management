@@ -631,9 +631,9 @@ function generateProductsCsv(products: Product[]): string {
     'ASIN',
     'Title',
     'Status',
-    'Amazon Price',
+    // 'Amazon Price',
     'Your Price',
-    'Profit Margin',
+    // 'Profit Margin',
     'Category',
     'Rating',
     'Reviews',
@@ -646,9 +646,9 @@ function generateProductsCsv(products: Product[]): string {
     p.asin,
     `"${p.title.replace(/"/g, '""')}"`,
     p.status,
-    p.amazon_price?.toFixed(2) ?? '',
+   // p.amazon_price?.toFixed(2) ?? '',
     p.retail_price?.toFixed(2) ?? '',
-    p.profit_margin?.toFixed(1) ?? '',
+   // p.profit_margin?.toFixed(1) ?? '',
     p.category ?? '',
     p.rating?.toString() ?? '',
     p.review_count?.toString() ?? '',
@@ -1988,9 +1988,9 @@ function ProductRow({
         </td>
 
         {/* Cost */}
-        <td className="px-3 py-3 whitespace-nowrap text-sm text-gray-900 font-mono">
+        {/* <td className="px-3 py-3 whitespace-nowrap text-sm text-gray-900 font-mono">
           {product.cost_price ? formatPrice(product.cost_price) : '-'}
-        </td>
+        </td> */}
 
         {/* Current Price */}
         <td className="px-3 py-3 whitespace-nowrap text-sm font-mono font-medium text-green-600">
@@ -1998,14 +1998,14 @@ function ProductRow({
         </td>
 
         {/* Profit */}
-        <td className="px-3 py-3 whitespace-nowrap">
+        {/* <td className="px-3 py-3 whitespace-nowrap">
           <ProfitBadge margin={(product as any).profit_margin} />
          {typeof (product as any).profit_margin === 'number' && (
             <div className="text-xs text-gray-500 font-mono">
               {((product as any).profit_margin).toFixed(1)}%
             </div>
           )}
-        </td>
+        </td> */}
 
         {/* Rating */}
         <td className="px-3 py-3 whitespace-nowrap">
@@ -2395,7 +2395,7 @@ function ActionBar({
         </button>
 
         {/* Import */}
-        <button
+        {/* <button
           onClick={onImport}
           disabled={isLoading}
           className="px-3 py-1.5 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
@@ -2404,7 +2404,7 @@ function ActionBar({
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
           </svg>
           Import Products
-        </button>
+        </button> */}
 
         {/* Bulk Actions */}
         {selectedCount > 0 && (
@@ -3156,15 +3156,15 @@ export function ProductsPanel({
                 <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Source
                 </th>
-                <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                {/* <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Amazon Cost
-                </th>
+                </th> */}
                 <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Your Price
                 </th>
-                <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                {/* <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Profit
-                </th>
+                </th> */}
                 <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Rating
                 </th>

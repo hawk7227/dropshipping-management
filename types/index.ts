@@ -64,6 +64,10 @@ export interface Product {
    * When present, this mirrors or complements cost_price.
    */
   amazon_price?: number | null;
+  amazon_last_checked?: string | null;
+  amazon_fetched_at?: string | null;
+  amazon_availability?: string | null;
+  amazon_is_prime?: boolean;
 
   // Pricing: Competitor displays (randomized, 80%+ higher)
   amazon_display_price?: number | null;
@@ -102,6 +106,7 @@ export interface Product {
   review_count?: number | null;
   is_prime?: boolean;
   image_url?: string | null;
+  images?: Array<{ src: string; alt?: string }> | null;
 
   // Inventory
   inventory_quantity?: number;

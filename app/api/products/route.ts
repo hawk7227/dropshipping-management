@@ -175,6 +175,33 @@ async function getProductsWithDetails({
     }
   }
 
+  // Fetch competitor prices (Amazon) for all products
+  // Note: product_id in competitor_prices is stored as "productId-amazon" format
+  let competitorPricesMap: Record<string, any> = {};
+  
+  if (productIds.length > 0) {
+    try {
+      // Build composite IDs for Amazon competitor prices
+      const amazonProductIds = productIds.map((id: string) => `${id}-amazon`);
+      console.log("amazonProductIds:", amazonProductIds);
+      const { data: competitorPrices } = await supabase
+        .from('competitor_prices')
+        .select('*')
+        .in('id', amazonProductIds);
+      console.log("competitorPrices:", competitorPrices);
+      if (competitorPrices) {
+        competitorPrices.forEach((cp: any) => {
+          // Extract the actual product ID from the composite format "productId-amazon"
+          const actualProductId = cp.product_id.replace('-amazon', '');
+          competitorPricesMap[actualProductId] = cp;
+        });
+      }
+    } catch (cpError) {
+      // Silently fail if competitor_prices table doesn't exist or has issues
+      console.warn('[Products API] Could not fetch competitor prices:', cpError);
+    }
+  }
+
   // Fetch variants for all products in a single query and map them by product_id
   let variantsMap: Record<string, any[]> = {};
   if (productIds.length > 0) {
@@ -206,6 +233,9 @@ async function getProductsWithDetails({
     
     // Get price snapshot for this product
     const priceSnapshot = priceSnapshotsMap[product.id] || null;
+
+    // Get competitor price (Amazon) for this product
+    const competitorPrice = competitorPricesMap[product.id] || null;
 
     // Calculate price freshness
     let priceFreshness: 'fresh' | 'stale' | 'very_stale' = 'fresh';
@@ -249,8 +279,16 @@ async function getProductsWithDetails({
     }
 
     // Calculate profit margin
-    const profitMargin = product.cost_price && product.current_price 
-      ? ((product.current_price - product.cost_price) / product.current_price) * 100
+    // Use Amazon competitor price if available, otherwise fall back to cost_price
+    const amazonPrice = competitorPrice?.competitor_price || product.cost_price;
+    const retailPrice = product.current_price;
+    
+    const profitMargin = amazonPrice && retailPrice
+      ? ((retailPrice - amazonPrice) / retailPrice) * 100
+      : null;
+    
+    const profitAmount = amazonPrice && retailPrice
+      ? retailPrice - amazonPrice
       : null;
 
     let profitStatus: 'profitable' | 'below_threshold' | 'unknown' = 'unknown';
@@ -294,7 +332,14 @@ async function getProductsWithDetails({
       demand_level: demandLevel,
       // Margin calculation
       profit_margin: profitMargin,
+      profit_amount: profitAmount,
       profit_status: profitStatus,
+      // Competitor pricing (Amazon)
+      amazon_price: competitorPrice?.competitor_price || null,
+      amazon_last_checked: competitorPrice?.last_checked || null,
+      amazon_fetched_at: competitorPrice?.fetched_at || null,
+      amazon_availability: competitorPrice?.availability || null,
+      amazon_is_prime: competitorPrice?.is_prime || false,
     };
   });
 

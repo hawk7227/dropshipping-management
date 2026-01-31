@@ -15,6 +15,7 @@ interface CompetitorPrice {
 interface PriceProduct {
   id: string;
   title: string;
+  image_url?: string;
   cost_price: number;
   our_price: number;
   amazon_price?: number;
@@ -353,7 +354,29 @@ export default function PriceIntelligenceDashboard() {
               <tbody className="divide-y">
                 {products.map(product => (
                   <tr key={product.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 text-sm text-gray-900 font-medium">{product.title}</td>
+                    <td className="px-6 py-4">
+                      <div className="asdasdasd flex items-center gap-3">
+                       {Array.isArray(product.images) && product.images[0]?.src ? (
+                        <img
+                          src={product.images[0].src}
+                            alt=""
+                            className="h-10 w-10 rounded object-cover bg-gray-100"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className="h-10 w-10 rounded bg-gray-200 flex items-center justify-center text-gray-400">
+                            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                            </svg>
+                          </div>
+                        )}
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-gray-900 truncate max-w-[200px]" title={product.title}>
+                            {product.title}
+                          </p>
+                        </div>
+                      </div>
+                    </td>
                     <td className="px-6 py-4 text-sm font-medium text-gray-900">${product.our_price.toFixed(2)}</td>
                     <td className="px-6 py-4 text-sm text-gray-600">${product.lowest_competitor.toFixed(2)}</td>
                     <td className="px-6 py-4 text-sm font-medium text-gray-900">{product.margin_percentage.toFixed(1)}%</td>
