@@ -1,0 +1,54 @@
+// app/api/health/crons/route.ts
+// Returns recent cron job execution status from cron_job_logs table
+
+import { NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
+
+export async function GET() {
+  try {
+    // Get the most recent log for each job type
+    const { data: logs, error } = await supabase
+      .from('cron_job_logs')
+      .select('job_type, status, started_at, completed_at, processed, errors, message')
+      .order('started_at', { ascending: false })
+      .limit(100);
+
+    if (error) {
+      // Table might not exist yet
+      if (error.code === '42P01') {
+        return NextResponse.json({
+          success: true,
+          logs: [],
+          message: 'cron_job_logs table not found - run migrations',
+        });
+      }
+      throw error;
+    }
+
+    // Get unique most recent log per job type
+    const latestByJob: Record<string, any> = {};
+    for (const log of logs || []) {
+      if (!latestByJob[log.job_type]) {
+        latestByJob[log.job_type] = log;
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      logs: Object.values(latestByJob),
+      total: Object.keys(latestByJob).length,
+    });
+  } catch (error) {
+    console.error('[Health/Crons] Error:', error);
+    return NextResponse.json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to fetch cron logs',
+      logs: [],
+    }, { status: 500 });
+  }
+}
