@@ -14,8 +14,9 @@ import {
 import type { Product, ProductStatus, ApiResponse } from '@/types';
 import type { ApiError } from '@/types/errors';
 import { ProductsPanel } from '@/components/products/ProductsPanel';
-import { ImportPanel } from '@/components/import/ImportPanel';
+import ImportPanelEnhanced from '@/components/import/ImportPanelEnhanced';
 import { BulkVerifyPanel } from '@/components/products/BulkVerifyPanel';
+import { ManualSourcingBar } from '@/components/products/ManualSourcingBar';
 import { FeatureStatusBanner } from '@/components/ui/FeatureStatusBanner';
 import { PageHealthCheck } from '@/components/ui/PageHealthCheck';
 import { AISuggestionBot } from '@/components/ai-assistant/AISuggestionBot';
@@ -677,6 +678,9 @@ export default function ProductsPage() {
               isLoading={state.isLoading}
             />
 
+            {/* Manual Sourcing Bar - Same criteria as 4AM cron */}
+            <ManualSourcingBar onSourcingComplete={() => fetchProducts()} />
+
             <ProductsPanel
               initialProducts={state.products}
               onProductsChange={(products) => dispatch({ type: 'SET_PRODUCTS', payload: products })}
@@ -684,8 +688,8 @@ export default function ProductsPage() {
           </>
         )}
 
-        {/* Import Modal */}
-        <ImportPanel
+        {/* Import Modal - Enhanced with AI Bot */}
+        <ImportPanelEnhanced
           isOpen={state.showImport}
           onClose={() => dispatch({ type: 'TOGGLE_IMPORT' })}
           onImportComplete={handleImportComplete}
@@ -708,4 +712,6 @@ export default function ProductsPage() {
       </div>
   );
 }
+
+
 
