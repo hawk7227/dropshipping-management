@@ -183,27 +183,7 @@ export async function middleware(request: NextRequest) {
   // AUTH REQUIRED ROUTES
   // ============================================================================
 
-  if (
-    isInRouteList(pathname, ROUTES.authRequired) ||
-    isInRouteList(pathname, ROUTES.authApiRoutes)
-  ) {
-    if (!isAuthenticated) {
-      console.log('[middleware] Auth required, user not authenticated');
-
-      // API routes return 401
-      if (pathname.startsWith('/api/')) {
-        return NextResponse.json(
-          { error: 'Authentication required' },
-          { status: 401 }
-        );
-      }
-
-      // Page routes redirect to login
-      const loginUrl = new URL('/login', request.url);
-      loginUrl.searchParams.set('redirect', pathname);
-      return NextResponse.redirect(loginUrl);
-    }
-  }
+ 
 
   // ============================================================================
   // MEMBER REQUIRED ROUTES
