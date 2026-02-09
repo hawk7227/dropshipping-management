@@ -1,0 +1,366 @@
+'use client';
+
+// components/products/ShopifySyncModal.tsx
+// ═══════════════════════════════════════════════════════════════════════════
+// SHOPIFY SYNC CONFIRMATION MODAL — Spec Item 16
+// Shows pricing rules, product preview, competitor price display
+// before confirming sync to Shopify
+// ═══════════════════════════════════════════════════════════════════════════
+
+import { useState, useMemo } from 'react';
+import { PRICING_RULES, COMPETITOR_NAMES } from '@/lib/config/pricing-rules';
+import type { Product } from '@/types';
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ICONS
+// ═══════════════════════════════════════════════════════════════════════════
+
+const Icons = {
+  X: ({ className = "w-5 h-5" }: { className?: string }) => (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+    </svg>
+  ),
+  ShoppingBag: ({ className = "w-5 h-5" }: { className?: string }) => (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
+    </svg>
+  ),
+  Check: ({ className = "w-5 h-5" }: { className?: string }) => (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+    </svg>
+  ),
+  AlertTriangle: ({ className = "w-5 h-5" }: { className?: string }) => (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+    </svg>
+  ),
+  ArrowRight: ({ className = "w-4 h-4" }: { className?: string }) => (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+    </svg>
+  ),
+  Loader: ({ className = "w-5 h-5" }: { className?: string }) => (
+    <svg className={`${className} animate-spin`} fill="none" viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+    </svg>
+  ),
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TYPES
+// ═══════════════════════════════════════════════════════════════════════════
+
+interface ShopifySyncModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirm: () => Promise<void>;
+  products: Product[];
+  mode: 'selected' | 'all' | 'unsynced';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════════════════════
+
+function formatPrice(price: number | null | undefined): string {
+  if (price === null || price === undefined) return '—';
+  return `$${price.toFixed(2)}`;
+}
+
+function generateCompetitorPrice(yourPrice: number, range: { min: number; max: number }): number {
+  const multiplier = range.min + Math.random() * (range.max - range.min);
+  return Math.round(yourPrice * multiplier * 100) / 100;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COMPONENT
+// ═══════════════════════════════════════════════════════════════════════════
+
+export function ShopifySyncModal({
+  isOpen,
+  onClose,
+  onConfirm,
+  products,
+  mode,
+}: ShopifySyncModalProps) {
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  const rules = PRICING_RULES;
+
+  // Compute summary stats
+  const stats = useMemo(() => {
+    const alreadySynced = products.filter(p => p.shopify_product_id || p.shopify_id).length;
+    const needsSync = products.length - alreadySynced;
+    const withPricing = products.filter(p => p.retail_price && p.cost_price).length;
+    const avgMargin = products.reduce((sum, p) => sum + (p.profit_percent || 0), 0) / (products.length || 1);
+    const lowMargin = products.filter(p => (p.profit_percent || 0) < rules.profitThresholds.minimum).length;
+
+    return { alreadySynced, needsSync, withPricing, avgMargin, lowMargin };
+  }, [products, rules.profitThresholds.minimum]);
+
+  // Sample pricing preview (first 3 products)
+  const pricingPreview = useMemo(() => {
+    return products.slice(0, 3).map(p => {
+      const yourPrice = p.retail_price || 0;
+      return {
+        title: (p.title || 'Untitled').substring(0, 45),
+        asin: p.asin || p.source_product_id || '—',
+        cost: p.cost_price,
+        yourPrice,
+        competitors: {
+          amazon: generateCompetitorPrice(yourPrice, rules.competitors.ranges.amazon),
+          costco: generateCompetitorPrice(yourPrice, rules.competitors.ranges.costco),
+          ebay: generateCompetitorPrice(yourPrice, rules.competitors.ranges.ebay),
+          sams: generateCompetitorPrice(yourPrice, rules.competitors.ranges.sams),
+        },
+        margin: p.profit_percent || 0,
+      };
+    });
+  }, [products, rules.competitors.ranges]);
+
+  const handleConfirm = async () => {
+    setIsSyncing(true);
+    setSyncResult(null);
+    try {
+      await onConfirm();
+      setSyncResult({ success: true, message: `Successfully synced ${products.length} products to Shopify` });
+    } catch (err) {
+      setSyncResult({
+        success: false,
+        message: err instanceof Error ? err.message : 'Sync failed',
+      });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  const modeLabel = mode === 'selected' ? 'Selected' : mode === 'unsynced' ? 'Unsynced' : 'All';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      {/* Backdrop */}
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+
+      {/* Modal */}
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
+        {/* Header */}
+        <div className="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-green-50 to-emerald-50 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-green-100 rounded-lg">
+              <Icons.ShoppingBag className="w-5 h-5 text-green-700" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-gray-900">Sync to Shopify</h2>
+              <p className="text-sm text-gray-500">
+                {modeLabel} — {products.length} product{products.length !== 1 ? 's' : ''}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100 transition-colors"
+            aria-label="Close"
+          >
+            <Icons.X />
+          </button>
+        </div>
+
+        {/* Body (scrollable) */}
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+
+          {/* Stats Summary */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <StatCard label="To Sync" value={stats.needsSync} color="blue" />
+            <StatCard label="Already Synced" value={stats.alreadySynced} color="gray" />
+            <StatCard label="Avg Margin" value={`${stats.avgMargin.toFixed(0)}%`} color="green" />
+            <StatCard
+              label="Low Margin"
+              value={stats.lowMargin}
+              color={stats.lowMargin > 0 ? 'amber' : 'green'}
+            />
+          </div>
+
+          {/* Low Margin Warning */}
+          {stats.lowMargin > 0 && (
+            <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+              <Icons.AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+              <div>
+                <p className="font-medium">{stats.lowMargin} product{stats.lowMargin !== 1 ? 's' : ''} below {rules.profitThresholds.minimum}% margin threshold</p>
+                <p className="text-xs mt-0.5">These will trigger margin alerts. Products below threshold for {rules.profitThresholds.gracePeriodDays} days are auto-paused.</p>
+              </div>
+            </div>
+          )}
+
+          {/* Pricing Rules Summary */}
+          <div className="bg-gray-50 rounded-lg border border-gray-200 p-4">
+            <h3 className="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-3">Pricing Rules Applied</h3>
+            <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-gray-500">Your Markup</span>
+                <span className="font-medium text-gray-900">{rules.yourMarkup.multiplier}x</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Min Competitor</span>
+                <span className="font-medium text-gray-900">{((rules.competitors.minimumMarkup - 1) * 100).toFixed(0)}% higher</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Target Profit</span>
+                <span className="font-medium text-gray-900">{rules.profitThresholds.target}%</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Grace Period</span>
+                <span className="font-medium text-gray-900">{rules.profitThresholds.gracePeriodDays} days</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Pricing Preview Table */}
+          {pricingPreview.length > 0 && (
+            <div>
+              <h3 className="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-3">
+                Price Preview (sample of {Math.min(3, products.length)})
+              </h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-xs uppercase tracking-wider text-gray-400 border-b border-gray-200">
+                      <th className="text-left py-2 pr-2 font-medium">Product</th>
+                      <th className="text-right py-2 px-2 font-medium">Cost</th>
+                      <th className="text-right py-2 px-2 font-medium text-blue-600">Your Price</th>
+                      {Object.keys(COMPETITOR_NAMES).map(key => (
+                        <th key={key} className="text-right py-2 px-2 font-medium text-orange-500">
+                          {COMPETITOR_NAMES[key as keyof typeof COMPETITOR_NAMES]}
+                        </th>
+                      ))}
+                      <th className="text-right py-2 pl-2 font-medium text-green-600">Margin</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {pricingPreview.map((item, i) => (
+                      <tr key={i} className="hover:bg-gray-50/50">
+                        <td className="py-2 pr-2">
+                          <p className="font-medium text-gray-900 truncate max-w-[160px]">{item.title}</p>
+                          <p className="text-[10px] text-gray-400 font-mono">{item.asin}</p>
+                        </td>
+                        <td className="py-2 px-2 text-right text-gray-500 tabular-nums">{formatPrice(item.cost)}</td>
+                        <td className="py-2 px-2 text-right font-semibold text-blue-700 tabular-nums">{formatPrice(item.yourPrice)}</td>
+                        <td className="py-2 px-2 text-right text-orange-600 tabular-nums line-through opacity-70">{formatPrice(item.competitors.amazon)}</td>
+                        <td className="py-2 px-2 text-right text-orange-600 tabular-nums line-through opacity-70">{formatPrice(item.competitors.costco)}</td>
+                        <td className="py-2 px-2 text-right text-orange-600 tabular-nums line-through opacity-70">{formatPrice(item.competitors.ebay)}</td>
+                        <td className="py-2 px-2 text-right text-orange-600 tabular-nums line-through opacity-70">{formatPrice(item.competitors.sams)}</td>
+                        <td className="py-2 pl-2 text-right">
+                          <span className={`inline-block text-xs font-bold px-1.5 py-0.5 rounded ${
+                            item.margin >= rules.profitThresholds.target
+                              ? 'bg-green-100 text-green-700'
+                              : item.margin >= rules.profitThresholds.minimum
+                              ? 'bg-yellow-100 text-yellow-700'
+                              : 'bg-red-100 text-red-700'
+                          }`}>
+                            {item.margin.toFixed(0)}%
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-[10px] text-gray-400 mt-2">
+                Competitor prices are display-only — customers see these as strikethrough prices on your store.
+                All competitor prices are {((rules.competitors.minimumMarkup - 1) * 100).toFixed(0)}%+ higher than your price (enforced).
+              </p>
+            </div>
+          )}
+
+          {/* Sync Result */}
+          {syncResult && (
+            <div className={`flex items-start gap-2 p-3 rounded-lg text-sm ${
+              syncResult.success
+                ? 'bg-green-50 text-green-800 border border-green-200'
+                : 'bg-red-50 text-red-800 border border-red-200'
+            }`}>
+              {syncResult.success
+                ? <Icons.Check className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                : <Icons.AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+              }
+              {syncResult.message}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 flex items-center justify-between">
+          <p className="text-xs text-gray-400">
+            Pushes products + pricing + metafields (ASIN, cost, profit %, Amazon URL)
+          </p>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 rounded-lg transition-colors"
+              disabled={isSyncing}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleConfirm}
+              disabled={isSyncing || products.length === 0 || syncResult?.success === true}
+              className={`flex items-center gap-2 px-5 py-2.5 text-sm font-semibold rounded-lg transition-all ${
+                isSyncing || products.length === 0 || syncResult?.success === true
+                  ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                  : 'bg-green-600 text-white hover:bg-green-700 active:bg-green-800 shadow-sm'
+              }`}
+            >
+              {isSyncing ? (
+                <>
+                  <Icons.Loader className="w-4 h-4" />
+                  Syncing...
+                </>
+              ) : syncResult?.success ? (
+                <>
+                  <Icons.Check className="w-4 h-4" />
+                  Done
+                </>
+              ) : (
+                <>
+                  <Icons.ShoppingBag className="w-4 h-4" />
+                  Sync {stats.needsSync > 0 ? stats.needsSync : products.length} to Shopify
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STAT CARD SUB-COMPONENT
+// ═══════════════════════════════════════════════════════════════════════════
+
+function StatCard({ label, value, color }: {
+  label: string;
+  value: number | string;
+  color: 'blue' | 'green' | 'gray' | 'amber';
+}) {
+  const colorMap = {
+    blue: 'bg-blue-50 text-blue-700 border-blue-200',
+    green: 'bg-green-50 text-green-700 border-green-200',
+    gray: 'bg-gray-50 text-gray-600 border-gray-200',
+    amber: 'bg-amber-50 text-amber-700 border-amber-200',
+  };
+
+  return (
+    <div className={`rounded-lg border p-3 text-center ${colorMap[color]}`}>
+      <p className="text-lg font-bold">{value}</p>
+      <p className="text-[10px] uppercase tracking-wider opacity-70">{label}</p>
+    </div>
+  );
+}
+
+export default ShopifySyncModal;
