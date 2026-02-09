@@ -790,6 +790,13 @@ export async function GET(request: NextRequest) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 export async function POST(request: NextRequest) {
+  // ── DEPRECATION NOTICE — Spec Item 29 ──────────────────────────────
+  // This route is deprecated. All new code should use /api/import/v2 (Keepa-based).
+  // ManualSourcingBar still calls this route — it will be migrated in a future step.
+  // Added: Deprecation header for monitoring + console warning
+  console.warn('[DEPRECATED] /api/import POST called — use /api/import/v2 instead. Caller:', request.headers.get('referer') || 'unknown');
+  // ────────────────────────────────────────────────────────────────────
+
   try {
     const body = await request.json() as ImportRequest;
 

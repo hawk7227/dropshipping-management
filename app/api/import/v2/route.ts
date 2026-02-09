@@ -263,6 +263,9 @@ export async function POST(request: NextRequest) {
         handle: `product-${asin.toLowerCase()}`,
         description: keepaData.description || null,
         
+        // AI-optimized title (Spec Item 33) — set below after optimization
+        original_title: keepaData.title || existingFileData?.title || `Product ${asin}`,
+        
         // Images - THIS IS THE KEY FIX
         image_url: keepaData.mainImage,
         images: keepaData.images,
@@ -328,6 +331,56 @@ export async function POST(request: NextRequest) {
         profitPercent: productRecord.profit_percent,
         status: status,
       });
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════════
+    // STEP 4.5: AI Title Optimization (Spec Item 33)
+    // Optimizes titles for Google Shopping + SEO if OPENAI_API_KEY is set
+    // Falls back to raw title if AI unavailable or fails
+    // ═══════════════════════════════════════════════════════════════════════
+    
+    const allProducts = [...productsToInsert, ...productsToUpdate];
+    if (process.env.OPENAI_API_KEY && allProducts.length > 0) {
+      console.log(`[Import V2] Optimizing ${allProducts.length} titles with AI...`);
+      try {
+        const { optimizeTitle } = await import('@/lib/ai-optimization');
+        
+        // Process in parallel batches of 5 to avoid rate limits
+        const BATCH_SIZE = 5;
+        for (let i = 0; i < allProducts.length; i += BATCH_SIZE) {
+          const batch = allProducts.slice(i, i + BATCH_SIZE);
+          const optimizations = await Promise.allSettled(
+            batch.map(async (prod) => {
+              const aiProduct = {
+                id: prod.asin,
+                title: prod.original_title || prod.title,
+                description: prod.description || '',
+                price: prod.price || 0,
+                costPrice: prod.cost || prod.amazon_price,
+                category: prod.category,
+              };
+              const result = await optimizeTitle(aiProduct);
+              return { asin: prod.asin, optimizedTitle: result.title, score: result.score };
+            })
+          );
+          
+          // Apply successful optimizations
+          for (const opt of optimizations) {
+            if (opt.status === 'fulfilled' && opt.value.optimizedTitle) {
+              const target = allProducts.find(p => p.asin === opt.value.asin);
+              if (target && opt.value.score > 40) {
+                target.title = opt.value.optimizedTitle;
+                target.ai_title_score = opt.value.score;
+                target.ai_optimized_at = new Date().toISOString();
+              }
+            }
+          }
+        }
+        console.log(`[Import V2] AI title optimization complete`);
+      } catch (aiErr) {
+        // Non-fatal — continue with raw titles
+        console.warn('[Import V2] AI title optimization skipped:', aiErr instanceof Error ? aiErr.message : aiErr);
+      }
     }
     
     // ═══════════════════════════════════════════════════════════════════════

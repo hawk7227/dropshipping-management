@@ -161,11 +161,65 @@ export async function GET(request: NextRequest) {
       switch (jobType) {
         case 'product-discovery': {
           // P1.2: Product Discovery - Daily at 4 AM
+          // Item 21: Read config from sourcing_settings table
+          let discoveryCategories = ['kitchen', 'home', 'beauty'];
+          let discoveryMaxProducts = 100;
+          let discoveryEnabled = true;
+
+          try {
+            const { data: settings } = await supabase
+              .from('sourcing_settings')
+              .select('enabled, criteria, cron_interval')
+              .limit(1)
+              .maybeSingle();
+
+            if (settings) {
+              discoveryEnabled = settings.enabled !== false;
+              const criteria = settings.criteria as any;
+              if (criteria?.search_terms && Array.isArray(criteria.search_terms)) {
+                discoveryCategories = criteria.search_terms;
+              }
+              if (criteria?.max_products_per_run) {
+                discoveryMaxProducts = criteria.max_products_per_run;
+              }
+            }
+          } catch (settingsErr) {
+            console.warn('[Cron] Could not read sourcing_settings:', settingsErr);
+          }
+
+          if (!discoveryEnabled) {
+            result = {
+              job: 'product-discovery',
+              success: true,
+              processed: 0,
+              errors: 0,
+              message: 'Auto sourcing is disabled in sourcing_settings',
+              duration_seconds: duration(),
+              timestamp: new Date().toISOString(),
+            };
+            break;
+          }
+
+          console.log(`[Cron] Product discovery: categories=${discoveryCategories.join(', ')}, max=${discoveryMaxProducts}`);
           const discoveryResult = await runP1Discovery({
-            searchTerms: ['kitchen gadgets', 'phone accessories', 'home organization'],
-            maxProducts: 100,
+            categories: discoveryCategories,
+            maxProducts: discoveryMaxProducts,
             dryRun: false
           });
+
+          // Update last_run in sourcing_settings
+          await supabase
+            .from('sourcing_settings')
+            .update({
+              last_run_at: new Date().toISOString(),
+              last_run_status: discoveryResult.errors.length === 0 ? 'completed' : 'failed',
+              last_run_found: discoveryResult.found,
+              last_run_imported: discoveryResult.imported,
+            })
+            .not('id', 'is', null)
+            .then(({ error: updateErr }) => {
+              if (updateErr) console.warn('[Cron] sourcing_settings update error:', updateErr.message);
+            });
 
           result = {
             job: 'product-discovery',
@@ -187,19 +241,31 @@ export async function GET(request: NextRequest) {
 
         case 'price-sync': {
           // P2.2: Price Sync - Every hour
+          // Step 1: Fetch latest prices from Keepa
           const priceResult = await runP1PriceSync({ limit: 50 });
+
+          // Step 2: Apply pricing rules + grace period enforcement (Items 34, 39)
+          let pricingCycleResult = null;
+          try {
+            const { executePricingCycle } = await import('@/lib/pricing-execution');
+            pricingCycleResult = await executePricingCycle();
+          } catch (pricingErr) {
+            console.warn('[Cron] Pricing execution skipped:', pricingErr instanceof Error ? pricingErr.message : pricingErr);
+          }
 
           result = {
             job: 'price-sync',
             success: priceResult.errors === 0,
             processed: priceResult.processed,
             errors: priceResult.errors,
-            message: `Price sync completed: ${priceResult.updated} updated, ${priceResult.errors} errors`,
+            message: `Price sync: ${priceResult.updated} updated, ${priceResult.errors} errors` +
+              (pricingCycleResult ? ` | Pricing: ${pricingCycleResult.pricesUpdated} repriced, ${pricingCycleResult.autoPaused} paused, ${pricingCycleResult.shopifyPushed} pushed` : ''),
             duration_seconds: duration(),
             timestamp: new Date().toISOString(),
             details: {
               updated: priceResult.updated,
-              errorDetails: priceResult.errorDetails
+              errorDetails: priceResult.errorDetails,
+              pricingCycle: pricingCycleResult || null,
             }
           };
           break;
@@ -397,17 +463,62 @@ export async function GET(request: NextRequest) {
         }
 
         case 'google-shopping':
-        case 'omnipresence': 
-        case 'daily-learning': {
-          // P3 jobs - stubs for now
+        case 'omnipresence': {
+          // P3: Programmatic SEO + FAQ generation (Items 42, 43)
+          let seoResult = null;
+          let faqResult = null;
+          try {
+            const { executeSEOCycle } = await import('@/lib/programmatic-seo-engine');
+            seoResult = await executeSEOCycle();
+          } catch (seoErr) {
+            console.warn('[Cron] SEO cycle skipped:', seoErr instanceof Error ? seoErr.message : seoErr);
+          }
+          try {
+            const { generateAllFAQs } = await import('@/lib/faq-schema-generator');
+            faqResult = await generateAllFAQs();
+          } catch (faqErr) {
+            console.warn('[Cron] FAQ generation skipped:', faqErr instanceof Error ? faqErr.message : faqErr);
+          }
+
           result = {
-            job: jobType,
+            job: 'omnipresence',
             success: true,
-            processed: 0,
-            errors: 0,
-            message: `${jobType} completed (P3 stub)`,
+            processed: (seoResult?.pagesGenerated || 0) + (faqResult?.generated || 0),
+            errors: [...(seoResult?.errors || []), ...(faqResult?.errors || [])].length,
+            message: `SEO: ${seoResult?.pagesGenerated || 0} pages | FAQ: ${faqResult?.generated || 0} generated`,
             duration_seconds: duration(),
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            details: { seo: seoResult, faq: faqResult },
+          };
+          break;
+        }
+
+        case 'daily-learning': {
+          // P3: Behavioral segmentation + GSC fetch (Items 46, 47)
+          let segResult = null;
+          let gscResult = null;
+          try {
+            const { runSegmentation } = await import('@/lib/behavioral-segmentation');
+            segResult = await runSegmentation();
+          } catch (segErr) {
+            console.warn('[Cron] Segmentation skipped:', segErr instanceof Error ? segErr.message : segErr);
+          }
+          try {
+            const { fetchSearchPerformance } = await import('@/lib/google-search-console');
+            gscResult = await fetchSearchPerformance({ days: 7 });
+          } catch (gscErr) {
+            console.warn('[Cron] GSC fetch skipped:', gscErr instanceof Error ? gscErr.message : gscErr);
+          }
+
+          result = {
+            job: 'daily-learning',
+            success: true,
+            processed: (segResult?.assignments || 0) + (gscResult?.stored || 0),
+            errors: [...(segResult?.errors || []), ...(gscResult?.errors || [])].length,
+            message: `Segments: ${segResult?.assignments || 0} assignments | GSC: ${gscResult?.stored || 0} rows, ${gscResult?.opportunities?.length || 0} opportunities`,
+            duration_seconds: duration(),
+            timestamp: new Date().toISOString(),
+            details: { segmentation: segResult, gsc: gscResult },
           };
           break;
         }
