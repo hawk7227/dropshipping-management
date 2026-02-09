@@ -1,0 +1,1650 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dropshipping Platform - Price Intelligence & AI Command Center</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: '#111827',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    .spinner {
+      border: 2px solid #e5e7eb;
+      border-top-color: #374151;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .fade-in {
+      animation: fadeIn 0.3s ease-in;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .slide-up {
+      animation: slideUp 0.3s ease-out;
+    }
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <!-- Navigation -->
+  <nav class="bg-white border-b border-gray-200 sticky top-0 z-40">
+    <div class="max-w-7xl mx-auto px-6">
+      <div class="flex items-center justify-between h-16">
+        <div class="flex items-center gap-8">
+          <div class="flex items-center gap-2">
+            <div class="w-8 h-8 bg-gray-900 rounded-lg flex items-center justify-center">
+              <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+            </div>
+            <span class="font-semibold text-gray-900">DropshipPro</span>
+          </div>
+          <div class="flex gap-1">
+            <button onclick="switchPage('prices')" id="nav-prices" class="nav-btn px-4 py-2 text-sm font-medium rounded-md text-gray-900 bg-gray-100">
+              Price Intelligence
+            </button>
+            <button onclick="switchPage('ai')" id="nav-ai" class="nav-btn px-4 py-2 text-sm font-medium rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">
+              AI Command Center
+            </button>
+            <button onclick="switchPage('import')" id="nav-import" class="nav-btn px-4 py-2 text-sm font-medium rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50">
+              Bulk Import
+            </button>
+          </div>
+        </div>
+        <div class="flex items-center gap-4">
+          <button class="relative p-2 text-gray-500 hover:text-gray-700">
+            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+            </svg>
+            <span id="alert-badge" class="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center">3</span>
+          </button>
+          <div class="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center">
+            <span class="text-sm font-medium text-gray-600">M</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main Content -->
+  <main class="max-w-7xl mx-auto px-6 py-8">
+    
+    <!-- ======================= -->
+    <!-- PRICE INTELLIGENCE PAGE -->
+    <!-- ======================= -->
+    <div id="page-prices" class="page-content">
+      <!-- Alerts Banner -->
+      <div id="alerts-banner" class="mb-6 bg-amber-50 border border-amber-200 rounded-lg p-4 fade-in">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <div class="p-2 bg-amber-100 rounded-full">
+              <svg class="w-5 h-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+              </svg>
+            </div>
+            <div>
+              <p class="font-medium text-amber-800">
+                <span id="alert-count">3</span> new alerts
+              </p>
+              <p class="text-sm text-amber-600">
+                Price changes and availability updates detected
+              </p>
+            </div>
+          </div>
+          <div class="flex gap-2">
+            <button onclick="showAlertsModal()" class="px-3 py-1.5 text-sm font-medium text-amber-700 hover:bg-amber-100 rounded-md">
+              View Alerts
+            </button>
+            <button onclick="dismissAllAlerts()" class="px-3 py-1.5 text-sm font-medium text-amber-700 hover:bg-amber-100 rounded-md">
+              Dismiss All
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stats Grid -->
+      <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
+        <div class="bg-white border border-gray-200 rounded-lg p-5">
+          <div class="flex items-start justify-between">
+            <div>
+              <p class="text-sm text-gray-500">Products Tracked</p>
+              <p class="text-2xl font-semibold text-gray-900 mt-1">2,847</p>
+            </div>
+            <div class="text-gray-400">
+              <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+              </svg>
+            </div>
+          </div>
+        </div>
+        <div class="bg-white border border-gray-200 rounded-lg p-5">
+          <div class="flex items-start justify-between">
+            <div>
+              <p class="text-sm text-gray-500">Avg Savings</p>
+              <p class="text-2xl font-semibold text-gray-900 mt-1">12.4%</p>
+            </div>
+            <div class="text-gray-400">
+              <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+              </svg>
+            </div>
+          </div>
+        </div>
+        <div class="bg-white border border-gray-200 rounded-lg p-5">
+          <div class="flex items-start justify-between">
+            <div>
+              <p class="text-sm text-gray-500">Need Refresh</p>
+              <p class="text-2xl font-semibold text-gray-900 mt-1">156</p>
+            </div>
+            <div class="text-gray-400">
+              <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </div>
+          </div>
+        </div>
+        <div class="bg-red-50 border border-red-200 rounded-lg p-5">
+          <div class="flex items-start justify-between">
+            <div>
+              <p class="text-sm text-gray-500">Out of Stock</p>
+              <p class="text-2xl font-semibold text-red-900 mt-1">43</p>
+            </div>
+            <div class="text-red-400">
+              <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+              </svg>
+            </div>
+          </div>
+        </div>
+        <div class="bg-green-50 border border-green-200 rounded-lg p-5">
+          <div class="flex items-start justify-between">
+            <div>
+              <p class="text-sm text-gray-500">Price Drops</p>
+              <p class="text-2xl font-semibold text-green-900 mt-1">28</p>
+            </div>
+            <div class="text-green-400">
+              <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6" />
+              </svg>
+            </div>
+          </div>
+        </div>
+        <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-5">
+          <div class="flex items-start justify-between">
+            <div>
+              <p class="text-sm text-gray-500">Price Increases</p>
+              <p class="text-2xl font-semibold text-yellow-900 mt-1">15</p>
+            </div>
+            <div class="text-yellow-400">
+              <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+              </svg>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Price Table Card -->
+      <div class="bg-white border border-gray-200 rounded-lg">
+        <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+          <div>
+            <h3 class="text-base font-semibold text-gray-900">Competitor Prices & Availability</h3>
+          </div>
+          <div class="flex gap-2">
+            <button onclick="showImportModal()" class="inline-flex items-center px-3 py-1.5 text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md">
+              <svg class="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+              </svg>
+              Import Data
+            </button>
+            <button onclick="showRulesModal()" class="inline-flex items-center px-3 py-1.5 text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md">
+              <svg class="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+              Monitoring Rules
+            </button>
+            <button onclick="refreshPrices()" id="refresh-btn" class="inline-flex items-center px-4 py-1.5 text-sm font-medium text-white bg-gray-900 hover:bg-gray-800 rounded-md">
+              Refresh Prices
+            </button>
+          </div>
+        </div>
+        
+        <!-- Filters -->
+        <div class="px-6 py-4 border-b border-gray-100 flex flex-wrap gap-4">
+          <div class="flex items-center gap-2">
+            <label class="text-sm text-gray-600">Availability:</label>
+            <select id="filter-availability" onchange="filterTable()" class="text-sm border rounded px-2 py-1">
+              <option value="all">All</option>
+              <option value="in_stock">In Stock</option>
+              <option value="low_stock">Low Stock</option>
+              <option value="out_of_stock">Out of Stock</option>
+            </select>
+          </div>
+          <div class="flex items-center gap-2">
+            <label class="text-sm text-gray-600">Price Change:</label>
+            <select id="filter-price-change" onchange="filterTable()" class="text-sm border rounded px-2 py-1">
+              <option value="all">All</option>
+              <option value="drop">Price Drops</option>
+              <option value="increase">Price Increases</option>
+              <option value="changed">Any Change</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Tabs -->
+        <div class="px-6 border-b border-gray-200">
+          <nav class="flex gap-6">
+            <button onclick="switchTab('all')" class="price-tab py-3 text-sm font-medium border-b-2 border-gray-900 text-gray-900" data-tab="all">
+              All Products
+            </button>
+            <button onclick="switchTab('stale')" class="price-tab py-3 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700" data-tab="stale">
+              Need Refresh <span class="ml-2 px-2 py-0.5 rounded-full text-xs bg-gray-100">156</span>
+            </button>
+            <button onclick="switchTab('outofstock')" class="price-tab py-3 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700" data-tab="outofstock">
+              Out of Stock <span class="ml-2 px-2 py-0.5 rounded-full text-xs bg-red-100 text-red-700">43</span>
+            </button>
+            <button onclick="switchTab('pricechanges')" class="price-tab py-3 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700" data-tab="pricechanges">
+              Price Changes <span class="ml-2 px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-700">43</span>
+            </button>
+          </nav>
+        </div>
+
+        <!-- Table -->
+        <div class="p-6">
+          <div class="overflow-x-auto">
+            <table class="w-full">
+              <thead>
+                <tr class="border-b border-gray-200">
+                  <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Availability</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amazon Price</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Our Price</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Savings</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Updated</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"></th>
+                </tr>
+              </thead>
+              <tbody id="price-table-body" class="divide-y divide-gray-100">
+                <!-- Data will be inserted here -->
+              </tbody>
+            </table>
+          </div>
+          
+          <!-- Pagination -->
+          <div class="flex items-center justify-between px-4 py-3 border-t border-gray-200 mt-4">
+            <div class="text-sm text-gray-500">
+              Page 1 of 12
+            </div>
+            <div class="flex gap-2">
+              <button class="px-3 py-1.5 text-sm font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-md" disabled>
+                Previous
+              </button>
+              <button class="px-3 py-1.5 text-sm font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-md">
+                Next
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== -->
+    <!-- AI COMMAND CENTER -->
+    <!-- ==================== -->
+    <div id="page-ai" class="page-content hidden">
+      <!-- Command Input Card -->
+      <div class="bg-white border border-gray-200 rounded-lg p-6 mb-6">
+        <div class="flex items-center gap-3 mb-4">
+          <div class="p-2 bg-gradient-to-br from-purple-500 to-blue-500 rounded-lg">
+            <svg class="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+            </svg>
+          </div>
+          <div>
+            <h3 class="font-semibold text-gray-900">AI Command Center</h3>
+            <p class="text-sm text-gray-500">Control your products with natural language</p>
+          </div>
+        </div>
+
+        <div class="relative mb-4">
+          <textarea
+            id="ai-command-input"
+            placeholder="Type a command... e.g., 'Increase all prices by 10%' or 'Delete products with 0 inventory'"
+            class="w-full px-4 py-3 pr-24 border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+            rows="2"
+            onkeydown="handleCommandKeydown(event)"
+            oninput="filterSuggestions()"
+            onfocus="showSuggestions()"
+          ></textarea>
+          <button
+            onclick="executeCommand()"
+            id="execute-btn"
+            class="absolute right-2 bottom-2 px-4 py-1.5 text-sm font-medium text-white bg-gray-900 hover:bg-gray-800 rounded-md"
+          >
+            Execute
+          </button>
+        </div>
+
+        <!-- Category Filters -->
+        <div class="flex flex-wrap gap-2 mb-4">
+          <button onclick="filterByCategory(null)" class="category-btn px-3 py-1 text-sm rounded-full bg-purple-100 text-purple-700">All</button>
+          <button onclick="filterByCategory('Create')" class="category-btn px-3 py-1 text-sm rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200">Create</button>
+          <button onclick="filterByCategory('Edit')" class="category-btn px-3 py-1 text-sm rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200">Edit</button>
+          <button onclick="filterByCategory('Delete')" class="category-btn px-3 py-1 text-sm rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200">Delete</button>
+          <button onclick="filterByCategory('AI')" class="category-btn px-3 py-1 text-sm rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200">AI</button>
+          <button onclick="filterByCategory('Search')" class="category-btn px-3 py-1 text-sm rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200">Search</button>
+          <button onclick="filterByCategory('Sync')" class="category-btn px-3 py-1 text-sm rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200">Sync</button>
+        </div>
+
+        <!-- Suggestions -->
+        <div id="suggestions-dropdown" class="border rounded-lg divide-y max-h-64 overflow-y-auto">
+          <!-- Suggestions will be inserted here -->
+        </div>
+      </div>
+
+      <!-- Command History -->
+      <div class="bg-white border border-gray-200 rounded-lg">
+        <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+          <h3 class="text-base font-semibold text-gray-900">Command History</h3>
+          <button onclick="clearCommandHistory()" class="text-sm text-gray-500 hover:text-gray-700">
+            Clear History
+          </button>
+        </div>
+        <div id="command-history" class="p-6 space-y-4 max-h-96 overflow-y-auto">
+          <!-- History will be inserted here -->
+        </div>
+      </div>
+
+      <!-- Quick Actions -->
+      <div class="bg-white border border-gray-200 rounded-lg mt-6">
+        <div class="px-6 py-4 border-b border-gray-100">
+          <h3 class="text-base font-semibold text-gray-900">Quick Actions</h3>
+        </div>
+        <div class="p-6 grid grid-cols-2 md:grid-cols-4 gap-3">
+          <button onclick="executeQuickAction('Show all products with low inventory')" class="p-4 text-left border rounded-lg hover:bg-gray-50 transition-colors">
+            <svg class="w-6 h-6 text-orange-500 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <p class="font-medium text-sm">Low Inventory</p>
+            <p class="text-xs text-gray-500">Find products running low</p>
+          </button>
+          <button onclick="executeQuickAction('Generate SEO descriptions for products missing them')" class="p-4 text-left border rounded-lg hover:bg-gray-50 transition-colors">
+            <svg class="w-6 h-6 text-purple-500 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+            </svg>
+            <p class="font-medium text-sm">AI Descriptions</p>
+            <p class="text-xs text-gray-500">Generate missing content</p>
+          </button>
+          <button onclick="executeQuickAction('Find all products with margins below 20%')" class="p-4 text-left border rounded-lg hover:bg-gray-50 transition-colors">
+            <svg class="w-6 h-6 text-green-500 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <p class="font-medium text-sm">Low Margin</p>
+            <p class="text-xs text-gray-500">Analyze profitability</p>
+          </button>
+          <button onclick="executeQuickAction('Sync all changed products to channels')" class="p-4 text-left border rounded-lg hover:bg-gray-50 transition-colors">
+            <svg class="w-6 h-6 text-blue-500 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            <p class="font-medium text-sm">Sync Channels</p>
+            <p class="text-xs text-gray-500">Push updates everywhere</p>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- =============== -->
+    <!-- BULK IMPORT PAGE -->
+    <!-- =============== -->
+    <div id="page-import" class="page-content hidden">
+      <div class="bg-white border border-gray-200 rounded-lg">
+        <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+          <div>
+            <h3 class="text-base font-semibold text-gray-900">Bulk Product Import</h3>
+            <p class="text-sm text-gray-500 mt-0.5">Import products from CSV, JSON, or Excel files</p>
+          </div>
+          <div class="flex gap-2">
+            <button onclick="downloadTemplate('csv')" class="px-3 py-1.5 text-sm font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-md">
+              CSV Template
+            </button>
+            <button onclick="downloadTemplate('xlsx')" class="px-3 py-1.5 text-sm font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-md">
+              Excel Template
+            </button>
+          </div>
+        </div>
+
+        <div class="p-6">
+          <!-- Import Steps -->
+          <div id="import-step-upload" class="import-step">
+            <!-- Destination -->
+            <div class="mb-6">
+              <label class="block text-sm font-medium text-gray-700 mb-2">Import Destination</label>
+              <select id="import-destination" class="w-full max-w-xs border rounded-md px-3 py-2">
+                <option value="competitor_prices">Competitor Price Tracking</option>
+                <option value="shopify">Shopify Store</option>
+                <option value="ebay">eBay Listings</option>
+                <option value="tiktok">TikTok Shop</option>
+                <option value="amazon">Amazon Seller</option>
+                <option value="google_merchant">Google Merchant</option>
+              </select>
+              <p class="text-xs text-gray-500 mt-1">Choose where to import the data</p>
+            </div>
+
+            <!-- File Upload -->
+            <div
+              id="file-drop-zone"
+              class="relative border-2 border-dashed rounded-lg p-8 text-center transition-colors border-gray-300 hover:border-gray-400"
+              ondrop="handleFileDrop(event)"
+              ondragover="handleDragOver(event)"
+              ondragleave="handleDragLeave(event)"
+            >
+              <input type="file" id="file-input" accept=".csv,.json,.xlsx,.xls" onchange="handleFileSelect(event)" class="hidden">
+              <div class="flex flex-col items-center">
+                <svg class="w-12 h-12 text-gray-400 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                </svg>
+                <p class="text-sm font-medium text-gray-700">Upload Product File</p>
+                <p class="mt-1 text-xs text-gray-500">Supports CSV, JSON, and Excel files up to 10MB</p>
+                <button onclick="document.getElementById('file-input').click()" class="mt-4 px-4 py-1.5 text-sm font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-md">
+                  Select Files
+                </button>
+              </div>
+            </div>
+
+            <!-- Instructions -->
+            <div class="mt-6 text-sm text-gray-600 bg-gray-50 p-4 rounded-lg">
+              <p class="font-medium mb-2">Required columns:</p>
+              <ul class="list-disc list-inside space-y-1 text-gray-500">
+                <li><strong>SKU</strong> - Product identifier to match</li>
+                <li><strong>Title</strong> - Product name</li>
+                <li><strong>Price</strong> - Product price</li>
+              </ul>
+              <p class="font-medium mt-3 mb-2">Optional columns:</p>
+              <ul class="list-disc list-inside space-y-1 text-gray-500">
+                <li><strong>Description</strong> - Product description</li>
+                <li><strong>Inventory</strong> - Stock quantity</li>
+                <li><strong>Vendor</strong> - Brand or supplier</li>
+                <li><strong>Tags</strong> - Comma-separated tags</li>
+                <li><strong>Image URL</strong> - Main product image</li>
+              </ul>
+            </div>
+          </div>
+
+          <!-- Preview Step -->
+          <div id="import-step-preview" class="import-step hidden">
+            <div class="flex items-center justify-between mb-4">
+              <div>
+                <p class="font-medium" id="import-file-name">products.csv</p>
+                <p class="text-sm text-gray-500"><span id="import-row-count">0</span> rows found</p>
+              </div>
+              <button onclick="resetImport()" class="px-3 py-1.5 text-sm font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-md">
+                Change File
+              </button>
+            </div>
+
+            <!-- Preview Table -->
+            <div class="mb-4">
+              <h4 class="font-medium text-sm mb-2">Data Preview (first 5 rows)</h4>
+              <div class="overflow-x-auto max-h-40 border rounded" id="preview-table-container">
+                <!-- Preview table will be inserted here -->
+              </div>
+            </div>
+
+            <!-- Field Mapping -->
+            <div class="mb-6">
+              <h4 class="font-medium text-sm mb-2">Field Mapping</h4>
+              <div class="grid grid-cols-2 gap-3" id="field-mapping-container">
+                <!-- Mappings will be inserted here -->
+              </div>
+            </div>
+
+            <div class="flex gap-3 pt-4 border-t">
+              <button onclick="resetImport()" class="px-4 py-2 text-sm font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-md">
+                Back
+              </button>
+              <button onclick="startImport()" id="start-import-btn" class="px-4 py-2 text-sm font-medium text-white bg-gray-900 hover:bg-gray-800 rounded-md">
+                Start Import
+              </button>
+            </div>
+          </div>
+
+          <!-- Progress Step -->
+          <div id="import-step-progress" class="import-step hidden">
+            <div class="text-center py-8">
+              <div id="import-status-icon">
+                <div class="spinner w-12 h-12 mx-auto"></div>
+              </div>
+              <p class="mt-4 font-medium" id="import-status-text">Importing data...</p>
+            </div>
+
+            <div class="mb-6">
+              <div class="flex justify-between text-sm mb-1">
+                <span class="text-gray-600" id="import-progress-label">0 of 0 rows</span>
+                <span class="text-gray-500" id="import-progress-percent">0%</span>
+              </div>
+              <div class="w-full bg-gray-200 rounded-full h-2">
+                <div id="import-progress-bar" class="bg-gray-900 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-3 gap-4 text-center mb-6">
+              <div class="p-3 bg-gray-50 rounded-lg">
+                <p class="text-xl font-semibold" id="import-total">0</p>
+                <p class="text-xs text-gray-500">Total Rows</p>
+              </div>
+              <div class="p-3 bg-green-50 rounded-lg">
+                <p class="text-xl font-semibold text-green-600" id="import-success">0</p>
+                <p class="text-xs text-gray-500">Successful</p>
+              </div>
+              <div class="p-3 bg-red-50 rounded-lg">
+                <p class="text-xl font-semibold text-red-600" id="import-errors">0</p>
+                <p class="text-xs text-gray-500">Failed</p>
+              </div>
+            </div>
+
+            <div id="import-error-list" class="hidden">
+              <h4 class="font-medium text-sm text-red-600 mb-2">Errors</h4>
+              <div class="max-h-32 overflow-y-auto border border-red-200 rounded divide-y" id="import-error-container">
+                <!-- Errors will be inserted here -->
+              </div>
+            </div>
+
+            <div id="import-complete-actions" class="flex gap-3 pt-4 border-t hidden">
+              <button onclick="resetImport()" class="px-4 py-2 text-sm font-medium text-white bg-gray-900 hover:bg-gray-800 rounded-md">
+                Close
+              </button>
+              <button onclick="resetImport()" class="px-4 py-2 text-sm font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-md">
+                Import More
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Import History -->
+      <div class="bg-white border border-gray-200 rounded-lg mt-6">
+        <div class="px-6 py-4 border-b border-gray-100">
+          <h3 class="text-base font-semibold text-gray-900">Import History</h3>
+        </div>
+        <div class="p-6">
+          <table class="w-full">
+            <thead>
+              <tr class="border-b border-gray-200">
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Destination</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Products</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Success</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Errors</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+              <tr>
+                <td class="px-4 py-3 text-sm">Jan 21, 2026 2:30 PM</td>
+                <td class="px-4 py-3 text-sm"><span class="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700">SHOPIFY</span></td>
+                <td class="px-4 py-3 text-sm"><span class="px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700">Completed</span></td>
+                <td class="px-4 py-3 text-sm">1,250</td>
+                <td class="px-4 py-3 text-sm text-green-600">1,245</td>
+                <td class="px-4 py-3 text-sm text-red-600">5</td>
+              </tr>
+              <tr>
+                <td class="px-4 py-3 text-sm">Jan 20, 2026 10:15 AM</td>
+                <td class="px-4 py-3 text-sm"><span class="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700">EBAY</span></td>
+                <td class="px-4 py-3 text-sm"><span class="px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700">Completed</span></td>
+                <td class="px-4 py-3 text-sm">850</td>
+                <td class="px-4 py-3 text-sm text-green-600">850</td>
+                <td class="px-4 py-3 text-sm text-gray-400">0</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ============ -->
+  <!-- MODALS -->
+  <!-- ============ -->
+
+  <!-- Alerts Modal -->
+  <div id="alerts-modal" class="fixed inset-0 z-50 overflow-y-auto hidden">
+    <div class="fixed inset-0 bg-black bg-opacity-50" onclick="closeModal('alerts-modal')"></div>
+    <div class="flex min-h-full items-center justify-center p-4">
+      <div class="relative bg-white rounded-lg shadow-xl w-full max-w-2xl">
+        <div class="flex items-center justify-between p-4 border-b">
+          <h3 class="text-lg font-semibold text-gray-900">Price & Availability Alerts</h3>
+          <button onclick="closeModal('alerts-modal')" class="text-gray-400 hover:text-gray-600">
+            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div class="p-6 space-y-3 max-h-96 overflow-y-auto" id="alerts-container">
+          <!-- Alerts will be inserted here -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Monitoring Rules Modal -->
+  <div id="rules-modal" class="fixed inset-0 z-50 overflow-y-auto hidden">
+    <div class="fixed inset-0 bg-black bg-opacity-50" onclick="closeModal('rules-modal')"></div>
+    <div class="flex min-h-full items-center justify-center p-4">
+      <div class="relative bg-white rounded-lg shadow-xl w-full max-w-2xl">
+        <div class="flex items-center justify-between p-4 border-b">
+          <h3 class="text-lg font-semibold text-gray-900">Monitoring Rules</h3>
+          <button onclick="closeModal('rules-modal')" class="text-gray-400 hover:text-gray-600">
+            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div class="p-6">
+          <!-- Active Rules -->
+          <div class="mb-6">
+            <h4 class="font-medium mb-3">Active Rules</h4>
+            <div class="space-y-2" id="rules-list">
+              <!-- Rules will be inserted here -->
+            </div>
+          </div>
+
+          <!-- Add New Rule -->
+          <div class="border-t pt-4">
+            <h4 class="font-medium mb-3">Add New Rule</h4>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm text-gray-600 mb-1">Rule Type</label>
+                <select id="new-rule-type" class="w-full border rounded px-3 py-2">
+                  <option value="price_drop">Price Drop</option>
+                  <option value="price_increase">Price Increase</option>
+                  <option value="availability_change">Availability Change</option>
+                  <option value="competitor_undercut">Competitor Undercut</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-sm text-gray-600 mb-1">Threshold %</label>
+                <input type="number" id="new-rule-threshold" value="5" class="w-full border rounded px-3 py-2" placeholder="e.g., 5">
+              </div>
+              <div class="flex items-center gap-4">
+                <label class="flex items-center gap-2">
+                  <input type="checkbox" id="new-rule-email" checked class="rounded">
+                  <span class="text-sm">Email</span>
+                </label>
+                <label class="flex items-center gap-2">
+                  <input type="checkbox" id="new-rule-webhook" class="rounded">
+                  <span class="text-sm">Webhook</span>
+                </label>
+              </div>
+              <div id="webhook-url-container" class="hidden">
+                <label class="block text-sm text-gray-600 mb-1">Webhook URL</label>
+                <input type="url" id="new-rule-webhook-url" class="w-full border rounded px-3 py-2" placeholder="https://...">
+              </div>
+            </div>
+            <button onclick="addMonitoringRule()" class="mt-4 px-4 py-2 text-sm font-medium text-white bg-gray-900 hover:bg-gray-800 rounded-md">
+              Add Rule
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Confirmation Modal -->
+  <div id="confirm-modal" class="fixed inset-0 z-50 overflow-y-auto hidden">
+    <div class="fixed inset-0 bg-black bg-opacity-50" onclick="closeModal('confirm-modal')"></div>
+    <div class="flex min-h-full items-center justify-center p-4">
+      <div class="relative bg-white rounded-lg shadow-xl w-full max-w-md">
+        <div class="flex items-center justify-between p-4 border-b">
+          <h3 class="text-lg font-semibold text-gray-900" id="confirm-title">Confirm Action</h3>
+          <button onclick="closeModal('confirm-modal')" class="text-gray-400 hover:text-gray-600">
+            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div class="p-6">
+          <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
+            <p class="text-yellow-800" id="confirm-message">This action will affect multiple products.</p>
+          </div>
+          <p class="text-sm font-medium mb-2">Command:</p>
+          <p class="p-3 bg-gray-100 rounded text-sm mb-4" id="confirm-command"></p>
+          <div id="confirm-affected" class="mb-4 hidden">
+            <p class="text-sm font-medium mb-2">Affected Products (<span id="confirm-count">0</span>)</p>
+            <div class="max-h-40 overflow-y-auto border rounded divide-y" id="confirm-products-list">
+              <!-- Products will be inserted here -->
+            </div>
+          </div>
+          <div class="flex gap-3 pt-4">
+            <button onclick="closeModal('confirm-modal')" class="flex-1 px-4 py-2 text-sm font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-md">
+              Cancel
+            </button>
+            <button onclick="confirmAction()" id="confirm-btn" class="flex-1 px-4 py-2 text-sm font-medium text-white bg-gray-900 hover:bg-gray-800 rounded-md">
+              Confirm
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Price History Modal -->
+  <div id="history-modal" class="fixed inset-0 z-50 overflow-y-auto hidden">
+    <div class="fixed inset-0 bg-black bg-opacity-50" onclick="closeModal('history-modal')"></div>
+    <div class="flex min-h-full items-center justify-center p-4">
+      <div class="relative bg-white rounded-lg shadow-xl w-full max-w-2xl">
+        <div class="flex items-center justify-between p-4 border-b">
+          <h3 class="text-lg font-semibold text-gray-900" id="history-product-title">Price History</h3>
+          <button onclick="closeModal('history-modal')" class="text-gray-400 hover:text-gray-600">
+            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div class="p-6">
+          <!-- Simple Chart Visualization -->
+          <div class="h-48 bg-gray-50 rounded-lg mb-4 flex items-end justify-around p-4" id="price-chart">
+            <!-- Chart bars will be inserted here -->
+          </div>
+          <!-- History Table -->
+          <div class="max-h-48 overflow-y-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-gray-50 sticky top-0">
+                <tr>
+                  <th class="text-left p-2">Date</th>
+                  <th class="text-left p-2">Price</th>
+                  <th class="text-left p-2">Availability</th>
+                  <th class="text-left p-2">Change</th>
+                </tr>
+              </thead>
+              <tbody id="history-table-body">
+                <!-- History will be inserted here -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ==================
+    // MOCK DATA
+    // ==================
+    
+    const mockProducts = [
+      { id: 1, title: 'Wireless Bluetooth Earbuds Pro', sku: 'WBE-001', source: 'Amazon', competitor_price: 79.99, our_price: 69.99, savings: 12.5, availability: 'in_stock', stock_qty: 1250, price_changed: true, previous_price: 89.99, price_change_percent: -11.1, price_change_direction: 'down', last_checked: '5m ago' },
+      { id: 2, title: 'Smart Fitness Watch Series 5', sku: 'SFW-005', source: 'Amazon', competitor_price: 199.99, our_price: 179.99, savings: 10.0, availability: 'low_stock', stock_qty: 23, price_changed: false, previous_price: null, price_change_percent: 0, price_change_direction: 'none', last_checked: '12m ago' },
+      { id: 3, title: 'Premium Yoga Mat Extra Thick', sku: 'PYM-003', source: 'Walmart', competitor_price: 45.99, our_price: 39.99, savings: 13.0, availability: 'in_stock', stock_qty: 890, price_changed: true, previous_price: 42.99, price_change_percent: 7.0, price_change_direction: 'up', last_checked: '18m ago' },
+      { id: 4, title: 'Stainless Steel Water Bottle 32oz', sku: 'SSW-032', source: 'Amazon', competitor_price: 29.99, our_price: 24.99, savings: 16.7, availability: 'out_of_stock', stock_qty: 0, price_changed: false, previous_price: null, price_change_percent: 0, price_change_direction: 'none', last_checked: '25m ago' },
+      { id: 5, title: 'LED Desk Lamp with USB Port', sku: 'LDL-USB', source: 'Amazon', competitor_price: 49.99, our_price: 44.99, savings: 10.0, availability: 'in_stock', stock_qty: 456, price_changed: true, previous_price: 54.99, price_change_percent: -9.1, price_change_direction: 'down', last_checked: '32m ago' },
+      { id: 6, title: 'Portable Phone Charger 20000mAh', sku: 'PPC-20K', source: 'Amazon', competitor_price: 39.99, our_price: 34.99, savings: 12.5, availability: 'low_stock', stock_qty: 15, price_changed: false, previous_price: null, price_change_percent: 0, price_change_direction: 'none', last_checked: '45m ago' },
+      { id: 7, title: 'Bamboo Cutting Board Set', sku: 'BCB-SET', source: 'Walmart', competitor_price: 34.99, our_price: 29.99, savings: 14.3, availability: 'in_stock', stock_qty: 678, price_changed: true, previous_price: 32.99, price_change_percent: 6.1, price_change_direction: 'up', last_checked: '1h ago' },
+      { id: 8, title: 'Memory Foam Pillow Queen Size', sku: 'MFP-QS', source: 'Amazon', competitor_price: 59.99, our_price: 49.99, savings: 16.7, availability: 'out_of_stock', stock_qty: 0, price_changed: true, previous_price: 64.99, price_change_percent: -7.7, price_change_direction: 'down', last_checked: '1h ago' },
+    ];
+
+    const mockAlerts = [
+      { id: 1, type: 'price_drop', product: 'Wireless Bluetooth Earbuds Pro', old_value: '$89.99', new_value: '$79.99', change: -11.1, time: '5 minutes ago', acknowledged: false },
+      { id: 2, type: 'out_of_stock', product: 'Stainless Steel Water Bottle 32oz', old_value: 'In Stock', new_value: 'Out of Stock', time: '25 minutes ago', acknowledged: false },
+      { id: 3, type: 'price_increase', product: 'Premium Yoga Mat Extra Thick', old_value: '$42.99', new_value: '$45.99', change: 7.0, time: '18 minutes ago', acknowledged: false },
+    ];
+
+    const mockRules = [
+      { id: 1, type: 'price_drop', threshold: 5, email: true, webhook: false, enabled: true },
+      { id: 2, type: 'availability_change', threshold: null, email: true, webhook: true, enabled: true },
+    ];
+
+    const commandSuggestions = [
+      { text: 'Increase all prices by 10%', description: 'Bulk price adjustment', category: 'Edit' },
+      { text: 'Delete all products with 0 inventory', description: 'Remove out of stock', category: 'Delete' },
+      { text: 'Add tag "sale" to all products under $20', description: 'Bulk tag products', category: 'Edit' },
+      { text: 'Create a product called "Summer Hat" at $29.99', description: 'Create single product', category: 'Create' },
+      { text: 'Sync all products to Shopify', description: 'Push to Shopify', category: 'Sync' },
+      { text: 'Set all products from "Brand X" to draft', description: 'Bulk status change', category: 'Edit' },
+      { text: 'Generate SEO descriptions for all products', description: 'AI descriptions', category: 'AI' },
+      { text: 'Find all products with margins below 20%', description: 'Margin analysis', category: 'Search' },
+      { text: 'Show products that need price updates', description: 'Stale prices', category: 'Search' },
+      { text: 'Update eBay listings for changed products', description: 'Sync to eBay', category: 'Sync' },
+    ];
+
+    let commandHistory = [];
+    let currentCategory = null;
+    let pendingCommand = null;
+    let importData = null;
+
+    // ==================
+    // INITIALIZATION
+    // ==================
+
+    document.addEventListener('DOMContentLoaded', function() {
+      renderPriceTable();
+      renderAlerts();
+      renderRules();
+      renderSuggestions();
+      loadCommandHistory();
+      
+      // Setup webhook checkbox listener
+      document.getElementById('new-rule-webhook').addEventListener('change', function() {
+        document.getElementById('webhook-url-container').classList.toggle('hidden', !this.checked);
+      });
+    });
+
+    // ==================
+    // PAGE NAVIGATION
+    // ==================
+
+    function switchPage(page) {
+      // Hide all pages
+      document.querySelectorAll('.page-content').forEach(el => el.classList.add('hidden'));
+      // Show selected page
+      document.getElementById('page-' + page).classList.remove('hidden');
+      
+      // Update nav buttons
+      document.querySelectorAll('.nav-btn').forEach(btn => {
+        btn.classList.remove('text-gray-900', 'bg-gray-100');
+        btn.classList.add('text-gray-600');
+      });
+      document.getElementById('nav-' + page).classList.remove('text-gray-600');
+      document.getElementById('nav-' + page).classList.add('text-gray-900', 'bg-gray-100');
+    }
+
+    // ==================
+    // PRICE TABLE
+    // ==================
+
+    function renderPriceTable() {
+      const tbody = document.getElementById('price-table-body');
+      const filterAvail = document.getElementById('filter-availability').value;
+      const filterPrice = document.getElementById('filter-price-change').value;
+      
+      let filtered = mockProducts;
+      
+      if (filterAvail !== 'all') {
+        filtered = filtered.filter(p => p.availability === filterAvail);
+      }
+      
+      if (filterPrice === 'drop') {
+        filtered = filtered.filter(p => p.price_change_direction === 'down');
+      } else if (filterPrice === 'increase') {
+        filtered = filtered.filter(p => p.price_change_direction === 'up');
+      } else if (filterPrice === 'changed') {
+        filtered = filtered.filter(p => p.price_changed);
+      }
+      
+      tbody.innerHTML = filtered.map(product => `
+        <tr class="hover:bg-gray-50">
+          <td class="px-4 py-3 text-sm text-gray-900">
+            <div class="font-medium truncate max-w-xs">${product.title}</div>
+            <div class="text-xs text-gray-500">${product.source} · ${product.sku}</div>
+          </td>
+          <td class="px-4 py-3 text-sm">
+            <div class="flex flex-col gap-1">
+              <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getAvailabilityClass(product.availability)}">
+                ${getAvailabilityLabel(product.availability)}
+              </span>
+              ${product.stock_qty > 0 ? `<span class="text-xs text-gray-500">${product.stock_qty} units</span>` : ''}
+            </div>
+          </td>
+          <td class="px-4 py-3 text-sm">
+            <div class="flex flex-col">
+              <span class="text-gray-600">$${product.competitor_price.toFixed(2)}</span>
+              ${product.price_changed && product.previous_price ? `
+                <div class="flex items-center gap-1 text-xs">
+                  <span class="text-gray-400 line-through">$${product.previous_price.toFixed(2)}</span>
+                  <span class="${product.price_change_direction === 'down' ? 'text-green-600' : 'text-red-600'}">
+                    ${product.price_change_direction === 'down' ? '↓' : '↑'}${Math.abs(product.price_change_percent).toFixed(1)}%
+                  </span>
+                </div>
+              ` : ''}
+            </div>
+          </td>
+          <td class="px-4 py-3 text-sm font-medium">$${product.our_price.toFixed(2)}</td>
+          <td class="px-4 py-3 text-sm">
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${product.savings > 10 ? 'bg-green-50 text-green-700' : 'bg-blue-50 text-blue-700'}">
+              ${product.savings.toFixed(1)}%
+            </span>
+          </td>
+          <td class="px-4 py-3 text-sm text-gray-500">${product.last_checked}</td>
+          <td class="px-4 py-3 text-sm">
+            <div class="flex gap-2">
+              <button onclick="showPriceHistory(${product.id})" class="text-gray-400 hover:text-gray-600" title="View History">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                </svg>
+              </button>
+              <a href="#" class="text-gray-400 hover:text-gray-600" title="View on Amazon">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                </svg>
+              </a>
+            </div>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    function getAvailabilityClass(status) {
+      switch (status) {
+        case 'in_stock': return 'bg-green-50 text-green-700';
+        case 'low_stock': return 'bg-yellow-50 text-yellow-700';
+        case 'out_of_stock': return 'bg-red-50 text-red-700';
+        default: return 'bg-gray-100 text-gray-700';
+      }
+    }
+
+    function getAvailabilityLabel(status) {
+      switch (status) {
+        case 'in_stock': return 'In Stock';
+        case 'low_stock': return 'Low Stock';
+        case 'out_of_stock': return 'Out of Stock';
+        default: return 'Unknown';
+      }
+    }
+
+    function filterTable() {
+      renderPriceTable();
+    }
+
+    function switchTab(tab) {
+      document.querySelectorAll('.price-tab').forEach(btn => {
+        btn.classList.remove('border-gray-900', 'text-gray-900');
+        btn.classList.add('border-transparent', 'text-gray-500');
+      });
+      document.querySelector(`.price-tab[data-tab="${tab}"]`).classList.remove('border-transparent', 'text-gray-500');
+      document.querySelector(`.price-tab[data-tab="${tab}"]`).classList.add('border-gray-900', 'text-gray-900');
+      
+      // Filter based on tab
+      document.getElementById('filter-availability').value = 'all';
+      document.getElementById('filter-price-change').value = 'all';
+      
+      if (tab === 'outofstock') {
+        document.getElementById('filter-availability').value = 'out_of_stock';
+      } else if (tab === 'pricechanges') {
+        document.getElementById('filter-price-change').value = 'changed';
+      }
+      
+      renderPriceTable();
+    }
+
+    function refreshPrices() {
+      const btn = document.getElementById('refresh-btn');
+      btn.innerHTML = '<div class="spinner w-4 h-4 mr-2"></div>Refreshing...';
+      btn.disabled = true;
+      
+      setTimeout(() => {
+        btn.innerHTML = 'Refresh Prices';
+        btn.disabled = false;
+        alert('Prices refreshed successfully!');
+      }, 2000);
+    }
+
+    // ==================
+    // ALERTS
+    // ==================
+
+    function renderAlerts() {
+      const container = document.getElementById('alerts-container');
+      container.innerHTML = mockAlerts.map(alert => `
+        <div class="p-4 rounded-lg border ${alert.acknowledged ? 'bg-gray-50 border-gray-200' : 'bg-white border-gray-300'}">
+          <div class="flex items-start justify-between">
+            <div class="flex-1">
+              <div class="flex items-center gap-2">
+                <span class="px-2 py-0.5 rounded text-xs font-medium ${getAlertTypeClass(alert.type)}">
+                  ${alert.type.replace(/_/g, ' ').toUpperCase()}
+                </span>
+                ${!alert.acknowledged ? '<span class="w-2 h-2 bg-blue-500 rounded-full"></span>' : ''}
+              </div>
+              <p class="font-medium mt-1">${alert.product}</p>
+              <p class="text-sm text-gray-600">
+                ${alert.old_value} → ${alert.new_value}
+                ${alert.change ? ` (${alert.change > 0 ? '+' : ''}${alert.change.toFixed(1)}%)` : ''}
+              </p>
+              <p class="text-xs text-gray-400 mt-1">${alert.time}</p>
+            </div>
+            ${!alert.acknowledged ? `
+              <button onclick="acknowledgeAlert(${alert.id})" class="text-gray-400 hover:text-gray-600">
+                <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                </svg>
+              </button>
+            ` : ''}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function getAlertTypeClass(type) {
+      switch (type) {
+        case 'price_drop': return 'bg-green-50 text-green-700';
+        case 'price_increase': return 'bg-yellow-50 text-yellow-700';
+        case 'out_of_stock': return 'bg-red-50 text-red-700';
+        case 'back_in_stock': return 'bg-green-50 text-green-700';
+        case 'low_stock': return 'bg-yellow-50 text-yellow-700';
+        default: return 'bg-gray-100 text-gray-700';
+      }
+    }
+
+    function showAlertsModal() {
+      document.getElementById('alerts-modal').classList.remove('hidden');
+    }
+
+    function acknowledgeAlert(id) {
+      const alert = mockAlerts.find(a => a.id === id);
+      if (alert) {
+        alert.acknowledged = true;
+        renderAlerts();
+        updateAlertCount();
+      }
+    }
+
+    function dismissAllAlerts() {
+      mockAlerts.forEach(a => a.acknowledged = true);
+      renderAlerts();
+      updateAlertCount();
+      document.getElementById('alerts-banner').classList.add('hidden');
+    }
+
+    function updateAlertCount() {
+      const count = mockAlerts.filter(a => !a.acknowledged).length;
+      document.getElementById('alert-count').textContent = count;
+      document.getElementById('alert-badge').textContent = count;
+      if (count === 0) {
+        document.getElementById('alerts-banner').classList.add('hidden');
+      }
+    }
+
+    // ==================
+    // MONITORING RULES
+    // ==================
+
+    function renderRules() {
+      const container = document.getElementById('rules-list');
+      if (mockRules.length === 0) {
+        container.innerHTML = '<p class="text-gray-500 text-sm">No monitoring rules configured</p>';
+        return;
+      }
+      
+      container.innerHTML = mockRules.map(rule => `
+        <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+          <div class="flex items-center gap-3">
+            <input type="checkbox" ${rule.enabled ? 'checked' : ''} onchange="toggleRule(${rule.id})" class="rounded">
+            <div>
+              <p class="font-medium text-sm">
+                ${rule.type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                ${rule.threshold ? ` (>${rule.threshold}%)` : ''}
+              </p>
+              <p class="text-xs text-gray-500">
+                ${rule.email ? 'Email' : ''} ${rule.webhook ? 'Webhook' : ''}
+              </p>
+            </div>
+          </div>
+          <button onclick="deleteRule(${rule.id})" class="text-red-500 hover:text-red-700">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+          </button>
+        </div>
+      `).join('');
+    }
+
+    function showRulesModal() {
+      document.getElementById('rules-modal').classList.remove('hidden');
+    }
+
+    function addMonitoringRule() {
+      const newRule = {
+        id: Date.now(),
+        type: document.getElementById('new-rule-type').value,
+        threshold: parseInt(document.getElementById('new-rule-threshold').value) || null,
+        email: document.getElementById('new-rule-email').checked,
+        webhook: document.getElementById('new-rule-webhook').checked,
+        enabled: true
+      };
+      mockRules.push(newRule);
+      renderRules();
+      alert('Monitoring rule added successfully!');
+    }
+
+    function toggleRule(id) {
+      const rule = mockRules.find(r => r.id === id);
+      if (rule) {
+        rule.enabled = !rule.enabled;
+      }
+    }
+
+    function deleteRule(id) {
+      const index = mockRules.findIndex(r => r.id === id);
+      if (index > -1) {
+        mockRules.splice(index, 1);
+        renderRules();
+      }
+    }
+
+    // ==================
+    // PRICE HISTORY
+    // ==================
+
+    function showPriceHistory(productId) {
+      const product = mockProducts.find(p => p.id === productId);
+      if (!product) return;
+      
+      document.getElementById('history-product-title').textContent = `Price History: ${product.title}`;
+      
+      // Generate mock history data
+      const history = [];
+      let price = product.competitor_price;
+      for (let i = 0; i < 10; i++) {
+        const date = new Date();
+        date.setDate(date.getDate() - i * 3);
+        const change = (Math.random() - 0.5) * 10;
+        price = Math.max(10, price + change);
+        history.push({
+          date: date.toLocaleDateString(),
+          price: price.toFixed(2),
+          availability: Math.random() > 0.2 ? 'in_stock' : 'out_of_stock',
+          change: i === 0 ? null : ((price - parseFloat(history[i-1]?.price || price)) / price * 100).toFixed(1)
+        });
+      }
+      
+      // Render chart
+      const maxPrice = Math.max(...history.map(h => parseFloat(h.price)));
+      document.getElementById('price-chart').innerHTML = history.slice(0, 7).reverse().map((h, i) => {
+        const height = (parseFloat(h.price) / maxPrice * 100).toFixed(0);
+        return `
+          <div class="flex flex-col items-center">
+            <div class="w-8 bg-gray-900 rounded-t" style="height: ${height}px"></div>
+            <span class="text-xs text-gray-500 mt-1">${h.date.split('/')[0]}/${h.date.split('/')[1]}</span>
+          </div>
+        `;
+      }).join('');
+      
+      // Render table
+      document.getElementById('history-table-body').innerHTML = history.map(h => `
+        <tr class="border-b">
+          <td class="p-2">${h.date}</td>
+          <td class="p-2 font-medium">$${h.price}</td>
+          <td class="p-2">
+            <span class="px-2 py-0.5 rounded text-xs font-medium ${getAvailabilityClass(h.availability)}">
+              ${getAvailabilityLabel(h.availability)}
+            </span>
+          </td>
+          <td class="p-2">
+            ${h.change ? `<span class="${parseFloat(h.change) < 0 ? 'text-green-600' : 'text-red-600'}">${parseFloat(h.change) > 0 ? '+' : ''}${h.change}%</span>` : '-'}
+          </td>
+        </tr>
+      `).join('');
+      
+      document.getElementById('history-modal').classList.remove('hidden');
+    }
+
+    // ==================
+    // AI COMMAND CENTER
+    // ==================
+
+    function renderSuggestions(filtered = null) {
+      const suggestions = filtered || commandSuggestions;
+      const container = document.getElementById('suggestions-dropdown');
+      
+      container.innerHTML = suggestions.slice(0, 6).map(s => `
+        <button onclick="useSuggestion('${s.text.replace(/'/g, "\\'")}')" class="w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm font-medium text-gray-900">${s.text}</p>
+              <p class="text-xs text-gray-500">${s.description}</p>
+            </div>
+            <span class="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700">${s.category}</span>
+          </div>
+        </button>
+      `).join('');
+    }
+
+    function filterSuggestions() {
+      const query = document.getElementById('ai-command-input').value.toLowerCase();
+      if (!query) {
+        renderSuggestions();
+        return;
+      }
+      
+      const filtered = commandSuggestions.filter(s => 
+        s.text.toLowerCase().includes(query) || 
+        s.description.toLowerCase().includes(query) ||
+        s.category.toLowerCase().includes(query)
+      );
+      renderSuggestions(filtered);
+    }
+
+    function showSuggestions() {
+      document.getElementById('suggestions-dropdown').classList.remove('hidden');
+    }
+
+    function filterByCategory(category) {
+      currentCategory = category;
+      
+      // Update button states
+      document.querySelectorAll('.category-btn').forEach(btn => {
+        btn.classList.remove('bg-purple-100', 'text-purple-700');
+        btn.classList.add('bg-gray-100', 'text-gray-600');
+      });
+      event.target.classList.remove('bg-gray-100', 'text-gray-600');
+      event.target.classList.add('bg-purple-100', 'text-purple-700');
+      
+      if (category) {
+        const filtered = commandSuggestions.filter(s => s.category === category);
+        renderSuggestions(filtered);
+      } else {
+        renderSuggestions();
+      }
+    }
+
+    function useSuggestion(text) {
+      document.getElementById('ai-command-input').value = text;
+      document.getElementById('ai-command-input').focus();
+    }
+
+    function handleCommandKeydown(event) {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        executeCommand();
+      }
+    }
+
+    function executeCommand() {
+      const input = document.getElementById('ai-command-input');
+      const command = input.value.trim();
+      if (!command) return;
+      
+      // Check if destructive
+      const isDestructive = command.toLowerCase().includes('delete') || command.toLowerCase().includes('remove');
+      const isBulk = command.toLowerCase().includes('all') || command.toLowerCase().includes('bulk');
+      
+      if (isDestructive || isBulk) {
+        pendingCommand = command;
+        showConfirmation(command, isDestructive);
+        return;
+      }
+      
+      processCommand(command);
+    }
+
+    function executeQuickAction(command) {
+      document.getElementById('ai-command-input').value = command;
+      executeCommand();
+    }
+
+    function showConfirmation(command, isDestructive) {
+      document.getElementById('confirm-title').textContent = isDestructive ? 'Confirm Destructive Action' : 'Confirm Action';
+      document.getElementById('confirm-message').textContent = isDestructive ? 
+        'This action will permanently delete products and cannot be undone.' :
+        'This action will affect multiple products.';
+      document.getElementById('confirm-command').textContent = command;
+      
+      // Show affected products
+      document.getElementById('confirm-affected').classList.remove('hidden');
+      document.getElementById('confirm-count').textContent = '43';
+      document.getElementById('confirm-products-list').innerHTML = mockProducts.slice(0, 5).map(p => 
+        `<div class="p-2 text-sm">${p.title}</div>`
+      ).join('');
+      
+      if (isDestructive) {
+        document.getElementById('confirm-btn').classList.remove('bg-gray-900', 'hover:bg-gray-800');
+        document.getElementById('confirm-btn').classList.add('bg-red-600', 'hover:bg-red-700');
+        document.getElementById('confirm-btn').textContent = 'Yes, Delete';
+      } else {
+        document.getElementById('confirm-btn').classList.remove('bg-red-600', 'hover:bg-red-700');
+        document.getElementById('confirm-btn').classList.add('bg-gray-900', 'hover:bg-gray-800');
+        document.getElementById('confirm-btn').textContent = 'Confirm';
+      }
+      
+      document.getElementById('confirm-modal').classList.remove('hidden');
+    }
+
+    function confirmAction() {
+      closeModal('confirm-modal');
+      if (pendingCommand) {
+        processCommand(pendingCommand);
+        pendingCommand = null;
+      }
+    }
+
+    function processCommand(command) {
+      const result = {
+        id: Date.now(),
+        command: command,
+        timestamp: new Date().toISOString(),
+        status: 'processing',
+        action: parseCommand(command)
+      };
+      
+      commandHistory.unshift(result);
+      saveCommandHistory();
+      renderCommandHistory();
+      
+      document.getElementById('ai-command-input').value = '';
+      
+      // Simulate processing
+      setTimeout(() => {
+        result.status = 'completed';
+        result.result = {
+          success: true,
+          message: getResultMessage(result.action),
+          affected: Math.floor(Math.random() * 50) + 1
+        };
+        saveCommandHistory();
+        renderCommandHistory();
+      }, 1500);
+    }
+
+    function parseCommand(command) {
+      const lower = command.toLowerCase();
+      let type = 'search';
+      
+      if (lower.includes('create') || lower.includes('add')) type = 'create';
+      else if (lower.includes('update') || lower.includes('change') || lower.includes('increase') || lower.includes('decrease') || lower.includes('set')) type = 'update';
+      else if (lower.includes('delete') || lower.includes('remove')) type = 'delete';
+      else if (lower.includes('sync') || lower.includes('push')) type = 'sync';
+      else if (lower.includes('generate') || lower.includes('ai')) type = 'generate';
+      else if (lower.includes('find') || lower.includes('show') || lower.includes('list')) type = 'search';
+      
+      return {
+        type: type,
+        targets: lower.includes('all') ? 'all' : 'specific',
+        details: command
+      };
+    }
+
+    function getResultMessage(action) {
+      switch (action.type) {
+        case 'create': return 'Products created successfully';
+        case 'update': return 'Products updated successfully';
+        case 'delete': return 'Products deleted successfully';
+        case 'sync': return 'Sync completed successfully';
+        case 'generate': return 'Content generated successfully';
+        case 'search': return 'Search completed';
+        default: return 'Command executed';
+      }
+    }
+
+    function renderCommandHistory() {
+      const container = document.getElementById('command-history');
+      
+      if (commandHistory.length === 0) {
+        container.innerHTML = `
+          <div class="text-center py-12 text-gray-500">
+            <svg class="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+            </svg>
+            <p>No commands yet</p>
+            <p class="text-sm">Start by typing a command above</p>
+          </div>
+        `;
+        return;
+      }
+      
+      container.innerHTML = commandHistory.slice(0, 10).map(result => `
+        <div class="p-4 rounded-lg border slide-up ${getStatusClass(result.status)}">
+          <div class="flex items-start justify-between gap-4">
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 mb-1">
+                <span class="px-2 py-0.5 rounded text-xs font-medium ${getStatusBadgeClass(result.status)}">
+                  ${result.status === 'processing' ? 'Processing...' : result.status}
+                </span>
+                <span class="text-xs text-gray-500">
+                  ${new Date(result.timestamp).toLocaleTimeString()}
+                </span>
+              </div>
+              <p class="font-medium text-gray-900 truncate">${result.command}</p>
+              ${result.result ? `
+                <p class="text-sm ${result.result.success ? 'text-green-700' : 'text-red-700'} mt-2">
+                  ${result.result.message}
+                  ${result.result.affected > 0 ? ` (${result.result.affected} products affected)` : ''}
+                </p>
+              ` : ''}
+            </div>
+            ${result.status === 'processing' ? '<div class="spinner w-5 h-5"></div>' : ''}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function getStatusClass(status) {
+      switch (status) {
+        case 'completed': return 'bg-green-50 border-green-200';
+        case 'failed': return 'bg-red-50 border-red-200';
+        case 'processing': return 'bg-gray-50 border-gray-200';
+        default: return 'bg-gray-50 border-gray-200';
+      }
+    }
+
+    function getStatusBadgeClass(status) {
+      switch (status) {
+        case 'completed': return 'bg-green-100 text-green-700';
+        case 'failed': return 'bg-red-100 text-red-700';
+        case 'processing': return 'bg-blue-100 text-blue-700';
+        default: return 'bg-gray-100 text-gray-700';
+      }
+    }
+
+    function loadCommandHistory() {
+      try {
+        const saved = localStorage.getItem('ai-command-history');
+        if (saved) {
+          commandHistory = JSON.parse(saved);
+          renderCommandHistory();
+        }
+      } catch (e) {
+        console.error('Failed to load command history:', e);
+      }
+    }
+
+    function saveCommandHistory() {
+      try {
+        localStorage.setItem('ai-command-history', JSON.stringify(commandHistory.slice(0, 50)));
+      } catch (e) {
+        console.error('Failed to save command history:', e);
+      }
+    }
+
+    function clearCommandHistory() {
+      commandHistory = [];
+      localStorage.removeItem('ai-command-history');
+      renderCommandHistory();
+    }
+
+    // ==================
+    // BULK IMPORT
+    // ==================
+
+    function handleDragOver(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      document.getElementById('file-drop-zone').classList.add('border-gray-900', 'bg-gray-50');
+    }
+
+    function handleDragLeave(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      document.getElementById('file-drop-zone').classList.remove('border-gray-900', 'bg-gray-50');
+    }
+
+    function handleFileDrop(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      document.getElementById('file-drop-zone').classList.remove('border-gray-900', 'bg-gray-50');
+      
+      const files = e.dataTransfer.files;
+      if (files.length > 0) {
+        processFile(files[0]);
+      }
+    }
+
+    function handleFileSelect(e) {
+      const files = e.target.files;
+      if (files.length > 0) {
+        processFile(files[0]);
+      }
+    }
+
+    function processFile(file) {
+      const ext = file.name.split('.').pop().toLowerCase();
+      if (!['csv', 'json', 'xlsx', 'xls'].includes(ext)) {
+        alert('Unsupported file type. Please upload CSV, JSON, or Excel files.');
+        return;
+      }
+      
+      // Generate mock preview data
+      importData = {
+        fileName: file.name,
+        fileType: ext,
+        headers: ['SKU', 'Title', 'Price', 'Inventory', 'Vendor', 'Tags'],
+        rows: [
+          { SKU: 'PRD-001', Title: 'Wireless Earbuds', Price: '$49.99', Inventory: '150', Vendor: 'TechCorp', Tags: 'electronics, audio' },
+          { SKU: 'PRD-002', Title: 'Smart Watch', Price: '$199.99', Inventory: '75', Vendor: 'TechCorp', Tags: 'electronics, wearable' },
+          { SKU: 'PRD-003', Title: 'Yoga Mat', Price: '$29.99', Inventory: '200', Vendor: 'FitLife', Tags: 'fitness, yoga' },
+          { SKU: 'PRD-004', Title: 'Water Bottle', Price: '$19.99', Inventory: '500', Vendor: 'EcoGear', Tags: 'outdoor, hydration' },
+          { SKU: 'PRD-005', Title: 'Desk Lamp', Price: '$39.99', Inventory: '120', Vendor: 'HomeStyle', Tags: 'home, lighting' },
+        ],
+        totalRows: 1250
+      };
+      
+      showPreview();
+    }
+
+    function showPreview() {
+      document.getElementById('import-step-upload').classList.add('hidden');
+      document.getElementById('import-step-preview').classList.remove('hidden');
+      
+      document.getElementById('import-file-name').textContent = importData.fileName;
+      document.getElementById('import-row-count').textContent = importData.totalRows;
+      
+      // Render preview table
+      const previewContainer = document.getElementById('preview-table-container');
+      previewContainer.innerHTML = `
+        <table class="min-w-full text-xs">
+          <thead class="bg-gray-50 sticky top-0">
+            <tr>
+              ${importData.headers.map(h => `<th class="px-2 py-1.5 text-left font-medium text-gray-600">${h}</th>`).join('')}
+            </tr>
+          </thead>
+          <tbody class="divide-y">
+            ${importData.rows.map(row => `
+              <tr>
+                ${importData.headers.map(h => `<td class="px-2 py-1.5 truncate max-w-[150px]">${row[h]}</td>`).join('')}
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+      
+      // Render field mappings
+      const targetFields = ['sku', 'title', 'price', 'inventory', 'vendor', 'tags'];
+      const mappingContainer = document.getElementById('field-mapping-container');
+      mappingContainer.innerHTML = targetFields.map(field => `
+        <div class="flex items-center gap-2">
+          <label class="text-sm text-gray-600 w-24 capitalize">${field}:</label>
+          <select class="flex-1 border rounded px-2 py-1 text-sm field-mapping" data-field="${field}">
+            <option value="">-- Not Mapped --</option>
+            ${importData.headers.map(h => `<option value="${h}" ${h.toLowerCase() === field ? 'selected' : ''}>${h}</option>`).join('')}
+          </select>
+        </div>
+      `).join('');
+    }
+
+    function startImport() {
+      document.getElementById('import-step-preview').classList.add('hidden');
+      document.getElementById('import-step-progress').classList.remove('hidden');
+      
+      const total = importData.totalRows;
+      let processed = 0;
+      let success = 0;
+      let errors = 0;
+      
+      document.getElementById('import-total').textContent = total;
+      
+      // Simulate import progress
+      const interval = setInterval(() => {
+        processed += Math.floor(Math.random() * 50) + 20;
+        if (processed > total) processed = total;
+        
+        success = Math.floor(processed * 0.996);
+        errors = processed - success;
+        
+        const percent = Math.floor(processed / total * 100);
+        
+        document.getElementById('import-progress-label').textContent = `${processed} of ${total} rows`;
+        document.getElementById('import-progress-percent').textContent = `${percent}%`;
+        document.getElementById('import-progress-bar').style.width = `${percent}%`;
+        document.getElementById('import-success').textContent = success;
+        document.getElementById('import-errors').textContent = errors;
+        
+        if (processed >= total) {
+          clearInterval(interval);
+          completeImport(success, errors);
+        }
+      }, 200);
+    }
+
+    function completeImport(success, errors) {
+      document.getElementById('import-status-icon').innerHTML = `
+        <svg class="w-16 h-16 mx-auto text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      `;
+      document.getElementById('import-status-text').textContent = 'Import Complete!';
+      
+      if (errors > 0) {
+        document.getElementById('import-error-list').classList.remove('hidden');
+        document.getElementById('import-error-container').innerHTML = `
+          <div class="p-2 text-sm text-red-700 bg-red-50">Row 234: Invalid price format</div>
+          <div class="p-2 text-sm text-red-700 bg-red-50">Row 567: Missing required field SKU</div>
+          <div class="p-2 text-sm text-red-700 bg-red-50">Row 891: Duplicate SKU detected</div>
+        `;
+      }
+      
+      document.getElementById('import-complete-actions').classList.remove('hidden');
+    }
+
+    function resetImport() {
+      importData = null;
+      document.querySelectorAll('.import-step').forEach(step => step.classList.add('hidden'));
+      document.getElementById('import-step-upload').classList.remove('hidden');
+      document.getElementById('import-error-list').classList.add('hidden');
+      document.getElementById('import-complete-actions').classList.add('hidden');
+      document.getElementById('file-input').value = '';
+    }
+
+    function downloadTemplate(format) {
+      alert(`Downloading ${format.toUpperCase()} template...`);
+    }
+
+    function showImportModal() {
+      switchPage('import');
+    }
+
+    // ==================
+    // MODAL UTILITIES
+    // ==================
+
+    function closeModal(modalId) {
+      document.getElementById(modalId).classList.add('hidden');
+    }
+  </script>
+</body>
+</html>
