@@ -1,0 +1,280 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   PRODUCTS PAGE — DARK THEME OVERRIDE
+   ═══════════════════════════════════════════════════════════════════════════
+   Import in app/products/page.tsx:  import './products-dark.css'
+   
+   Design tokens (matching SourcingPanel):
+     --bg:      #0f1117
+     --bg2:     #181c25
+     --bg3:     #222832
+     --border:  #2c3340
+     --border2: #3a4250
+     --text:    #e8eaed
+     --muted:   #8b919c
+     --dim:     #6b7280
+     --cyan:    #22d3ee
+     --green:   #22c55e
+     --red:     #ef4444
+     --yellow:  #eab308
+     --orange:  #f97316
+     --purple:  #a855f7
+     --blue:    #3b82f6
+     --shopify: #96bf48
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Page root ─────────────────────────────────────────────────────────── */
+.products-dark {
+  background: #0f1117 !important;
+  color: #e8eaed !important;
+  min-height: 100vh;
+}
+
+/* ── Override white/light backgrounds ──────────────────────────────────── */
+.products-dark .bg-white,
+.products-dark .bg-gray-50,
+.products-dark .bg-gray-100 {
+  background-color: #181c25 !important;
+}
+
+/* ── Cards (product cards, stat cards, error/empty states) ────────────── */
+.products-dark [class*="rounded-xl"][class*="border"][class*="bg-white"],
+.products-dark [class*="rounded-lg"][class*="border"][class*="bg-white"] {
+  background-color: #181c25 !important;
+  border-color: #2c3340 !important;
+}
+
+/* ── Stat cards — dark versions ───────────────────────────────────────── */
+.products-dark .bg-blue-50 { background-color: rgba(59,130,246,.08) !important; }
+.products-dark .bg-green-50 { background-color: rgba(34,197,94,.08) !important; }
+.products-dark .bg-yellow-50 { background-color: rgba(234,179,8,.08) !important; }
+.products-dark .bg-red-50 { background-color: rgba(239,68,68,.08) !important; }
+.products-dark .bg-purple-50 { background-color: rgba(168,85,247,.08) !important; }
+.products-dark .bg-orange-50 { background-color: rgba(249,115,22,.08) !important; }
+
+.products-dark .border-blue-200 { border-color: rgba(59,130,246,.2) !important; }
+.products-dark .border-green-200 { border-color: rgba(34,197,94,.2) !important; }
+.products-dark .border-yellow-200 { border-color: rgba(234,179,8,.2) !important; }
+.products-dark .border-red-200 { border-color: rgba(239,68,68,.2) !important; }
+.products-dark .border-purple-200 { border-color: rgba(168,85,247,.2) !important; }
+.products-dark .border-orange-200 { border-color: rgba(249,115,22,.2) !important; }
+
+.products-dark .text-blue-700 { color: #60a5fa !important; }
+.products-dark .text-green-700 { color: #4ade80 !important; }
+.products-dark .text-yellow-700 { color: #facc15 !important; }
+.products-dark .text-red-700 { color: #f87171 !important; }
+.products-dark .text-purple-700 { color: #c084fc !important; }
+.products-dark .text-orange-700 { color: #fb923c !important; }
+
+/* Active stat cards keep their solid colors — no change needed */
+
+/* ── Text colors ──────────────────────────────────────────────────────── */
+.products-dark .text-gray-900,
+.products-dark .text-gray-800,
+.products-dark .text-black {
+  color: #e8eaed !important;
+}
+.products-dark .text-gray-700 { color: #c9cdd4 !important; }
+.products-dark .text-gray-600 { color: #8b919c !important; }
+.products-dark .text-gray-500 { color: #8b919c !important; }
+.products-dark .text-gray-400 { color: #6b7280 !important; }
+.products-dark .text-gray-300 { color: #6b7280 !important; }
+
+/* ── Borders ──────────────────────────────────────────────────────────── */
+.products-dark .border-gray-200,
+.products-dark .border-gray-100 {
+  border-color: #2c3340 !important;
+}
+.products-dark .border-gray-300 {
+  border-color: #3a4250 !important;
+}
+
+/* ── Search input + form inputs ───────────────────────────────────────── */
+.products-dark input[type="text"],
+.products-dark input[type="search"],
+.products-dark input[type="number"],
+.products-dark input:not([type="checkbox"]):not([type="radio"]),
+.products-dark select,
+.products-dark textarea {
+  background-color: #222832 !important;
+  border-color: #3a4250 !important;
+  color: #e8eaed !important;
+}
+.products-dark input::placeholder,
+.products-dark .placeholder-gray-400::placeholder {
+  color: #6b7280 !important;
+}
+.products-dark input:focus,
+.products-dark select:focus {
+  border-color: #22d3ee !important;
+  box-shadow: 0 0 0 2px rgba(34,211,238,.15) !important;
+}
+
+/* ── Buttons ──────────────────────────────────────────────────────────── */
+/* Ghost/outline buttons */
+.products-dark button[class*="bg-white"][class*="border-gray"] {
+  background-color: transparent !important;
+  border-color: #3a4250 !important;
+  color: #8b919c !important;
+}
+.products-dark button[class*="bg-white"][class*="border-gray"]:hover {
+  background-color: #222832 !important;
+  color: #e8eaed !important;
+}
+
+/* Colored outline buttons */
+.products-dark button[class*="bg-purple-50"] {
+  background-color: rgba(168,85,247,.08) !important;
+  border-color: rgba(168,85,247,.2) !important;
+  color: #c084fc !important;
+}
+.products-dark button[class*="bg-purple-50"]:hover {
+  background-color: rgba(168,85,247,.15) !important;
+}
+
+.products-dark button[class*="bg-green-50"] {
+  background-color: rgba(34,197,94,.08) !important;
+  border-color: rgba(34,197,94,.2) !important;
+  color: #4ade80 !important;
+}
+.products-dark button[class*="bg-green-50"]:hover {
+  background-color: rgba(34,197,94,.15) !important;
+}
+
+/* ── Product cards ────────────────────────────────────────────────────── */
+.products-dark .group.relative {
+  background-color: #181c25 !important;
+  border-color: #2c3340 !important;
+}
+.products-dark .group.relative:hover {
+  border-color: #3a4250 !important;
+  box-shadow: 0 4px 12px rgba(0,0,0,.3) !important;
+}
+
+/* Card image area */
+.products-dark .group .bg-gray-50,
+.products-dark .group .bg-gray-100 {
+  background-color: #222832 !important;
+}
+
+/* Card body text */
+.products-dark .group .text-gray-900 { color: #e8eaed !important; }
+.products-dark .group .text-gray-600 { color: #8b919c !important; }
+.products-dark .group .text-gray-500 { color: #8b919c !important; }
+.products-dark .group .text-gray-400 { color: #6b7280 !important; }
+
+/* Card borders */
+.products-dark .group .border-gray-100,
+.products-dark .group .border-gray-200 {
+  border-color: #2c3340 !important;
+}
+
+/* Card action buttons */
+.products-dark .group button[class*="bg-green-50"] {
+  background-color: rgba(34,197,94,.08) !important;
+  color: #4ade80 !important;
+}
+.products-dark .group button[class*="hover\\:bg-blue-50"]:hover {
+  background-color: rgba(59,130,246,.08) !important;
+}
+.products-dark .group button[class*="hover\\:bg-red-50"]:hover {
+  background-color: rgba(239,68,68,.08) !important;
+}
+.products-dark .group button[class*="hover\\:bg-yellow-50"]:hover {
+  background-color: rgba(234,179,8,.08) !important;
+}
+.products-dark .group button[class*="hover\\:bg-green-50"]:hover {
+  background-color: rgba(34,197,94,.12) !important;
+}
+
+/* Card profit badges */
+.products-dark .bg-green-100 { background-color: rgba(34,197,94,.12) !important; }
+.products-dark .bg-yellow-100 { background-color: rgba(234,179,8,.12) !important; }
+.products-dark .bg-red-100 { background-color: rgba(239,68,68,.12) !important; }
+.products-dark .bg-gray-100 { background-color: rgba(107,114,128,.12) !important; }
+.products-dark .bg-blue-100 { background-color: rgba(59,130,246,.12) !important; }
+.products-dark .bg-orange-100 { background-color: rgba(249,115,22,.12) !important; }
+
+/* ── Bulk action bar ──────────────────────────────────────────────────── */
+.products-dark [class*="bg-blue-50"][role="toolbar"],
+.products-dark .sticky[class*="bg-blue-50"] {
+  background-color: rgba(34,211,238,.06) !important;
+  border-color: rgba(34,211,238,.15) !important;
+}
+.products-dark .text-blue-800 { color: #22d3ee !important; }
+.products-dark .text-blue-600 { color: #22d3ee !important; }
+
+/* ── Pagination ───────────────────────────────────────────────────────── */
+.products-dark [class*="bg-gray-100"][class*="text-gray-600"][class*="hover\\:bg-gray-200"] {
+  background-color: #222832 !important;
+  color: #8b919c !important;
+  border-color: #2c3340 !important;
+}
+
+/* ── Sourcing toggle button ───────────────────────────────────────────── */
+.products-dark button[class*="bg-blue-600"] {
+  /* Keep blue buttons blue — they work on dark */
+}
+
+/* ── Active filter label pill ─────────────────────────────────────────── */
+.products-dark [class*="bg-blue-50"][class*="text-blue-700"][class*="rounded-full"] {
+  background-color: rgba(34,211,238,.1) !important;
+  color: #22d3ee !important;
+}
+
+/* ── Hover states ─────────────────────────────────────────────────────── */
+.products-dark [class*="hover\\:bg-gray-50"]:hover { background-color: #222832 !important; }
+.products-dark [class*="hover\\:bg-gray-200"]:hover { background-color: #2c3340 !important; }
+.products-dark [class*="hover\\:bg-gray-100"]:hover { background-color: #222832 !important; }
+.products-dark [class*="hover\\:shadow-md"]:hover {
+  box-shadow: 0 4px 12px rgba(0,0,0,.3) !important;
+}
+
+/* ── Focus ring adjustments ───────────────────────────────────────────── */
+.products-dark [class*="focus\\:ring-blue-500"]:focus {
+  --tw-ring-color: rgba(34,211,238,.3) !important;
+}
+.products-dark [class*="focus\\:ring-offset-2"]:focus {
+  --tw-ring-offset-color: #0f1117 !important;
+}
+
+/* ── Scrollbar ────────────────────────────────────────────────────────── */
+.products-dark ::-webkit-scrollbar { width: 6px; height: 6px; }
+.products-dark ::-webkit-scrollbar-track { background: #0f1117; }
+.products-dark ::-webkit-scrollbar-thumb { background: #3a4250; border-radius: 3px; }
+
+/* ── Selection ────────────────────────────────────────────────────────── */
+.products-dark ::selection { background: rgba(34,211,238,.2); }
+
+/* ── Error state ──────────────────────────────────────────────────────── */
+.products-dark .bg-red-100 { background-color: rgba(239,68,68,.1) !important; }
+.products-dark [class*="bg-red-50"][class*="border-red-200"] {
+  background-color: rgba(239,68,68,.06) !important;
+  border-color: rgba(239,68,68,.15) !important;
+  color: #f87171 !important;
+}
+
+/* ── Empty state icon circles ─────────────────────────────────────────── */
+.products-dark [class*="bg-blue-50"][class*="rounded-full"] {
+  background-color: rgba(34,211,238,.08) !important;
+}
+
+/* ── Checkbox ─────────────────────────────────────────────────────────── */
+.products-dark input[type="checkbox"] {
+  accent-color: #a855f7;
+}
+.products-dark .bg-white\\/80 {
+  background-color: rgba(34, 39, 50, 0.8) !important;
+}
+
+/* ── Google status badge override ─────────────────────────────────────── */
+.products-dark [class*="bg-green-500"] { /* keep as-is */ }
+
+/* ── Shadow overrides ─────────────────────────────────────────────────── */
+.products-dark .shadow-lg { box-shadow: 0 8px 24px rgba(0,0,0,.4) !important; }
+.products-dark .shadow-md { box-shadow: 0 4px 12px rgba(0,0,0,.3) !important; }
+.products-dark .shadow-sm { box-shadow: 0 1px 4px rgba(0,0,0,.2) !important; }
+
+/* ── Ring adjustments ─────────────────────────────────────────────────── */
+.products-dark .ring-blue-100 { --tw-ring-color: rgba(34,211,238,.1) !important; }
+.products-dark .ring-2 { --tw-ring-color: rgba(34,211,238,.15) !important; }
+.products-dark .border-blue-400 { border-color: rgba(34,211,238,.4) !important; }
