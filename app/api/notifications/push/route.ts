@@ -13,16 +13,23 @@ const supabase = createClient(
   { auth: { autoRefreshToken: false, persistSession: false } }
 );
 
-// Configure VAPID
-webpush.setVapidDetails(
-  `mailto:${process.env.VAPID_EMAIL || 'admin@medazonhealth.com'}`,
-  process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!,
-  process.env.VAPID_PRIVATE_KEY!
-);
+// Configure VAPID (lazy init to avoid build errors)
+let vapidConfigured = false;
+function ensureVapid() {
+  if (!vapidConfigured && process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
+    webpush.setVapidDetails(
+      `mailto:${process.env.VAPID_EMAIL || 'admin@medazonhealth.com'}`,
+      process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY,
+      process.env.VAPID_PRIVATE_KEY
+    );
+    vapidConfigured = true;
+  }
+}
 
 // POST — Send a push notification
 export async function POST(request: NextRequest) {
   try {
+    ensureVapid();
     const { recipient_id, recipient_role, title, body, url, type, tag } = await request.json();
 
     console.log('[PUSH] Sending:', { recipient_id, recipient_role, title });
