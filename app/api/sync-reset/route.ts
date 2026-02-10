@@ -208,8 +208,8 @@ async function pushToShopifyInternal() {
               samsDisplay ? { namespace: 'compare_prices', key: 'sams_price', value: samsDisplay, type: 'number_decimal' } : null,
               product.rating ? { namespace: 'social_proof', key: 'rating', value: product.rating.toString(), type: 'number_decimal' } : null,
               product.review_count ? { namespace: 'social_proof', key: 'total_sold', value: product.review_count.toString(), type: 'single_line_text_field' } : null,
-             (product.source_url || product.asin) ? { namespace: 'custom', key: 'supplier_url_flow_access', value: JSON.stringify([product.source_url || `https://www.amazon.com/dp/${product.asin}`]), type: 'list.url' } : null,
-             (product.source_url || product.asin) ? { namespace: 'custom', key: 'supplier_url', value: JSON.stringify([product.source_url || `https://www.amazon.com/dp/${product.asin}`]), type: 'list.url' } : null,
+             (product.source_url || product.asin) ? { namespace: 'custom', key: 'supplier_url_flow_access', value: product.source_url || `https://www.amazon.com/dp/${product.asin}`, type: 'url' } : null,
+             (product.source_url || product.asin) ? { namespace: 'custom', key: 'supplier_url', value: product.source_url || `https://www.amazon.com/dp/${product.asin}`, type: 'url' } : null,
             ].filter(Boolean),
           }
         }),
