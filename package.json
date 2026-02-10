@@ -30,8 +30,8 @@
     "twilio": "^4.19.0",
     "uuid": "^13.0.0",
     "xlsx": "^0.18.5",
-    "zod": "^3.25.76"
-    "web-push": "^3.6.7",
+    "zod": "^3.25.76",
+"web-push": "^3.6.7"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",
