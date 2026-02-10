@@ -239,6 +239,19 @@ function BulkActionBar({
             })}
           />
         )}
+        {onBulkSync && (
+          <BulkBtn
+            label="Pull from Shopify"
+            color="blue"
+            onClick={() => onRequestConfirm({
+              title: 'Pull from Shopify',
+              message: `Pull latest data from Shopify for ${selectedCount} product${selectedCount > 1 ? 's' : ''}? Competitor prices will be regenerated using pricing rules.`,
+              confirmLabel: 'Pull from Shopify',
+              confirmColor: 'blue',
+              onConfirm: () => onBulkSync(ids),
+            })}
+          />
+        )}
         {onBulkActivate && (
           <BulkBtn
             label="Activate"
