@@ -628,127 +628,96 @@ export async function POST(request: NextRequest) {
       }
 
       case 'sync-shopify': {
+        // Delegates to the same logic as /api/shopify-push
+        // Uses the standalone, metafield-free Shopify push
         try {
-          const { fullSync = false, productIds, direction } = body;
+          const { productIds, forceCreate = true, fullSync = false } = body;
 
-          // ── PUSH individual products TO Shopify ──────────────────────
           if (productIds && Array.isArray(productIds) && productIds.length > 0) {
-            console.log(`[Products API] Pushing ${productIds.length} product(s) to Shopify...`);
-            
-            let synced = 0;
-            const errors: string[] = [];
-
-            // Pricing rules (from lib/config/pricing-rules.ts)
-            const MARKUP = 1.70;
-            const COMPETITOR_RANGES = {
-              amazon: { min: 1.82, max: 1.88 },
-              costco: { min: 1.80, max: 1.85 },
-              ebay:   { min: 1.87, max: 1.93 },
-              sams:   { min: 1.80, max: 1.83 },
-            };
-            const randInRange = (mn: number, mx: number) => +(mn + Math.random() * (mx - mn)).toFixed(2);
-
-            const SHOPIFY_STORE = process.env.SHOPIFY_STORE_DOMAIN || process.env.NEXT_PUBLIC_SHOPIFY_STORE;
-            const SHOPIFY_TOKEN = process.env.SHOPIFY_ADMIN_ACCESS_TOKEN || process.env.SHOPIFY_ACCESS_TOKEN;
+            const SHOPIFY_STORE = process.env.SHOPIFY_STORE_DOMAIN;
+            const SHOPIFY_TOKEN = process.env.SHOPIFY_ADMIN_ACCESS_TOKEN;
             const API_VERSION = '2024-01';
 
             if (!SHOPIFY_STORE || !SHOPIFY_TOKEN) {
-              return NextResponse.json({
-                success: false,
-                error: { code: 'SHOPIFY_CONFIG_ERROR', message: 'Shopify credentials not configured. Set SHOPIFY_STORE_DOMAIN and SHOPIFY_ADMIN_ACCESS_TOKEN in .env' }
-              }, { status: 400 });
+              return NextResponse.json({ success: false, error: 'Shopify not configured. Set SHOPIFY_STORE_DOMAIN and SHOPIFY_ADMIN_ACCESS_TOKEN.' }, { status: 400 });
             }
 
-            for (const pid of productIds) {
+            const sb = getSupabaseClient();
+            const hdr = { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN };
+            const base = `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}`;
+
+            // Force create: clear stale Shopify IDs
+            if (forceCreate) {
+              await sb.from('products').update({ shopify_product_id: null, shopify_variant_id: null }).in('id', productIds);
+            }
+
+            const { data: products, error: fetchErr } = await sb.from('products').select('*').in('id', productIds);
+            if (fetchErr || !products) {
+              return NextResponse.json({ success: false, error: fetchErr?.message || 'No products found' }, { status: 500 });
+            }
+
+            const MARKUP = 1.70;
+            const rr = (lo: number, hi: number) => +(lo + Math.random() * (hi - lo)).toFixed(2);
+            let synced = 0;
+            const errors: string[] = [];
+
+            for (const p of products) {
               try {
-                const { data: product, error: fetchErr } = await getSupabaseClient()
-                  .from('products').select('*').eq('id', pid).single();
-                if (fetchErr || !product) { errors.push(`Product ${pid} not found`); continue; }
+                const asin = p.asin || p.source_product_id || p.sku || '';
+                const cost = p.cost_price || p.amazon_price || p.current_price || 0;
+                const sell = p.retail_price || +(cost * MARKUP).toFixed(2);
+                const compareAt = +(sell * rr(1.82, 1.93)).toFixed(2);
 
-                const asin = product.asin || product.source_product_id || product.sku || '';
-                const amazonCost = product.cost_price || product.amazon_price || 0;
-                const sellPrice = product.retail_price || +(amazonCost * MARKUP).toFixed(2);
-
-                // Calculate competitor display prices
-                const amazonDisplay = +(sellPrice * randInRange(COMPETITOR_RANGES.amazon.min, COMPETITOR_RANGES.amazon.max)).toFixed(2);
-                const costcoDisplay = +(sellPrice * randInRange(COMPETITOR_RANGES.costco.min, COMPETITOR_RANGES.costco.max)).toFixed(2);
-                const ebayDisplay   = +(sellPrice * randInRange(COMPETITOR_RANGES.ebay.min, COMPETITOR_RANGES.ebay.max)).toFixed(2);
-                const samsDisplay   = +(sellPrice * randInRange(COMPETITOR_RANGES.sams.min, COMPETITOR_RANGES.sams.max)).toFixed(2);
-                const compareAtPrice = Math.max(amazonDisplay, costcoDisplay, ebayDisplay, samsDisplay);
-
-                // Supplier URL from ASIN
-                const supplierUrl = asin && /^B[A-Z0-9]{9}$/.test(asin)
-                  ? `https://www.amazon.com/dp/${asin}` : (product.source_url || '');
-
-                // Build Shopify payload
-                const shopifyPayload: any = {
-                  product: {
-                    title: product.title,
-                    body_html: product.description || product.body_html || '',
-                    vendor: product.vendor || '',
-                    product_type: product.product_type || '',
-                    tags: Array.isArray(product.tags) ? product.tags.join(', ') : (product.tags || ''),
-                    variants: [{
-                      price: String(sellPrice),
-                      compare_at_price: String(compareAtPrice),
-                      sku: asin,
-                      inventory_management: 'shopify',
-                      inventory_quantity: product.inventory_quantity ?? 999,
-                      requires_shipping: true,
-                    }],
-                    images: product.image_url ? [{ src: product.image_url }] :
-                            (product.images || []).slice(0, 5).map((img: any) => ({ src: typeof img === 'string' ? img : img.src })),
+                const imgs: { src: string }[] = [];
+                if (p.main_image) imgs.push({ src: p.main_image });
+                else if (p.image_url) imgs.push({ src: p.image_url });
+                if (Array.isArray(p.images)) {
+                  for (const img of p.images.slice(0, 5)) {
+                    const s = typeof img === 'string' ? img : img?.src;
+                    if (s && !imgs.find((i: any) => i.src === s)) imgs.push({ src: s });
                   }
-                };
-
-                let shopifyResponse;
-                if (product.shopify_product_id) {
-                  // UPDATE existing
-                  const updatePayload = JSON.parse(JSON.stringify(shopifyPayload));
-                  if (product.shopify_variant_id) {
-                    updatePayload.product.variants[0].id = product.shopify_variant_id;
-                  }
-                  shopifyResponse = await fetch(
-                    `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/products/${product.shopify_product_id}.json`,
-                    { method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN }, body: JSON.stringify(updatePayload) }
-                  );
-                } else {
-                  // CREATE new
-                  shopifyResponse = await fetch(
-                    `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/products.json`,
-                    { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN }, body: JSON.stringify(shopifyPayload) }
-                  );
                 }
 
-                if (!shopifyResponse.ok) {
-                  const errBody = await shopifyResponse.text();
-                  errors.push(`Shopify error for ${product.title}: ${shopifyResponse.status} - ${errBody.substring(0, 200)}`);
+                const payload = {
+                  product: {
+                    title: p.title,
+                    body_html: p.description || p.body_html || '',
+                    vendor: p.vendor || p.brand || '',
+                    product_type: p.product_type || p.category || '',
+                    tags: Array.isArray(p.tags) ? p.tags.join(', ') : (p.tags || ''),
+                    variants: [{ price: String(sell), compare_at_price: String(compareAt), sku: asin, inventory_management: 'shopify', inventory_quantity: p.inventory_quantity ?? 999, requires_shipping: true }],
+                    images: imgs,
+                  },
+                };
+
+                let res = await fetch(`${base}/products.json`, { method: 'POST', headers: hdr, body: JSON.stringify(payload) });
+
+                if (!res.ok) {
+                  const errText = await res.text();
+                  errors.push(`${p.title}: Shopify ${res.status} - ${errText.substring(0, 200)}`);
+                  if (res.status === 429) await new Promise(r => setTimeout(r, 5000));
                   continue;
                 }
 
-                const shopifyData = await shopifyResponse.json();
-                const shopifyId = shopifyData.product?.id;
-                const shopifyVariantId = shopifyData.product?.variants?.[0]?.id;
+                const sData = await res.json();
+                const sId = sData.product?.id;
+                const svId = sData.product?.variants?.[0]?.id;
 
-                if (shopifyId) {
-                  await getSupabaseClient().from('products').update({
-                    shopify_product_id: String(shopifyId),
-                    shopify_variant_id: shopifyVariantId ? String(shopifyVariantId) : null,
+                if (sId) {
+                  await sb.from('products').update({
+                    shopify_product_id: String(sId),
+                    shopify_variant_id: svId ? String(svId) : null,
                     shopify_synced_at: new Date().toISOString(),
-                    retail_price: sellPrice,
-                    compare_at_price: compareAtPrice,
-                    amazon_display_price: amazonDisplay,
-                    costco_display_price: costcoDisplay,
-                    ebay_display_price: ebayDisplay,
-                    sams_display_price: samsDisplay,
+                    retail_price: sell,
+                    compare_at_price: compareAt,
                     updated_at: new Date().toISOString(),
-                  }).eq('id', pid);
+                  }).eq('id', p.id);
                 }
 
                 synced++;
-                console.log(`[Products API] Pushed ${product.title} (${asin}) → Shopify #${shopifyId} | $${sellPrice} | Compare: $${compareAtPrice}`);
+                await new Promise(r => setTimeout(r, 500));
               } catch (pushErr) {
-                errors.push(`Failed to push ${pid}: ${pushErr instanceof Error ? pushErr.message : 'Unknown error'}`);
+                errors.push(`${p.title}: ${pushErr instanceof Error ? pushErr.message : 'Unknown error'}`);
               }
             }
 
@@ -758,23 +727,15 @@ export async function POST(request: NextRequest) {
             });
           }
 
-          // ── PULL from Shopify (existing behavior) ────────────────────
-          console.log('[Products API] Starting Shopify sync (pull)...');
+          // PULL from Shopify (existing behavior)
           const result = await syncProductsFromShopify(fullSync);
-          console.log('[Products API] Shopify sync result:', result);
-
           return NextResponse.json({
             success: true,
             data: { synced: result.synced || 0, errors: result.errors || [], message: `Synced ${result.synced || 0} products from Shopify` },
           });
         } catch (syncError) {
           console.error('[Products API] Shopify sync error:', syncError);
-          return NextResponse.json({
-            success: false,
-            error: { code: 'SHOPIFY_SYNC_ERROR', message: 'Failed to sync products with Shopify',
-              details: syncError instanceof Error ? syncError.message : 'Unknown error',
-              suggestion: 'Check Shopify credentials and connection' }
-          }, { status: 500 });
+          return NextResponse.json({ success: false, error: String(syncError) }, { status: 500 });
         }
       }
 
