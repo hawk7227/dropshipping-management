@@ -30,7 +30,16 @@ interface PushResult {
   error?: string;
 }
 
+interface StockStatus {
+  inStock: boolean | null;
+  price: number | null;
+  source: string;
+  seller?: string;
+  error?: string;
+}
+
 const BATCH_SIZE = 10;
+const STOCK_BATCH_SIZE = 5;
 
 export default function PushToShopifyPage() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -50,6 +59,11 @@ export default function PushToShopifyPage() {
   const [pushLog, setPushLog] = useState<string[]>([]);
   const abortRef = useRef(false);
   const logRef = useRef<HTMLDivElement>(null);
+
+  // Stock check state
+  const [stockMap, setStockMap] = useState<Record<string, StockStatus>>({});
+  const [checkingStock, setCheckingStock] = useState(false);
+  const [stockProgress, setStockProgress] = useState(0);
 
   // Filter
   const [filter, setFilter] = useState<'all' | 'not_pushed' | 'pushed'>('all');
@@ -193,6 +207,74 @@ export default function PushToShopifyPage() {
 
   const abort = () => { abortRef.current = true; };
 
+  // CHECK STOCK via Rainforest/Keepa
+  const checkStock = useCallback(async () => {
+    const ids = Array.from(selectedIds);
+    const itemsToCheck = products
+      .filter(p => ids.includes(p.id) && p.asin)
+      .map(p => ({ asin: p.asin!, productId: p.id }));
+
+    if (itemsToCheck.length === 0) {
+      setPushLog(prev => [...prev, '⚠️ No products with ASINs selected to check']);
+      return;
+    }
+
+    setCheckingStock(true);
+    setStockProgress(0);
+    setPushLog(prev => [...prev, `🔍 Checking stock for ${itemsToCheck.length} products...`]);
+
+    const batches = [];
+    for (let i = 0; i < itemsToCheck.length; i += STOCK_BATCH_SIZE) {
+      batches.push(itemsToCheck.slice(i, i + STOCK_BATCH_SIZE));
+    }
+
+    const newStockMap: Record<string, StockStatus> = { ...stockMap };
+
+    for (let i = 0; i < batches.length; i++) {
+      if (abortRef.current) { setPushLog(prev => [...prev, '⛔ Stock check aborted']); break; }
+
+      setStockProgress(Math.round(((i + 1) / batches.length) * 100));
+
+      try {
+        const res = await fetch('/api/stock-check', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: batches[i] }),
+        });
+        const json = await res.json();
+
+        if (json.success && json.data?.results) {
+          for (const r of json.data.results) {
+            newStockMap[r.productId] = {
+              inStock: r.inStock,
+              price: r.price,
+              source: r.source,
+              seller: r.seller,
+              error: r.error,
+            };
+            const prod = products.find(p => p.id === r.productId);
+            const name = prod?.title?.substring(0, 50) || r.asin;
+            if (r.inStock === true) {
+              setPushLog(prev => [...prev, `✅ ${name} — In Stock ${r.price ? `$${r.price}` : ''} (${r.source})`]);
+            } else if (r.inStock === false) {
+              setPushLog(prev => [...prev, `❌ ${name} — OUT OF STOCK (${r.source})`]);
+            } else {
+              setPushLog(prev => [...prev, `⚠️ ${name} — Unknown: ${r.error || 'no data'}`]);
+            }
+          }
+          setStockMap({ ...newStockMap });
+        }
+      } catch (e) {
+        setPushLog(prev => [...prev, `❌ Batch ${i + 1} stock check failed: ${e}`]);
+      }
+    }
+
+    const inStock = Object.values(newStockMap).filter(s => s.inStock === true).length;
+    const outOfStock = Object.values(newStockMap).filter(s => s.inStock === false).length;
+    setPushLog(prev => [...prev, ``, `🏁 Stock check done: ${inStock} in stock, ${outOfStock} out of stock`]);
+    setCheckingStock(false);
+  }, [selectedIds, products, stockMap]);
+
   // Stats
   const successCount = pushResults.filter(r => r.success).length;
   const failCount = pushResults.filter(r => !r.success).length;
@@ -236,6 +318,8 @@ export default function PushToShopifyPage() {
           { label: 'Not Pushed', value: notPushedCount, color: '#f59e0b' },
           { label: 'Already Pushed', value: pushedCount, color: '#22c55e' },
           { label: 'Selected', value: selectedIds.size, color: '#8b5cf6' },
+          { label: 'In Stock', value: Object.values(stockMap).filter(s => s.inStock === true).length, color: '#10b981' },
+          { label: 'Out of Stock', value: Object.values(stockMap).filter(s => s.inStock === false).length, color: '#ef4444' },
         ].map(s => (
           <div key={s.label} style={{ background: '#1e293b', padding: '12px 20px', borderRadius: 8, borderLeft: `4px solid ${s.color}`, minWidth: 140 }}>
             <div style={{ fontSize: 24, fontWeight: 700, color: s.color }}>{s.value}</div>
@@ -262,6 +346,38 @@ export default function PushToShopifyPage() {
           <input type="checkbox" checked={forceCreate} onChange={e => setForceCreate(e.target.checked)} />
           Force create (ignore old Shopify IDs)
         </label>
+
+        {!checkingStock ? (
+          <button
+            onClick={checkStock}
+            disabled={selectedIds.size === 0 || pushing}
+            style={{
+              ...btnStyle('#0ea5e9'),
+              opacity: selectedIds.size === 0 || pushing ? 0.4 : 1,
+              cursor: selectedIds.size === 0 || pushing ? 'not-allowed' : 'pointer',
+            }}
+          >
+            🔍 Check Stock ({selectedIds.size})
+          </button>
+        ) : (
+          <button onClick={abort} style={btnStyle('#ef4444')}>⛔ Stop Check</button>
+        )}
+
+        {Object.values(stockMap).filter(s => s.inStock === true).length > 0 && (
+          <button
+            onClick={() => {
+              const inStockIds = new Set(
+                Object.entries(stockMap)
+                  .filter(([_, s]) => s.inStock === true)
+                  .map(([id]) => id)
+              );
+              setSelectedIds(inStockIds);
+            }}
+            style={btnStyle('#10b981')}
+          >
+            Select In-Stock Only ({Object.values(stockMap).filter(s => s.inStock === true).length})
+          </button>
+        )}
 
         {!pushing ? (
           <button
@@ -351,6 +467,7 @@ export default function PushToShopifyPage() {
               <th style={thStyle}>Sell Price</th>
               <th style={thStyle}>Status</th>
               <th style={thStyle}>Shopify</th>
+              <th style={thStyle}>Stock</th>
             </tr>
           </thead>
           <tbody>
@@ -398,6 +515,19 @@ export default function PushToShopifyPage() {
                       <span style={{ color: '#ef4444' }} title={pushResult.error}>❌ Failed</span>
                     ) : (
                       <span style={{ color: '#f59e0b' }}>⏳ Not pushed</span>
+                    )}
+                  </td>
+                  <td style={tdStyle}>
+                    {stockMap[p.id] ? (
+                      stockMap[p.id].inStock === true ? (
+                        <span style={{ color: '#22c55e' }}>✅ In Stock {stockMap[p.id].price ? `$${stockMap[p.id].price}` : ''}</span>
+                      ) : stockMap[p.id].inStock === false ? (
+                        <span style={{ color: '#ef4444', fontWeight: 700 }}>❌ OOS</span>
+                      ) : (
+                        <span style={{ color: '#94a3b8' }} title={stockMap[p.id].error}>⚠️ Unknown</span>
+                      )
+                    ) : (
+                      <span style={{ color: '#475569' }}>—</span>
                     )}
                   </td>
                 </tr>
