@@ -175,7 +175,7 @@ export async function syncProduct(productId: string): Promise<Product> {
   const data = await shopifyRequest<{ product: any }>(`products/${productId}.json`);
   await upsertProduct(data.product);
   
-  const { data: product, error } = await supabase
+  const { data: product, error } = await getSupabaseClient()
     .from('products')
     .select('*')
     .eq('id', productId)
@@ -198,7 +198,7 @@ export async function getProducts(options: {
   limit?: number; // Legacy support
   offset?: number; // Legacy support
 }): Promise<{ products: Product[]; total: number }> {
-  let query = supabase
+  let query = getSupabaseClient()
     .from('products')
     .select('*', { count: 'exact' });
 
@@ -246,7 +246,7 @@ export async function getProductWithVariants(productId: string): Promise<{
   product: Product;
   variants: Variant[];
 } | null> {
-  const { data: product, error: productError } = await supabase
+  const { data: product, error: productError } = await getSupabaseClient()
     .from('products')
     .select('*')
     .eq('id', productId)
@@ -254,7 +254,7 @@ export async function getProductWithVariants(productId: string): Promise<{
 
   if (productError) return null;
 
-  const { data: variants, error: variantError } = await supabase
+  const { data: variants, error: variantError } = await getSupabaseClient()
     .from('variants')
     .select('*')
     .eq('product_id', productId)
@@ -272,14 +272,14 @@ export async function updateProductCost(
   costs: Omit<ProductCost, 'id' | 'created_at' | 'product_id' | 'variant_id' | 'effective_from' | 'effective_to'>
 ): Promise<ProductCost> {
   // End previous cost record
-  await supabase
+  await getSupabaseClient()
     .from('product_costs')
     .update({ effective_to: new Date().toISOString() })
     .eq('product_id', productId)
     .is('effective_to', null);
 
   // Insert new cost record
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('product_costs')
     .insert({
       product_id: productId,
@@ -296,7 +296,7 @@ export async function updateProductCost(
 
 // Get current product cost
 export async function getProductCost(productId: string, variantId?: string): Promise<ProductCost | null> {
-  let query = supabase
+  let query = getSupabaseClient()
     .from('product_costs')
     .select('*')
     .eq('product_id', productId)
@@ -334,7 +334,7 @@ export async function bulkImportProducts(
 
   for (const productData of products) {
     // Create import record
-    const { data: importRecord, error: importError } = await supabase
+    const { data: importRecord, error: importError } = await getSupabaseClient()
       .from('product_imports')
       .insert({
         batch_id: actualBatchId,
@@ -389,7 +389,7 @@ export async function bulkImportProducts(
       }
 
       // Update import record
-      await supabase
+      await getSupabaseClient()
         .from('product_imports')
         .update({
           status: 'completed',
@@ -403,7 +403,7 @@ export async function bulkImportProducts(
       const errorMessage = error instanceof Error ? error.message : String(error);
       errors.push(`Failed to import "${productData.title || 'Unknown'}": ${errorMessage}`);
       
-      await supabase
+      await getSupabaseClient()
         .from('product_imports')
         .update({
           status: 'failed',
@@ -427,7 +427,7 @@ export async function getImportBatchStatus(batchId: string): Promise<{
   failed: number;
   imports: ProductImport[];
 }> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('product_imports')
     .select('*')
     .eq('batch_id', batchId);
@@ -451,7 +451,7 @@ export async function syncInventory(): Promise<{ updated: number; errors: number
   let errors = 0;
 
   // Get all variants with inventory_item_id
-  const { data: variants, error } = await supabase
+  const { data: variants, error } = await getSupabaseClient()
     .from('variants')
     .select('id, inventory_item_id')
     .not('inventory_item_id', 'is', null);
@@ -472,7 +472,7 @@ export async function syncInventory(): Promise<{ updated: number; errors: number
       for (const level of data.inventory_levels || []) {
         const variant = batch.find(v => v.inventory_item_id === level.inventory_item_id.toString());
         if (variant) {
-          await supabase
+          await getSupabaseClient()
             .from('variants')
             .update({ inventory_quantity: level.available })
             .eq('id', variant.id);
@@ -493,7 +493,7 @@ export async function getLowStockProducts(threshold: number = 10): Promise<Array
   product: Product;
   variant: Variant;
 }>> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('variants')
     .select('*, products(*)')
     .lte('inventory_quantity', threshold)
@@ -590,7 +590,7 @@ export async function createProduct(data: any): Promise<Product> {
 
 // Update Product
 export async function updateProduct(id: string, updates: any): Promise<Product> {
-    const { data, error } = await supabase
+    const { data, error } = await getSupabaseClient()
         .from('products')
         .update({ ...updates, updated_at: new Date().toISOString() })
         .eq('id', id)

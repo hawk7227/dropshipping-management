@@ -492,7 +492,7 @@ export async function importDiscoveredProduct(product: DiscoveredProduct, runId?
 
   // Associate to discovery_runs counts
   if (runId) {
-    await getSupabaseClient().from('discovery_runs').update({ products_imported: (supabase.raw('products_imported + 1') as any) }).eq('id', runId);
+    await getSupabaseClient().from('discovery_runs').update({ products_imported: (getSupabaseClient().raw('products_imported + 1') as any) }).eq('id', runId);
   }
 
   return pid;
