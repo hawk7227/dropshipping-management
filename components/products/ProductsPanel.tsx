@@ -2891,8 +2891,70 @@ export function ProductsPanel({
     let successCount = 0;
     let failCount = 0;
     
+    // Handle bulk push to Shopify as a batch
+    if (action === 'push_to_shopify') {
+      try {
+        dispatch({ type: 'SET_BULK_PROGRESS', payload: 10 });
+        
+        const response = await fetch('/api/products?action=sync-shopify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ productIds: ids }),
+        });
+
+        dispatch({ type: 'SET_BULK_PROGRESS', payload: 80 });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error?.message || errorData.error || 'Shopify push failed');
+        }
+
+        const result = await response.json();
+
+        if (result.success) {
+          successCount = result.data?.synced || ids.length;
+          failCount = (result.data?.errors?.length) || 0;
+
+          // Update synced products in local state
+          ids.forEach(productId => {
+            const product = state.products.find(p => p.id === productId);
+            if (product) {
+              dispatch({
+                type: 'UPDATE_PRODUCT',
+                payload: {
+                  ...product,
+                  shopify_sync_status: 'synced',
+                  updated_at: new Date().toISOString(),
+                },
+              });
+            }
+          });
+
+          dispatch({ type: 'SET_BULK_PROGRESS', payload: 100 });
+
+          if (result.data?.errors?.length > 0) {
+            addToast({
+              type: 'warning',
+              title: 'Shopify Push Partial',
+              message: `${successCount} pushed, ${failCount} failed: ${result.data.errors[0]}`,
+              duration: TOAST_DURATION,
+            });
+          }
+        } else {
+          throw new Error(result.error || 'Shopify push failed');
+        }
+      } catch (error) {
+        failCount = ids.length;
+        addToast({
+          type: 'error',
+          title: 'Shopify Push Failed',
+          message: error instanceof Error ? error.message : 'Failed to push products to Shopify.',
+          duration: TOAST_DURATION,
+        });
+      }
+    }
     // Handle bulk remove separately for efficiency
-    if (action === 'remove') {
+    else if (action === 'remove') {
       try {
         dispatch({ type: 'SET_BULK_PROGRESS', payload: 50 });
         
@@ -2961,9 +3023,24 @@ export function ProductsPanel({
                 });
               }
               break;
-            case 'push_to_shopify':
-              // Would add to Shopify queue
+            case 'push_to_shopify': {
+              const pushResponse = await fetch('/api/products?action=sync-shopify', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ productIds: [productId] }),
+              });
+              if (!pushResponse.ok) throw new Error(`Shopify push failed: HTTP ${pushResponse.status}`);
+              const pushResult = await pushResponse.json();
+              if (!pushResult.success) throw new Error(pushResult.error?.message || 'Shopify push failed');
+              const pushedProduct = state.products.find(p => p.id === productId);
+              if (pushedProduct) {
+                dispatch({
+                  type: 'UPDATE_PRODUCT',
+                  payload: { ...pushedProduct, shopify_sync_status: 'synced', updated_at: new Date().toISOString() },
+                });
+              }
               break;
+            }
           }
           
           dispatch({ type: 'ADD_BULK_RESULT', payload: { productId, success: true } });
