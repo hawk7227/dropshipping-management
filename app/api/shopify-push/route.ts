@@ -115,15 +115,8 @@ export async function POST(request: NextRequest) {
             tags,
             variants: [{ price: String(sell), compare_at_price: String(compareAt), sku: asin, inventory_management: 'shopify', inventory_quantity: p.inventory_quantity ?? 999, requires_shipping: true }],
             images: imgs,
-            metafields: [
-              { namespace: 'custom', key: 'asin', value: asin, type: 'single_line_text_field' },
-              { namespace: 'custom', key: 'supplier_url', value: supUrl, type: 'url' },
-              { namespace: 'custom', key: 'amazon_price', value: String(cost), type: 'number_decimal' },
-              { namespace: 'comparisons', key: 'price_amazon', value: String(ad), type: 'number_decimal' },
-              { namespace: 'comparisons', key: 'price_costco', value: String(cd), type: 'number_decimal' },
-              { namespace: 'comparisons', key: 'price_ebay', value: String(ed), type: 'number_decimal' },
-              { namespace: 'comparisons', key: 'price_samsclub', value: String(sd), type: 'number_decimal' },
-            ].filter(m => m.value && m.value !== '0' && m.value !== ''),
+            // Metafields removed — Shopify store has conflicting type definitions
+            // Products push without metafields; add them back via Shopify admin later
           },
         };
 
@@ -131,15 +124,8 @@ export async function POST(request: NextRequest) {
         if (p.shopify_product_id) {
           // UPDATE
           const up = JSON.parse(JSON.stringify(payload));
-          const mfs = up.product.metafields;
-          delete up.product.metafields;
           if (p.shopify_variant_id) up.product.variants[0].id = p.shopify_variant_id;
           res = await fetch(`${base}/products/${p.shopify_product_id}.json`, { method: 'PUT', headers: hdr, body: JSON.stringify(up) });
-          if (res.ok && mfs?.length) {
-            for (const mf of mfs) {
-              try { await fetch(`${base}/products/${p.shopify_product_id}/metafields.json`, { method: 'POST', headers: hdr, body: JSON.stringify({ metafield: { ...mf, owner_id: p.shopify_product_id, owner_resource: 'product' } }) }); } catch (_) {}
-            }
-          }
         } else {
           // CREATE
           res = await fetch(`${base}/products.json`, { method: 'POST', headers: hdr, body: JSON.stringify(payload) });
