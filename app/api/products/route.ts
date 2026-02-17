@@ -698,24 +698,13 @@ export async function POST(request: NextRequest) {
                     }],
                     images: product.image_url ? [{ src: product.image_url }] :
                             (product.images || []).slice(0, 5).map((img: any) => ({ src: typeof img === 'string' ? img : img.src })),
-                    metafields: [
-                      { namespace: 'custom', key: 'asin', value: asin, type: 'single_line_text_field' },
-                      { namespace: 'custom', key: 'supplier_url', value: supplierUrl, type: 'url' },
-                      { namespace: 'custom', key: 'amazon_price', value: String(amazonCost), type: 'number_decimal' },
-                      { namespace: 'comparisons', key: 'price_amazon', value: String(amazonDisplay), type: 'number_decimal' },
-                      { namespace: 'comparisons', key: 'price_costco', value: String(costcoDisplay), type: 'number_decimal' },
-                      { namespace: 'comparisons', key: 'price_ebay', value: String(ebayDisplay), type: 'number_decimal' },
-                      { namespace: 'comparisons', key: 'price_samsclub', value: String(samsDisplay), type: 'number_decimal' },
-                    ].filter(m => m.value && m.value !== '0' && m.value !== ''),
                   }
                 };
 
                 let shopifyResponse;
                 if (product.shopify_product_id) {
-                  // UPDATE existing — metafields need separate calls for PUT
+                  // UPDATE existing
                   const updatePayload = JSON.parse(JSON.stringify(shopifyPayload));
-                  const metafieldsToSet = updatePayload.product.metafields;
-                  delete updatePayload.product.metafields;
                   if (product.shopify_variant_id) {
                     updatePayload.product.variants[0].id = product.shopify_variant_id;
                   }
@@ -723,18 +712,8 @@ export async function POST(request: NextRequest) {
                     `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/products/${product.shopify_product_id}.json`,
                     { method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN }, body: JSON.stringify(updatePayload) }
                   );
-                  // Set metafields separately for existing products
-                  if (shopifyResponse.ok && metafieldsToSet?.length) {
-                    for (const mf of metafieldsToSet) {
-                      try {
-                        await fetch(`https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/products/${product.shopify_product_id}/metafields.json`,
-                          { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN },
-                            body: JSON.stringify({ metafield: { ...mf, owner_id: product.shopify_product_id, owner_resource: 'product' } }) });
-                      } catch (mfErr) { console.warn(`[Products API] Metafield ${mf.key} failed:`, mfErr); }
-                    }
-                  }
                 } else {
-                  // CREATE new — metafields included in POST
+                  // CREATE new
                   shopifyResponse = await fetch(
                     `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}/products.json`,
                     { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN }, body: JSON.stringify(shopifyPayload) }
