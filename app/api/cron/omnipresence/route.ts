@@ -132,7 +132,7 @@ async function publishScheduledPosts(): Promise<number> {
   const now = new Date().toISOString();
   
   // Find posts that are scheduled and ready to publish
-  const { data: readyPosts, error } = await supabase
+  const { data: readyPosts, error } = await getSupabaseClient()
     .from('social_posts')
     .select('*')
     .eq('status', 'scheduled')
@@ -210,7 +210,7 @@ async function processAbandonedCarts(): Promise<number> {
     if (!checkout.email) continue;
 
     // Check if we've already emailed this checkout
-    const { data: existing } = await supabase
+    const { data: existing } = await getSupabaseClient()
       .from('email_logs')
       .select('id')
       .eq('recipient_email', checkout.email)
@@ -269,7 +269,7 @@ async function processPostPurchase(): Promise<number> {
     if (order.fulfillment_status !== 'fulfilled') continue;
 
     // Check if we've already sent follow-up
-    const { data: existing } = await supabase
+    const { data: existing } = await getSupabaseClient()
       .from('email_logs')
       .select('id')
       .eq('recipient_email', order.email)
@@ -377,7 +377,7 @@ async function updateAffiliateStats(): Promise<number> {
     
     for (const discount of discountCodes) {
       // Check if this is an affiliate code
-      const { data: affiliate } = await supabase
+      const { data: affiliate } = await getSupabaseClient()
         .from('affiliates')
         .select('*')
         .eq('promo_code', discount.code.toUpperCase())
@@ -397,7 +397,7 @@ async function updateAffiliateStats(): Promise<number> {
         });
 
         // Update affiliate totals
-        await supabase
+        await getSupabaseClient()
           .from('affiliates')
           .update({
             total_sales: affiliate.total_sales + orderTotal,

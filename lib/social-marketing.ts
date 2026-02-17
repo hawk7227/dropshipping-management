@@ -84,7 +84,7 @@ export async function getSocialPosts(filters: {
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
 
-  let query = supabase
+  let query = getSupabaseClient()
     .from('social_posts')
     .select('*', { count: 'exact' })
     .order('created_at', { ascending: false })
@@ -108,7 +108,7 @@ export async function getSocialPosts(filters: {
 }
 
 export async function createSocialPost(post: Omit<SocialPost, 'id'>): Promise<SocialPost | null> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('social_posts')
     .insert(post)
     .select()
@@ -126,7 +126,7 @@ export async function updateSocialPost(
   postId: string,
   updates: Partial<SocialPost>
 ): Promise<SocialPost | null> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('social_posts')
     .update(updates)
     .eq('id', postId)
@@ -142,7 +142,7 @@ export async function updateSocialPost(
 }
 
 export async function deleteSocialPost(postId: string): Promise<boolean> {
-  const { error } = await supabase
+  const { error } = await getSupabaseClient()
     .from('social_posts')
     .delete()
     .eq('id', postId);
@@ -299,7 +299,7 @@ export async function getCampaigns(filters: {
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
 
-  let query = supabase
+  let query = getSupabaseClient()
     .from('campaigns')
     .select('*', { count: 'exact' })
     .order('created_at', { ascending: false })
@@ -323,7 +323,7 @@ export async function getCampaigns(filters: {
 }
 
 export async function createCampaign(campaign: Omit<Campaign, 'id'>): Promise<Campaign | null> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('campaigns')
     .insert(campaign)
     .select()
@@ -342,7 +342,7 @@ export async function executeCampaign(campaignId: string): Promise<{
   postsPublished: number;
   errors: string[];
 }> {
-  const { data: campaign } = await supabase
+  const { data: campaign } = await getSupabaseClient()
     .from('campaigns')
     .select('*, posts:social_posts(*)')
     .eq('id', campaignId)
@@ -356,7 +356,7 @@ export async function executeCampaign(campaignId: string): Promise<{
   const errors: string[] = [];
   
   // Update campaign status
-  await supabase
+  await getSupabaseClient()
     .from('campaigns')
     .update({ status: 'active' })
     .eq('id', campaignId);
@@ -387,7 +387,7 @@ export async function getTemplates(type?: string): Promise<Template[]> {
 }
 
 export async function createTemplate(template: Omit<Template, 'id'>): Promise<Template | null> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('message_templates')
     .insert(template)
     .select()
@@ -416,7 +416,7 @@ export async function getContacts(filters: {
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
 
-  let query = supabase
+  let query = getSupabaseClient()
     .from('marketing_contacts')
     .select('*', { count: 'exact' })
     .range(from, to)
@@ -452,7 +452,7 @@ export async function upsertContact(contact: {
   metadata?: Record<string, unknown>;
   is_subscribed?: boolean;
 }): Promise<Contact | null> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('marketing_contacts')
     .upsert(
       {

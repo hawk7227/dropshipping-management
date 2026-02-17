@@ -70,7 +70,7 @@ export async function generateProductSEOMetadata(): Promise<{
   const errors: string[] = [];
 
   try {
-    const { data: products } = await supabase
+    const { data: products } = await getSupabaseClient()
       .from('products')
       .select('id, title, category, product_type, retail_price, vendor, rating, review_count, asin')
       .eq('status', 'active')
@@ -179,7 +179,7 @@ export async function refreshStalePages(): Promise<{
   try {
     const staleCutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
 
-    const { data: stalePages } = await supabase
+    const { data: stalePages } = await getSupabaseClient()
       .from('seo_metadata')
       .select('id, page_handle, keyword_target, shopify_page_id')
       .eq('page_type', 'landing_page')
@@ -201,7 +201,7 @@ export async function refreshStalePages(): Promise<{
         const pushResult = await pushPageToShopify(page);
 
         if (pushResult.success) {
-          await supabase
+          await getSupabaseClient()
             .from('seo_metadata')
             .update({ updated_at: new Date().toISOString(), status: 'active' })
             .eq('id', stalePage.id);
@@ -250,12 +250,12 @@ export async function executeSEOCycle(): Promise<SEOCycleResult> {
     result.errors.push(...refreshResult.errors);
 
     // 4. Generate internal link map
-    const { data: products } = await supabase
+    const { data: products } = await getSupabaseClient()
       .from('products')
       .select('handle, title, category, retail_price')
       .eq('status', 'active');
 
-    const { data: landingPages } = await supabase
+    const { data: landingPages } = await getSupabaseClient()
       .from('seo_metadata')
       .select('page_handle')
       .eq('page_type', 'landing_page');

@@ -239,7 +239,7 @@ export async function batchOptimizeForGoogleShopping(
 // ============================================================================
 
 export async function findUnderperformers(): Promise<ProductPerformance[]> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('google_product_performance')
     .select('*')
     .lt('ctr', 0.02)

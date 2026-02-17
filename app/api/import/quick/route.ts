@@ -58,7 +58,7 @@ function getSupabaseClient() {
 
       try {
         // Check if exists
-        const { data: existing } = await supabase
+        const { data: existing } = await getSupabaseClient()
           .from('products')
           .select('id')
           .eq('asin', asin)
@@ -107,7 +107,7 @@ function getSupabaseClient() {
         const productId = crypto.randomUUID();
 
         // Insert product
-        const { error: insertError } = await supabase
+        const { error: insertError } = await getSupabaseClient()
           .from('products')
           .insert({
             id: productId,

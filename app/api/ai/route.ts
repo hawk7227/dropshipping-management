@@ -467,7 +467,7 @@ async function executeProductCommand(
 
           // Handle tag additions
           if (intent.values.add_tag) {
-            const { data: existing } = await supabase
+            const { data: existing } = await getSupabaseClient()
               .from('products')
               .select('tags')
               .eq('id', product.id)

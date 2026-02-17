@@ -18,7 +18,7 @@ function getSupabaseClient() {
 export async function GET() {
   try {
     // Get the most recent log for each job type
-    const { data: logs, error } = await supabase
+    const { data: logs, error } = await getSupabaseClient()
       .from('cron_job_logs')
       .select('job_type, status, started_at, completed_at, processed, errors, message')
       .order('started_at', { ascending: false })

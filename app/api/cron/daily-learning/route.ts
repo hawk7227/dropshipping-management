@@ -97,20 +97,20 @@ export async function GET(request: NextRequest) {
     const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
-    const { data: todaysPosts } = await supabase
+    const { data: todaysPosts } = await getSupabaseClient()
       .from('social_posts')
       .select('*, post_performance(*)')
       .gte('published_at', `${today}T00:00:00Z`)
       .lte('published_at', `${today}T23:59:59Z`)
       .eq('status', 'published');
 
-    const { data: weeksPosts } = await supabase
+    const { data: weeksPosts } = await getSupabaseClient()
       .from('social_posts')
       .select('*, post_performance(*)')
       .gte('published_at', `${weekAgo}T00:00:00Z`)
       .eq('status', 'published');
 
-    const { data: yesterdaysPosts } = await supabase
+    const { data: yesterdaysPosts } = await getSupabaseClient()
       .from('social_posts')
       .select('*, post_performance(*)')
       .gte('published_at', `${yesterday}T00:00:00Z`)
@@ -170,7 +170,7 @@ export async function GET(request: NextRequest) {
     // ========================================
     console.log('\n✅ Step 3: Validating existing patterns...');
 
-    const { data: existingPatterns } = await supabase
+    const { data: existingPatterns } = await getSupabaseClient()
       .from('winning_patterns')
       .select('*')
       .gte('confidence_score', 50);
@@ -180,7 +180,7 @@ export async function GET(request: NextRequest) {
 
     for (const pattern of existingPatterns || []) {
       // Check if pattern still performs well
-      const { data: recentPosts } = await supabase
+      const { data: recentPosts } = await getSupabaseClient()
         .from('social_posts')
         .select('*, post_performance(*)')
         .contains('patterns_used', [pattern.pattern_description])
@@ -192,7 +192,7 @@ export async function GET(request: NextRequest) {
         
         if (avgEng < 1.5) {
           // Pattern is underperforming - deprecate
-          await supabase
+          await getSupabaseClient()
             .from('winning_patterns')
             .update({ 
               confidence_score: Math.max(0, pattern.confidence_score - 20),
@@ -202,7 +202,7 @@ export async function GET(request: NextRequest) {
           deprecated++;
         } else if (avgEng > 3) {
           // Pattern still performing well - boost confidence
-          await supabase
+          await getSupabaseClient()
             .from('winning_patterns')
             .update({ 
               confidence_score: Math.min(100, pattern.confidence_score + 5),
@@ -223,7 +223,7 @@ export async function GET(request: NextRequest) {
     // ========================================
     console.log('\n🎯 Step 4: Evaluating AI accuracy...');
 
-    const { data: predictions } = await supabase
+    const { data: predictions } = await getSupabaseClient()
       .from('ai_generation_log')
       .select('*')
       .eq('was_published', true)

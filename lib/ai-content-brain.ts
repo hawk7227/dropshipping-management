@@ -132,7 +132,7 @@ interface DailyReport {
  * Get or create brand style guide
  */
 export async function getBrandStyleGuide(): Promise<BrandStyleGuide> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('brand_style_guide')
     .select('*')
     .limit(1)
@@ -162,7 +162,7 @@ export async function getBrandStyleGuide(): Promise<BrandStyleGuide> {
  * Update brand style guide
  */
 export async function updateBrandStyleGuide(guide: Partial<BrandStyleGuide>): Promise<void> {
-  await supabase
+  await getSupabaseClient()
     .from('brand_style_guide')
     .upsert({ id: 'default', ...guide, updated_at: new Date().toISOString() });
 }
@@ -176,7 +176,7 @@ export async function updateBrandStyleGuide(guide: Partial<BrandStyleGuide>): Pr
  */
 export async function analyzeWinningPatterns(platform?: string): Promise<WinningPattern[]> {
   // Get posts with performance data
-  let query = supabase
+  let query = getSupabaseClient()
     .from('social_posts')
     .select('*, post_performance(*)')
     .eq('status', 'published')
@@ -316,7 +316,7 @@ function getDefaultPatterns(): WinningPattern[] {
  * Get winning patterns for a platform
  */
 export async function getWinningPatterns(platform: string): Promise<WinningPattern[]> {
-  const { data } = await supabase
+  const { data } = await getSupabaseClient()
     .from('winning_patterns')
     .select('*')
     .or(`platform.eq.${platform},platform.eq.all`)
@@ -602,7 +602,7 @@ function predictEngagement(content: any, patterns: WinningPattern[]): number {
 // ============================================================================
 
 async function getContentTemplates(platform: string, contentType?: string): Promise<ContentTemplate[]> {
-  let query = supabase
+  let query = getSupabaseClient()
     .from('content_templates')
     .select('*')
     .eq('platform', platform);
@@ -675,7 +675,7 @@ export async function recordPerformance(
   });
 
   // Update the post's engagement
-  await supabase
+  await getSupabaseClient()
     .from('social_posts')
     .update({
       engagement: {
@@ -695,7 +695,7 @@ export async function recordPerformance(
  * Trigger the learning process
  */
 async function triggerLearning(): Promise<void> {
-  const { count } = await supabase
+  const { count } = await getSupabaseClient()
     .from('social_posts')
     .select('id', { count: 'exact' })
     .eq('status', 'published')
@@ -721,7 +721,7 @@ export async function generateDailyReport(date?: string): Promise<DailyReport> {
   const endOfDay = `${reportDate}T23:59:59Z`;
 
   // Get today's posts
-  const { data: todaysPosts } = await supabase
+  const { data: todaysPosts } = await getSupabaseClient()
     .from('social_posts')
     .select('*, post_performance(*)')
     .gte('created_at', startOfDay)
@@ -858,7 +858,7 @@ export async function generateWeeklySummary(): Promise<any> {
   const today = new Date();
   const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
 
-  const { data: reports } = await supabase
+  const { data: reports } = await getSupabaseClient()
     .from('daily_reports')
     .select('*')
     .gte('date', weekAgo.toISOString().split('T')[0])

@@ -44,7 +44,7 @@ function getSupabaseClient() {
 }
       
       // Test query
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('products')
         .select('id, title')
         .limit(1);
@@ -64,7 +64,7 @@ function getSupabaseClient() {
 
         // Test insert capability (dry run - we'll rollback)
         const testId = `test-${Date.now()}`;
-        const { error: insertError } = await supabase
+        const { error: insertError } = await getSupabaseClient()
           .from('products')
           .insert({
             id: testId,
@@ -150,7 +150,7 @@ function getSupabaseClient() {
 }
 
     // Check if critical columns exist by trying to select them
-    const { error: schemaError } = await supabase
+    const { error: schemaError } = await getSupabaseClient()
       .from('products')
       .select('id, asin, cost_price, retail_price, amazon_price, profit_status, source')
       .limit(0);

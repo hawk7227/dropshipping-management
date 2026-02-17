@@ -186,7 +186,7 @@ Provide JSON output:
 // Corrected to match route: (productId)
 export async function analyzeProductSEO(productId: string): Promise<any> {
   // 1. Fetch product from DB
-  const { data: product } = await supabase
+  const { data: product } = await getSupabaseClient()
     .from('products')
     .select('title, description')
     .eq('id', productId)
@@ -237,7 +237,7 @@ export async function getRecentTrends(days: number = 7, limit: number = 20): Pro
   const since = new Date();
   since.setDate(since.getDate() - days);
 
-  const { data } = await supabase
+  const { data } = await getSupabaseClient()
     .from('trend_data')
     .select('*')
     .gte('recorded_at', since.toISOString())
@@ -278,7 +278,7 @@ export async function queueImageProcessing(
   processingType: 'enhance' | 'background_remove' | 'resize' | 'compress',
   options: { productId?: string; settings?: Record<string, unknown> } = {}
 ): Promise<ImageQueueItem> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('image_queue')
     .insert({
       product_id: options.productId || null,
@@ -305,7 +305,7 @@ export async function getAIContent(
   type?: string, 
   status?: string
 ): Promise<{ data: AiContent[], count: number }> {
-  let query = supabase
+  let query = getSupabaseClient()
     .from('ai_content')
     .select('*', { count: 'exact' })
     .order('created_at', { ascending: false })
@@ -321,7 +321,7 @@ export async function getAIContent(
 // Corrected to match route: (contentId, approved)
 export async function approveAIContent(contentId: string, approved: boolean): Promise<any> {
   const status = approved ? 'approved' : 'rejected';
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('ai_content')
     .update({ status })
     .eq('id', contentId)

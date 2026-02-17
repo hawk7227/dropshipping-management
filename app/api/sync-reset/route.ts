@@ -60,22 +60,22 @@ export async function POST(request: NextRequest) {
 // ═══ AUDIT: Count products by sync status ═══
 
 async function auditSync() {
-  const { count: total } = await supabase
+  const { count: total } = await getSupabaseClient()
     .from('products')
     .select('*', { count: 'exact', head: true });
 
-  const { count: fakeSync } = await supabase
+  const { count: fakeSync } = await getSupabaseClient()
     .from('products')
     .select('*', { count: 'exact', head: true })
     .like('shopify_product_id', 'sync-%');
 
-  const { count: realSync } = await supabase
+  const { count: realSync } = await getSupabaseClient()
     .from('products')
     .select('*', { count: 'exact', head: true })
     .not('shopify_product_id', 'is', null)
     .not('shopify_product_id', 'like', 'sync-%');
 
-  const { count: noSync } = await supabase
+  const { count: noSync } = await getSupabaseClient()
     .from('products')
     .select('*', { count: 'exact', head: true })
     .is('shopify_product_id', null);
@@ -96,7 +96,7 @@ async function auditSync() {
 // ═══ RESET: Clear fake shopify_product_id values ═══
 
 async function resetFakeSyncInternal() {
-  const { data: fakeProducts } = await supabase
+  const { data: fakeProducts } = await getSupabaseClient()
     .from('products')
     .select('id')
     .like('shopify_product_id', 'sync-%');
@@ -106,7 +106,7 @@ async function resetFakeSyncInternal() {
   }
 
   const ids = fakeProducts.map(p => p.id);
-  const { error } = await supabase
+  const { error } = await getSupabaseClient()
     .from('products')
     .update({ shopify_product_id: null, shopify_id: null, synced_at: null })
     .in('id', ids);
@@ -129,7 +129,7 @@ async function pushToShopifyInternal() {
     return { pushed: 0, errors: ['Shopify credentials not configured'] };
   }
 
-  const { data: products } = await supabase
+  const { data: products } = await getSupabaseClient()
     .from('products')
     .select('id, asin, title, brand, category, product_type, description, image_url, images, retail_price, cost_price, amazon_price, compare_at_price, competitor_prices, rating, review_count, status, tags, source_url')
     .is('shopify_product_id', null)
@@ -230,7 +230,7 @@ async function pushToShopifyInternal() {
       const shopifyId = data.product?.id?.toString();
 
       if (shopifyId) {
-        await supabase
+        await getSupabaseClient()
           .from('products')
           .update({ shopify_product_id: shopifyId, shopify_id: shopifyId, synced_at: new Date().toISOString() })
           .eq('id', product.id);

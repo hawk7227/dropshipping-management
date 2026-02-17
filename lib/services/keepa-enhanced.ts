@@ -156,7 +156,7 @@ async function checkCache(asins: string[]): Promise<CacheCheckResult> {
   const stale: string[] = [];
   
   try {
-    const { data, error } = await supabase
+    const { data, error } = await getSupabaseClient()
       .from('keepa_cache')
       .select('*')
       .in('asin', asins);
@@ -268,7 +268,7 @@ async function saveToCache(products: KeepaFullProduct[]): Promise<void> {
   }));
   
   try {
-    const { error } = await supabase
+    const { error } = await getSupabaseClient()
       .from('keepa_cache')
       .upsert(cacheEntries, { onConflict: 'asin' });
     
@@ -613,13 +613,13 @@ export async function getTokenUsage(): Promise<{
   try {
     const today = new Date().toISOString().split('T')[0];
     
-    const { data: tokenData } = await supabase
+    const { data: tokenData } = await getSupabaseClient()
       .from('keepa_token_log')
       .select('tokens_used, tokens_limit')
       .eq('date', today)
       .single();
     
-    const { data: settingsData } = await supabase
+    const { data: settingsData } = await getSupabaseClient()
       .from('system_settings')
       .select('value')
       .eq('category', 'keepa')

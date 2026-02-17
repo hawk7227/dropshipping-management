@@ -124,7 +124,7 @@ export async function runSegmentation(): Promise<SegmentationResult> {
 
   try {
     // Fetch order data
-    const { data: orders, error: orderErr } = await supabase
+    const { data: orders, error: orderErr } = await getSupabaseClient()
       .from('unified_orders')
       .select('customer_email, total_price, line_item_count, financial_status, created_at')
       .not('customer_email', 'is', null)
@@ -283,12 +283,12 @@ export async function getSegmentSummary(): Promise<AudienceSegment[]> {
   const segments: AudienceSegment[] = [];
 
   for (const [segType, config] of Object.entries(SEGMENT_CONFIG)) {
-    const { count } = await supabase
+    const { count } = await getSupabaseClient()
       .from('audience_segments')
       .select('*', { count: 'exact', head: true })
       .eq('segment_type', segType);
 
-    const { data: ltvData } = await supabase
+    const { data: ltvData } = await getSupabaseClient()
       .from('audience_segments')
       .select('ltv')
       .eq('segment_type', segType);

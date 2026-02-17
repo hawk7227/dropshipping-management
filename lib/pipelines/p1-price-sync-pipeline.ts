@@ -57,7 +57,7 @@ function getSupabaseClient() {
 }
 
   // Get products with ASIN that haven't been synced recently
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('products')
     .select('id, asin, title, last_price_check')
     .not('asin', 'is', null)
@@ -145,7 +145,7 @@ function getSupabaseClient() {
   return _supabase;
 }
 
-        const { error: updateError } = await supabase
+        const { error: updateError } = await getSupabaseClient()
           .from('products')
           .update({ 
             last_price_check: new Date().toISOString(),

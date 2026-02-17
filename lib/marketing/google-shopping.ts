@@ -279,7 +279,7 @@ export async function generateGoogleShoppingFeed(
       updated_at: new Date().toISOString()
     };
 
-    const { error } = await supabase
+    const { error } = await getSupabaseClient()
       .from('marketing_feeds')
       .upsert(feedData, { onConflict: 'id' });
 
@@ -309,7 +309,7 @@ export async function generateGoogleShoppingFeed(
  */
 export async function getGoogleShoppingStats(): Promise<{ success: boolean; data?: any; error?: string }> {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await getSupabaseClient()
       .from('marketing_feeds')
       .select('*')
       .eq('feed_type', 'google_shopping')
@@ -412,7 +412,7 @@ export async function scheduleGoogleShoppingFeedGeneration(
   try {
     const nextRun = new Date(Date.now() + hours_between * 60 * 60 * 1000);
 
-    const { error } = await supabase
+    const { error } = await getSupabaseClient()
       .from('marketing_schedules')
       .upsert({
         id: 'google_shopping_feed',

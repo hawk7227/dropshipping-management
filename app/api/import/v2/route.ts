@@ -205,7 +205,7 @@ export async function POST(request: NextRequest) {
     // STEP 3: Check for existing products in database
     // ═══════════════════════════════════════════════════════════════════════
     
-    const { data: existingProducts } = await supabase
+    const { data: existingProducts } = await getSupabaseClient()
       .from('products')
       .select('asin')
       .in('asin', asinsToProcess);
@@ -395,7 +395,7 @@ export async function POST(request: NextRequest) {
     
     // Insert new products
     if (productsToInsert.length > 0) {
-      const { error: insertError } = await supabase
+      const { error: insertError } = await getSupabaseClient()
         .from('products')
         .insert(productsToInsert);
       
@@ -411,7 +411,7 @@ export async function POST(request: NextRequest) {
     // Update existing products
     if (productsToUpdate.length > 0) {
       for (const product of productsToUpdate) {
-        const { error: updateError } = await supabase
+        const { error: updateError } = await getSupabaseClient()
           .from('products')
           .update(product)
           .eq('asin', product.asin);
@@ -430,7 +430,7 @@ export async function POST(request: NextRequest) {
     // STEP 6: Update import batch record
     // ═══════════════════════════════════════════════════════════════════════
     
-    await supabase
+    await getSupabaseClient()
       .from('import_batches')
       .update({
         status: 'completed',
@@ -493,7 +493,7 @@ export async function GET(request: NextRequest) {
   }
   
   // Get job status
-  const { data: job, error } = await supabase
+  const { data: job, error } = await getSupabaseClient()
     .from('import_batches')
     .select('*')
     .eq('id', jobId)

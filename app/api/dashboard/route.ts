@@ -94,7 +94,7 @@ export async function GET(request: NextRequest) {
     const todayOrderCount = await getOrdersToday();
 
     // This week's revenue and orders
-    const { data: weekOrders } = await supabase
+    const { data: weekOrders } = await getSupabaseClient()
       .from('orders')
       .select('total')
       .gte('ordered_at', `${weekAgoStr}T00:00:00Z`);
@@ -103,7 +103,7 @@ export async function GET(request: NextRequest) {
     const weekOrderCount = weekOrders?.length || 0;
 
     // This month's revenue and orders
-    const { data: monthOrders } = await supabase
+    const { data: monthOrders } = await getSupabaseClient()
       .from('orders')
       .select('total')
       .gte('ordered_at', `${monthStartStr}T00:00:00Z`);
@@ -112,7 +112,7 @@ export async function GET(request: NextRequest) {
     const monthOrderCount = monthOrders?.length || 0;
 
     // Low stock and out of stock from price_snapshots availability
-    const { data: availabilityData } = await supabase
+    const { data: availabilityData } = await getSupabaseClient()
       .from('price_snapshots')
       .select('availability')
       .eq('is_latest', true);
@@ -127,12 +127,12 @@ export async function GET(request: NextRequest) {
     let avgLifetimeValue = 0;
 
     try {
-      const { count } = await supabase
+      const { count } = await getSupabaseClient()
         .from('members')
         .select('*', { count: 'exact', head: true });
       totalMembers = count || 0;
 
-      const { count: active } = await supabase
+      const { count: active } = await getSupabaseClient()
         .from('members')
         .select('*', { count: 'exact', head: true })
         .eq('status', 'active');
@@ -140,14 +140,14 @@ export async function GET(request: NextRequest) {
 
       // Calculate churned members (inactive for 30+ days)
       const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-      const { count: churned } = await supabase
+      const { count: churned } = await getSupabaseClient()
         .from('members')
         .select('*', { count: 'exact', head: true })
         .lt('last_active', thirtyDaysAgo);
       churnedMembers = churned || 0;
 
       // Calculate average lifetime value
-      const { data: memberStats } = await supabase
+      const { data: memberStats } = await getSupabaseClient()
         .from('member_analytics')
         .select('total_spent');
       
@@ -160,7 +160,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Price tracking data from price_snapshots
-    const { data: priceData } = await supabase
+    const { data: priceData } = await getSupabaseClient()
       .from('price_snapshots')
       .select('current_price, competitor_price, fetched_at')
       .eq('is_latest', true);
@@ -189,19 +189,19 @@ export async function GET(request: NextRequest) {
     let newMembersMonth = 0;
     
     try {
-      const { count: newToday } = await supabase
+      const { count: newToday } = await getSupabaseClient()
         .from('members')
         .select('*', { count: 'exact', head: true })
         .gte('created_at', `${todayStr}T00:00:00Z`);
       newMembersToday = newToday || 0;
 
-      const { count: newWeek } = await supabase
+      const { count: newWeek } = await getSupabaseClient()
         .from('members')
         .select('*', { count: 'exact', head: true })
         .gte('created_at', `${weekAgoStr}T00:00:00Z`);
       newMembersWeek = newWeek || 0;
 
-      const { count: newMonth } = await supabase
+      const { count: newMonth } = await getSupabaseClient()
         .from('members')
         .select('*', { count: 'exact', head: true })
         .gte('created_at', `${monthStartStr}T00:00:00Z`);

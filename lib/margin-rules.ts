@@ -68,7 +68,7 @@ export async function getApplicableRules(
 ): Promise<any[]> {
   try {
     // Get all active rules ordered by priority
-    const { data: rules, error } = await supabase
+    const { data: rules, error } = await getSupabaseClient()
       .from('margin_rules')
       .select('*')
       .eq('is_active', true)

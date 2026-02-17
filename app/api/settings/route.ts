@@ -26,7 +26,7 @@ function getSupabaseClient() {
 export async function GET(request: NextRequest) {
   try {
     // Fetch all settings
-    const { data: settings, error: settingsError } = await supabase
+    const { data: settings, error: settingsError } = await getSupabaseClient()
       .from('system_settings')
       .select('*')
       .order('category')
@@ -46,7 +46,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Fetch latest cron job logs
-    const { data: cronLogs } = await supabase
+    const { data: cronLogs } = await getSupabaseClient()
       .from('cron_job_logs')
       .select('*')
       .in('job_type', ['discovery', 'price_sync', 'margin_check'])
@@ -63,7 +63,7 @@ export async function GET(request: NextRequest) {
 
     // Fetch token usage for today
     const today = new Date().toISOString().split('T')[0];
-    const { data: tokenData } = await supabase
+    const { data: tokenData } = await getSupabaseClient()
       .from('keepa_token_log')
       .select('*')
       .eq('date', today)
@@ -120,7 +120,7 @@ export async function POST(request: NextRequest) {
       const jsonValue = JSON.stringify(value);
 
       updates.push(
-        supabase
+        getSupabaseClient()
           .from('system_settings')
           .upsert({
             category,

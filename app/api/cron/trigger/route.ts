@@ -81,7 +81,7 @@ async function logManualTrigger(
   error?: string
 ): Promise<void> {
   try {
-    await supabase
+    await getSupabaseClient()
       .from('cron_job_logs')
       .insert({
         job_type: jobType,
@@ -333,7 +333,7 @@ export async function GET(request: NextRequest) {
 
     if (showHistory) {
       // Get recent manual triggers
-      const { data: recentTriggers } = await supabase
+      const { data: recentTriggers } = await getSupabaseClient()
         .from('cron_job_logs')
         .select('*')
         .eq('triggered_by', 'manual')

@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
     const offset = parseInt(searchParams.get('offset') || '0');
 
     // Build query
-    let query = supabase
+    let query = getSupabaseClient()
       .from('medazon_patients')
       .select('*', { count: 'exact' })
       .eq('status', 'active')
@@ -104,7 +104,7 @@ export async function POST(request: NextRequest) {
     const { action } = body;
 
     if (action === 'get_segments') {
-      const { data: segments, error } = await supabase
+      const { data: segments, error } = await getSupabaseClient()
         .from('patient_segments')
         .select('*')
         .order('name');
@@ -118,7 +118,7 @@ export async function POST(request: NextRequest) {
 
     if (action === 'get_stats') {
       // Get patient statistics
-      const { data: allPatients } = await supabase
+      const { data: allPatients } = await getSupabaseClient()
         .from('medazon_patients')
         .select('email_opt_in, sms_opt_in, mms_opt_in, status')
         .eq('status', 'active');

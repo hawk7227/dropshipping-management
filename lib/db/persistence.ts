@@ -27,7 +27,7 @@ export class ProductPersistence {
   static async upsertProduct(product: NormalizedProduct): Promise<{ success: boolean; error?: string; id?: string }> {
     try {
       // First check if product exists by ASIN
-      const { data: existing, error: fetchError } = await supabase
+      const { data: existing, error: fetchError } = await getSupabaseClient()
         .from('products')
         .select('id, asin, title, brand, category, description, image_url, rating, review_count, source')
         .eq('asin', product.asin)
@@ -53,7 +53,7 @@ export class ProductPersistence {
           updated_at: new Date().toISOString(),
         };
 
-        const { data, error } = await supabase
+        const { data, error } = await getSupabaseClient()
           .from('products')
           .update(updateData)
           .eq('id', existing.id)
@@ -83,7 +83,7 @@ export class ProductPersistence {
           updated_at: product.updated_at,
         };
 
-        const { data, error } = await supabase
+        const { data, error } = await getSupabaseClient()
           .from('products')
           .insert(insertData)
           .select('id')
@@ -122,7 +122,7 @@ export class ProductPersistence {
         last_updated: new Date().toISOString(),
       };
 
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('product_demand')
         .upsert(demandData, { onConflict: 'asin' });
 
@@ -159,7 +159,7 @@ export class PriceSnapshotPersistence {
    */
   static async insertPriceSnapshot(snapshot: NormalizedPriceSnapshot): Promise<{ success: boolean; error?: string }> {
     try {
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('price_history')
         .insert({
           product_id: snapshot.product_id,
@@ -193,7 +193,7 @@ export class ShopifyProductPersistence {
   static async upsertShopifyProduct(shopifyProduct: NormalizedShopifyProduct): Promise<{ success: boolean; error?: string }> {
     try {
       // Update the main product with Shopify info
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('products')
         .update({
           shopify_product_id: shopifyProduct.shopify_id.toString(),
@@ -229,7 +229,7 @@ export class DiscoveryPersistence {
     status: 'running' | 'completed' | 'failed' = 'running'
   ): Promise<{ success: boolean; id?: string; error?: string }> {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('discovery_runs')
         .upsert({
           run_date: runDate,
@@ -266,7 +266,7 @@ export class DiscoveryPersistence {
     discoveryRunId?: string
   ): Promise<{ success: boolean; error?: string }> {
     try {
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('rejection_log')
         .insert({
           asin,
@@ -304,7 +304,7 @@ export class DiscoveryPersistence {
       if (stats.imported !== undefined) updateData.products_imported = stats.imported;
       if (stats.rejected !== undefined) updateData.products_rejected = stats.rejected;
 
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('discovery_runs')
         .update(updateData)
         .eq('id', runId);

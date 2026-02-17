@@ -44,7 +44,7 @@ interface PushPayload {
 // Send push to a specific user by their user_id
 export async function pushToUser(userId: string, payload: PushPayload): Promise<{ sent: number; failed: number }> {
   ensureVapid();
-  const { data: subscriptions } = await supabase
+  const { data: subscriptions } = await getSupabaseClient()
     .from('push_subscriptions')
     .select('*')
     .eq('user_id', String(userId));
@@ -54,7 +54,7 @@ export async function pushToUser(userId: string, payload: PushPayload): Promise<
 // Send push to all users with a specific role ('admin' or 'provider')
 export async function pushToRole(role: string, payload: PushPayload): Promise<{ sent: number; failed: number }> {
   ensureVapid();
-  const { data: subscriptions } = await supabase
+  const { data: subscriptions } = await getSupabaseClient()
     .from('push_subscriptions')
     .select('*')
     .eq('user_role', role);

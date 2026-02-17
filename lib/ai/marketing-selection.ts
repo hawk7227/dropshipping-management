@@ -94,7 +94,7 @@ export async function getMarketingEligibleProducts(
 
   try {
     // Build query for eligible products
-    let query = supabase
+    let query = getSupabaseClient()
       .from('products')
       .select(`
         id,
@@ -376,7 +376,7 @@ export async function refreshMarketingCache(): Promise<{ success: boolean; refre
       refreshed_at: new Date().toISOString()
     };
 
-    const { error } = await supabase
+    const { error } = await getSupabaseClient()
       .from('marketing_cache')
       .upsert({
         id: 'main_cache',

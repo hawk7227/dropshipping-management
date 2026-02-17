@@ -40,7 +40,7 @@ export class AIScorePersistence {
         updated_at: new Date().toISOString()
       };
 
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('ai_scores')
         .upsert(scoreData, { onConflict: 'product_id' });
 
@@ -98,7 +98,7 @@ export class AIScorePersistence {
         updated_at: new Date().toISOString()
       };
 
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('ai_feature_vectors')
         .upsert(vectorData, { onConflict: 'product_id' });
 
@@ -146,7 +146,7 @@ export class AIScorePersistence {
    */
   static async getAIScore(productId: string): Promise<{ success: boolean; data?: any; error?: string }> {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('ai_scores')
         .select('*')
         .eq('product_id', productId)
@@ -173,7 +173,7 @@ export class AIScorePersistence {
    */
   static async getFeatureVector(productId: string): Promise<{ success: boolean; data?: any; error?: string }> {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('ai_feature_vectors')
         .select('*')
         .eq('product_id', productId)
@@ -228,7 +228,7 @@ export class AIScorePersistence {
    */
   static async getTopScoringProducts(limit: number = 50): Promise<{ success: boolean; data?: any[]; error?: string }> {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('ai_scores')
         .select(`
           *,
@@ -262,7 +262,7 @@ export class AIScorePersistence {
    */
   static async getProductsByTier(tier: string, limit: number = 50): Promise<{ success: boolean; data?: any[]; error?: string }> {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('ai_scores')
         .select(`
           *,
@@ -297,7 +297,7 @@ export class AIScorePersistence {
    */
   static async getScoringStats(): Promise<{ success: boolean; data?: any; error?: string }> {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('ai_scores')
         .select(`
           overall_score,

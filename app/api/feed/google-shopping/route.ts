@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
     const limit = Math.min(parseInt(searchParams.get('limit') || '500'), 1000);
 
     // Fetch active products with required fields
-    let query = supabase
+    let query = getSupabaseClient()
       .from('products')
       .select('id, title, description, handle, retail_price, compare_at_price, cost_price, image_url, images, asin, category, product_type, vendor, rating, review_count, inventory_quantity, status')
       .eq('status', 'active')

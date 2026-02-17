@@ -47,7 +47,7 @@ export async function GET(request: NextRequest) {
 
 async function buildSitemap(): Promise<NextResponse> {
   // Fetch products
-  const { data: products } = await supabase
+  const { data: products } = await getSupabaseClient()
     .from('products')
     .select('handle, asin, updated_at, image_url, title, retail_price')
     .eq('status', 'active')
@@ -56,7 +56,7 @@ async function buildSitemap(): Promise<NextResponse> {
     .limit(5000);
 
   // Fetch landing pages
-  const { data: landingPages } = await supabase
+  const { data: landingPages } = await getSupabaseClient()
     .from('seo_metadata')
     .select('page_handle, updated_at')
     .eq('page_type', 'landing_page')
@@ -144,7 +144,7 @@ export async function POST(request: NextRequest) {
     // Get recently updated products
     const cutoff = new Date(Date.now() - hoursBack * 60 * 60 * 1000).toISOString();
 
-    const { data: recentProducts } = await supabase
+    const { data: recentProducts } = await getSupabaseClient()
       .from('products')
       .select('handle')
       .eq('status', 'active')
@@ -152,7 +152,7 @@ export async function POST(request: NextRequest) {
       .not('handle', 'is', null)
       .limit(100);
 
-    const { data: recentPages } = await supabase
+    const { data: recentPages } = await getSupabaseClient()
       .from('seo_metadata')
       .select('page_handle')
       .eq('page_type', 'landing_page')

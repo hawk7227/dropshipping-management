@@ -189,7 +189,7 @@ export async function fetchSearchPerformance(options?: {
         created_at: new Date().toISOString(),
       }));
 
-      const { error: insertErr } = await supabase
+      const { error: insertErr } = await getSupabaseClient()
         .from('search_performance')
         .insert(records);
 
@@ -259,7 +259,7 @@ function identifyOpportunities(metrics: SearchPerformance[]): OptimizationOpport
 // ═══════════════════════════════════════════════════════════════════════════
 
 export async function getTopQueries(limit: number = 20): Promise<SearchPerformance[]> {
-  const { data } = await supabase
+  const { data } = await getSupabaseClient()
     .from('search_performance')
     .select('query, page_url, clicks, impressions, ctr, avg_position, date')
     .order('impressions', { ascending: false })

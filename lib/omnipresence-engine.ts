@@ -117,7 +117,7 @@ export async function publishViaZapier(
     // Get webhook URL from params or from saved settings
     let zapierUrl = webhookUrl;
     if (!zapierUrl) {
-      const { data: settings } = await supabase
+      const { data: settings } = await getSupabaseClient()
         .from('integration_settings')
         .select('zapier_webhook_url, zapier_enabled')
         .single();
@@ -166,7 +166,7 @@ export async function publishViaZapier(
 
     // Update post status
     if (post.id) {
-      await supabase
+      await getSupabaseClient()
         .from('social_posts')
         .update({
           status: 'published',
@@ -193,7 +193,7 @@ export async function publishViaZapier(
 
     // Update post status to failed
     if (post.id) {
-      await supabase
+      await getSupabaseClient()
         .from('social_posts')
         .update({
           status: 'failed',

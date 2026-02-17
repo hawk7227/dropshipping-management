@@ -263,7 +263,7 @@ async function queryProducts(options: ExportOptions = {}): Promise<ProductRecord
   console.log('[MasterExport] Querying products with options:', options);
   
   // Base query - join products with product_demand
-  let query = supabase
+  let query = getSupabaseClient()
     .from('products')
     .select(`
       id,
@@ -622,7 +622,7 @@ export async function createBackup(options: ExportOptions = {}): Promise<{
 export async function getExportStats(): Promise<ExportStats> {
   try {
     // Get total count and status breakdown
-    const { data: statusData, error: statusError } = await supabase
+    const { data: statusData, error: statusError } = await getSupabaseClient()
       .from('products')
       .select('status', { count: 'exact' });
     
@@ -635,7 +635,7 @@ export async function getExportStats(): Promise<ExportStats> {
     });
     
     // Get demand tier breakdown
-    const { data: demandData, error: demandError } = await supabase
+    const { data: demandData, error: demandError } = await getSupabaseClient()
       .from('product_demand')
       .select('demand_score, current_bsr');
     
@@ -662,7 +662,7 @@ export async function getExportStats(): Promise<ExportStats> {
     });
     
     // Get margin stats
-    const { data: priceData, error: priceError } = await supabase
+    const { data: priceData, error: priceError } = await getSupabaseClient()
       .from('products')
       .select('retail_price, amazon_price, cost');
     

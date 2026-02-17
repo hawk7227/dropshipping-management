@@ -186,7 +186,7 @@ async function createPostsForPlatform(
           updated_at: new Date().toISOString()
         };
 
-        const { data, error } = await supabase
+        const { data, error } = await getSupabaseClient()
           .from('social_posts')
           .insert(postData)
           .select()
@@ -223,7 +223,7 @@ export async function scheduleSocialPosts(
   schedule_hours_ahead: number = 24
 ): Promise<{ success: boolean; posts_scheduled: number; errors: string[] }> {
   try {
-    let query = supabase
+    let query = getSupabaseClient()
       .from('social_posts')
       .select('*')
       .eq('status', 'draft');
@@ -250,7 +250,7 @@ export async function scheduleSocialPosts(
 
     const updates = posts.map((post, index) => {
       const scheduledTime = new Date(now.getTime() + (index * intervalMs));
-      return supabase
+      return getSupabaseClient()
         .from('social_posts')
         .update({
           scheduled_at: scheduledTime.toISOString(),
@@ -339,7 +339,7 @@ export async function getSocialPostingStats(
   try {
     const cutoffDate = new Date(Date.now() - days_back * 24 * 60 * 60 * 1000).toISOString();
 
-    const { data, error } = await supabase
+    const { data, error } = await getSupabaseClient()
       .from('social_posts')
       .select(`
         platform,
@@ -393,7 +393,7 @@ export async function publishScheduledPosts(): Promise<{ success: boolean; publi
   try {
     const now = new Date().toISOString();
 
-    const { data: scheduledPosts, error } = await supabase
+    const { data: scheduledPosts, error } = await getSupabaseClient()
       .from('social_posts')
       .select('*')
       .eq('status', 'scheduled')
@@ -420,7 +420,7 @@ export async function publishScheduledPosts(): Promise<{ success: boolean; publi
         await new Promise(resolve => setTimeout(resolve, 100)); // Simulate network delay
 
         // Update post as published
-        const { error: updateError } = await supabase
+        const { error: updateError } = await getSupabaseClient()
           .from('social_posts')
           .update({
             status: 'published',
@@ -436,7 +436,7 @@ export async function publishScheduledPosts(): Promise<{ success: boolean; publi
         errors.push(`Failed to publish post ${post.id}: ${error}`);
         
         // Mark as failed
-        await supabase
+        await getSupabaseClient()
           .from('social_posts')
           .update({
             status: 'failed',

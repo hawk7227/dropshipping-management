@@ -215,7 +215,7 @@ export async function logCommandExecution(
   execution: Partial<CommandExecution>,
   dryRun: boolean = true
 ): Promise<AiCommandLog | null> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('ai_command_logs')
     .insert({
       command,
@@ -284,7 +284,7 @@ async function executePriceUpdate(
     try {
       const calculatedPrice = new_price || (product.cost_price * (1 + (min_margin || 0.3)));
 
-      const { error: updateError } = await supabase
+      const { error: updateError } = await getSupabaseClient()
         .from('products')
         .update({ retail_price: calculatedPrice, updated_at: new Date().toISOString() })
         .eq('id', product.id);
@@ -311,7 +311,7 @@ async function executePriceSync(
 ): Promise<CommandExecution['results']> {
   const { source = 'amazon', limit = 50 } = interpretation.parameters;
 
-  const { data: products, error } = await supabase
+  const { data: products, error } = await getSupabaseClient()
     .from('products')
     .select('id, asin, title')
     .eq('status', 'active')
@@ -391,7 +391,7 @@ async function executeMarginRuleApplication(
 
       const newPrice = Math.max(minPrice, Math.min(targetPrice, maxPrice));
 
-      const { error: updateError } = await supabase
+      const { error: updateError } = await getSupabaseClient()
         .from('products')
         .update({ retail_price: newPrice, updated_at: new Date().toISOString() })
         .eq('id', product.id);
@@ -455,7 +455,7 @@ async function executePriceAdjustment(
     try {
       const newPrice = product.retail_price * multiplier;
 
-      const { error: updateError } = await supabase
+      const { error: updateError } = await getSupabaseClient()
         .from('products')
         .update({ retail_price: newPrice, updated_at: new Date().toISOString() })
         .eq('id', product.id);
@@ -486,7 +486,7 @@ async function executeDescriptionGeneration(
 ): Promise<CommandExecution['results']> {
   const { tone = 'professional', length = 'medium' } = interpretation.parameters;
 
-  const { data: products, error } = await supabase
+  const { data: products, error } = await getSupabaseClient()
     .from('products')
     .select('id, title, category')
     .or('description.is.null,description.eq.""')
@@ -525,7 +525,7 @@ async function executeDescriptionGeneration(
 
       const description = response.choices[0].message.content;
 
-      const { error: updateError } = await supabase
+      const { error: updateError } = await getSupabaseClient()
         .from('products')
         .update({ description, updated_at: new Date().toISOString() })
         .eq('id', product.id);
@@ -593,7 +593,7 @@ async function executeTitleUpdate(
 
       const newTitle = response.choices[0].message.content?.trim() || product.title;
 
-      const { error: updateError } = await supabase
+      const { error: updateError } = await getSupabaseClient()
         .from('products')
         .update({ title: newTitle, updated_at: new Date().toISOString() })
         .eq('id', product.id);
@@ -654,7 +654,7 @@ async function executePauseProducts(
 
   for (const product of products || []) {
     try {
-      const { error: updateError } = await supabase
+      const { error: updateError } = await getSupabaseClient()
         .from('products')
         .update({ status: 'paused', updated_at: new Date().toISOString() })
         .eq('id', product.id);
@@ -712,7 +712,7 @@ async function executeActivateProducts(
 
   for (const product of products || []) {
     try {
-      const { error: updateError } = await supabase
+      const { error: updateError } = await getSupabaseClient()
         .from('products')
         .update({ status: 'active', updated_at: new Date().toISOString() })
         .eq('id', product.id);
@@ -863,7 +863,7 @@ Return JSON with: meta_title (60 chars), meta_description (155 chars), keywords 
 
       const seoData = JSON.parse(response.choices[0].message.content || '{}');
 
-      const { error: updateError } = await supabase
+      const { error: updateError } = await getSupabaseClient()
         .from('products')
         .update({
           meta_title: seoData.meta_title,
@@ -897,7 +897,7 @@ Return JSON with: meta_title (60 chars), meta_description (155 chars), keywords 
  * Get recent command executions
  */
 export async function getCommandHistory(limit: number = 20): Promise<AiCommandLog[]> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('ai_command_logs')
     .select('*')
     .order('created_at', { ascending: false })
@@ -922,7 +922,7 @@ export async function getCommandStats(): Promise<{
   by_category: Record<string, number>;
   by_action: Record<string, number>;
 }> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('ai_command_logs')
     .select('*');
 

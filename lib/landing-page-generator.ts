@@ -77,7 +77,7 @@ export async function analyzeKeywordClusters(): Promise<KeywordCluster[]> {
   const clusters: KeywordCluster[] = [];
 
   // Fetch active products with prices
-  const { data: products, error } = await supabase
+  const { data: products, error } = await getSupabaseClient()
     .from('products')
     .select('id, title, retail_price, rating, review_count, image_url, asin, category, product_type, vendor, handle')
     .eq('status', 'active')

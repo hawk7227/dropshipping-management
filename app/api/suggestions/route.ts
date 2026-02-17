@@ -172,7 +172,7 @@ export async function GET(request: NextRequest) {
     const priorityFilter = request.nextUrl.searchParams.get('priority') as SuggestionPriority | null;
 
     // Fetch products for analysis
-    const { data: products, error } = await supabase
+    const { data: products, error } = await getSupabaseClient()
       .from('products')
       .select('*')
       .in('status', ['active', 'pending', 'paused']);

@@ -74,7 +74,7 @@ export async function POST(request: NextRequest) {
 
     // Check idempotency — skip if we already processed this webhook
     if (webhookId) {
-      const { data: existing } = await supabase
+      const { data: existing } = await getSupabaseClient()
         .from('webhook_logs')
         .select('id')
         .eq('webhook_id', webhookId)
@@ -184,7 +184,7 @@ async function handleOrderPaid(payload: any) {
   console.log(`[Webhook] Order paid: ${orderId}`);
 
   try {
-    await supabase
+    await getSupabaseClient()
       .from('unified_orders')
       .update({ financial_status: 'paid', updated_at: new Date().toISOString() })
       .eq('shopify_order_id', orderId?.toString());
@@ -204,7 +204,7 @@ async function handleProductUpdate(payload: any) {
 
   try {
     // Find product by shopify_product_id
-    const { data: product } = await supabase
+    const { data: product } = await getSupabaseClient()
       .from('products')
       .select('id')
       .or(`shopify_product_id.eq.${shopifyId},shopify_id.eq.${shopifyId}`)
@@ -244,7 +244,7 @@ async function handleProductDelete(payload: any) {
   console.log(`[Webhook] Product deleted from Shopify: ${shopifyId}`);
 
   try {
-    await supabase
+    await getSupabaseClient()
       .from('products')
       .update({
         status: 'removed',

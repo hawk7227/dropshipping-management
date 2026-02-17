@@ -377,7 +377,7 @@ async function createZapierPayloads(
           updated_at: new Date().toISOString()
         };
 
-        const { data, error } = await supabase
+        const { data, error } = await getSupabaseClient()
           .from('zapier_payloads')
           .insert(payload)
           .select()
@@ -414,7 +414,7 @@ async function sendZapierPayloads(
 ): Promise<{ success: boolean; payloads_sent: number; errors: string[] }> {
   try {
     // Get pending payloads
-    const { data: payloads, error } = await supabase
+    const { data: payloads, error } = await getSupabaseClient()
       .from('zapier_payloads')
       .select('*')
       .eq('integration_type', integrationType)
@@ -443,7 +443,7 @@ async function sendZapierPayloads(
         // For now, we'll simulate successful sending
         
         // Update payload as sent
-        const { error: updateError } = await supabase
+        const { error: updateError } = await getSupabaseClient()
           .from('zapier_payloads')
           .update({
             status: 'sent',
@@ -459,7 +459,7 @@ async function sendZapierPayloads(
         errors.push(`Failed to send payload ${payload.id}: ${error}`);
         
         // Mark as failed
-        await supabase
+        await getSupabaseClient()
           .from('zapier_payloads')
           .update({
             status: 'failed',
@@ -560,7 +560,7 @@ export async function getZapierStats(
   try {
     const cutoffDate = new Date(Date.now() - days_back * 24 * 60 * 60 * 1000).toISOString();
 
-    const { data, error } = await supabase
+    const { data, error } = await getSupabaseClient()
       .from('zapier_payloads')
       .select(`
         integration_type,
@@ -612,7 +612,7 @@ export async function retryFailedPayloads(
   max_retries: number = 3
 ): Promise<{ success: boolean; retried: number; errors: string[] }> {
   try {
-    let query = supabase
+    let query = getSupabaseClient()
       .from('zapier_payloads')
       .select('*')
       .eq('status', 'failed')
@@ -635,7 +635,7 @@ export async function retryFailedPayloads(
     }
 
     // Reset to pending for retry
-    const { error: updateError } = await supabase
+    const { error: updateError } = await getSupabaseClient()
       .from('zapier_payloads')
       .update({
         status: 'pending',

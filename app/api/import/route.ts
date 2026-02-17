@@ -323,7 +323,7 @@ async function processImport(
     let existingAsins = new Set<string>();
     if (options.skipExisting || options.updateExisting) {
       console.log(`[Import] Checking for existing ASINs...`);
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('products')
         .select('asin')
         .in('asin', items.map(i => i.asin));
@@ -532,7 +532,7 @@ async function processImport(
 
           if (exists && options.updateExisting) {
             // Update existing product
-            const { error } = await supabase
+            const { error } = await getSupabaseClient()
               .from('products')
               .update({
                 title: productData.title,
@@ -579,7 +579,7 @@ async function processImport(
             // Set new_until to 48 hours from now for "NEW" badge
             const newUntil = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
             
-            const { error } = await supabase
+            const { error } = await getSupabaseClient()
               .from('products')
               .insert({
                 id: crypto.randomUUID(),
@@ -725,7 +725,7 @@ async function processImport(
     job.completedAt = new Date().toISOString();
     
     // Fetch the created products to return them
-    const { data: createdProducts } = await supabase
+    const { data: createdProducts } = await getSupabaseClient()
       .from('products')
       .select('*')
       .in('asin', items.map(i => i.asin))

@@ -175,7 +175,7 @@ function getSupabaseClient() {
 
     const cutoffTime = new Date(Date.now() - minAgeHours * 60 * 60 * 1000).toISOString();
     
-    const { data: products, error } = await supabase
+    const { data: products, error } = await getSupabaseClient()
       .from('products')
       .select('*')
       .or('updated_at.lt.' + cutoffTime + ',last_price_check.is.null')
@@ -299,7 +299,7 @@ function getSupabaseClient() {
   return _supabase;
 }
 
-    await supabase
+    await getSupabaseClient()
       .from('ai_analysis_log')
       .insert({
         product_id: productId,
@@ -338,7 +338,7 @@ function getSupabaseClient() {
   return _supabase;
 }
 
-    await supabase
+    await getSupabaseClient()
       .from('ai_analysis_log')
       .insert({
         product_id: productId,

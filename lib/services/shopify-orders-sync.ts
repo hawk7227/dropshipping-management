@@ -168,7 +168,7 @@ export async function syncShopifyOrders(
 
   try {
     // Get the last synced order ID to fetch only new orders
-    const { data: lastOrder } = await supabase
+    const { data: lastOrder } = await getSupabaseClient()
       .from('orders')
       .select('shopify_order_id')
       .order('synced_at', { ascending: false })
@@ -191,7 +191,7 @@ export async function syncShopifyOrders(
         const localOrder = convertShopifyOrder(shopifyOrder);
 
         // Check if order exists
-        const { data: existingOrder } = await supabase
+        const { data: existingOrder } = await getSupabaseClient()
           .from('orders')
           .select('id')
           .eq('shopify_order_id', localOrder.shopify_order_id)
@@ -199,7 +199,7 @@ export async function syncShopifyOrders(
 
         if (existingOrder) {
           // Update existing order
-          const { error } = await supabase
+          const { error } = await getSupabaseClient()
             .from('orders')
             .update(localOrder)
             .eq('shopify_order_id', localOrder.shopify_order_id);
@@ -213,7 +213,7 @@ export async function syncShopifyOrders(
           }
         } else {
           // Insert new order
-          const { error } = await supabase
+          const { error } = await getSupabaseClient()
             .from('orders')
             .insert(localOrder);
 
@@ -296,7 +296,7 @@ export async function syncOrdersByDateRange(
       try {
         const localOrder = convertShopifyOrder(shopifyOrder);
 
-        const { error } = await supabase
+        const { error } = await getSupabaseClient()
           .from('orders')
           .upsert(localOrder, {
             onConflict: 'shopify_order_id',
@@ -335,19 +335,19 @@ export async function syncOrdersByDateRange(
  */
 export async function getSyncStatus() {
   try {
-    const { data: lastSync } = await supabase
+    const { data: lastSync } = await getSupabaseClient()
       .from('orders')
       .select('synced_at')
       .order('synced_at', { ascending: false })
       .limit(1)
       .single();
 
-    const { count: totalOrders } = await supabase
+    const { count: totalOrders } = await getSupabaseClient()
       .from('orders')
       .select('*', { count: 'exact', head: true });
 
     const today = new Date().toISOString().split('T')[0];
-    const { count: todayOrders } = await supabase
+    const { count: todayOrders } = await getSupabaseClient()
       .from('orders')
       .select('*', { count: 'exact', head: true })
       .gte('ordered_at', `${today}T00:00:00Z`);

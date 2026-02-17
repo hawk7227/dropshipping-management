@@ -100,7 +100,7 @@ function parseQueryParams(searchParams: URLSearchParams): QueueQueryParams {
  */
 async function calculateQueueStats(supabase: ReturnType<typeof getSupabaseClient>): Promise<QueueStats> {
   // Get counts by status
-  const { data: statusCounts } = await supabase
+  const { data: statusCounts } = await getSupabaseClient()
     .from('shopify_queue')
     .select('status')
     .returns<{ status: QueueStatus }[]>();
@@ -111,7 +111,7 @@ async function calculateQueueStats(supabase: ReturnType<typeof getSupabaseClient
   }, {} as Record<string, number>);
 
   // Get completed items for processing time calculation
-  const { data: completedItems } = await supabase
+  const { data: completedItems } = await getSupabaseClient()
     .from('shopify_queue')
     .select('started_at, completed_at')
     .eq('status', 'completed')
@@ -165,7 +165,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Build query
-    let query = supabase
+    let query = getSupabaseClient()
       .from('shopify_queue')
       .select('*, products!inner(id, asin, title, image_url, retail_price, status)', { count: 'exact' });
 
@@ -243,7 +243,7 @@ export async function POST(request: NextRequest) {
           return successResponse({ paused: false, message: 'Queue resumed' });
 
         case 'clear_completed':
-          const { error: clearError, count } = await supabase
+          const { error: clearError, count } = await getSupabaseClient()
             .from('shopify_queue')
             .delete()
             .eq('status', 'completed');
@@ -259,7 +259,7 @@ export async function POST(request: NextRequest) {
           return successResponse({ cleared: count || 0 });
 
         case 'retry_all_failed':
-          const { error: retryError } = await supabase
+          const { error: retryError } = await getSupabaseClient()
             .from('shopify_queue')
             .update({
               status: 'pending',
@@ -290,7 +290,7 @@ export async function POST(request: NextRequest) {
     // Add new item to queue
     if (body.productId && body.operation) {
       // Verify product exists
-      const { data: product } = await supabase
+      const { data: product } = await getSupabaseClient()
         .from('products')
         .select('id, asin')
         .eq('id', body.productId)
@@ -304,7 +304,7 @@ export async function POST(request: NextRequest) {
       }
 
       // Check for existing pending item
-      const { data: existing } = await supabase
+      const { data: existing } = await getSupabaseClient()
         .from('shopify_queue')
         .select('id')
         .eq('product_id', body.productId)
@@ -321,7 +321,7 @@ export async function POST(request: NextRequest) {
       }
 
       // Add to queue
-      const { data: item, error } = await supabase
+      const { data: item, error } = await getSupabaseClient()
         .from('shopify_queue')
         .insert({
           product_id: body.productId,
@@ -381,7 +381,7 @@ async function handleBulkOperation(
 
   switch (operation) {
     case 'retry': {
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('shopify_queue')
         .update({
           status: 'pending',
@@ -403,7 +403,7 @@ async function handleBulkOperation(
     }
 
     case 'cancel': {
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('shopify_queue')
         .delete()
         .in('id', itemIds)
@@ -428,7 +428,7 @@ async function handleBulkOperation(
         }, 400);
       }
 
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('shopify_queue')
         .update({
           priority,
@@ -481,7 +481,7 @@ export async function PUT(request: NextRequest) {
     if (body.priority !== undefined) updates.priority = body.priority;
     if (body.status !== undefined) updates.status = body.status;
 
-    const { data: item, error } = await supabase
+    const { data: item, error } = await getSupabaseClient()
       .from('shopify_queue')
       .update(updates)
       .eq('id', itemId)
@@ -526,7 +526,7 @@ export async function DELETE(request: NextRequest) {
       }, 400);
     }
 
-    const { error, count } = await supabase
+    const { error, count } = await getSupabaseClient()
       .from('shopify_queue')
       .delete()
       .in('id', idsToDelete);

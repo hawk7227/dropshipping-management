@@ -191,7 +191,7 @@ function convertShopifyOrder(shopifyOrder: any): UnifiedOrder {
 export async function createShopifyQueueJob(
   productIds: string[]
 ): Promise<{ job_id: string; status: string }> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('shopify_queue')
     .insert({
       product_ids: productIds,
@@ -216,7 +216,7 @@ export async function getShopifyQueueStatus(
   status: string;
   estimated_remaining_seconds: number;
 }> {
-  const { data } = await supabase
+  const { data } = await getSupabaseClient()
     .from('shopify_queue')
     .select('*')
     .eq('id', jobId)
@@ -401,7 +401,7 @@ export async function syncChannelOrders(): Promise<{
 
     // Save to unified_orders table
     if (shopifyOrders.length > 0) {
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('unified_orders')
         .upsert(shopifyOrders, {
           onConflict: 'channel,channel_order_id',
@@ -467,7 +467,7 @@ export async function getChannelListings(
     status?: string;
   }
 ): Promise<{ listings: ChannelListing[]; total: number }> {
-  let query = supabase
+  let query = getSupabaseClient()
     .from('platform_listings')
     .select('*,products(title,images)', { count: 'exact' });
 
@@ -522,7 +522,7 @@ export async function getChannelsStatus(): Promise<
     channels[channel].active = config?.is_enabled || false;
     channels[channel].last_sync = config?.last_sync_at;
 
-    const { count } = await supabase
+    const { count } = await getSupabaseClient()
       .from('platform_listings')
       .select('*', { count: 'exact', head: true })
       .eq('platform', channel);
@@ -530,7 +530,7 @@ export async function getChannelsStatus(): Promise<
     channels[channel].listings_count = count || 0;
 
     // Get monthly revenue from orders
-    const { data: orders } = await supabase
+    const { data: orders } = await getSupabaseClient()
       .from('unified_orders')
       .select('total')
       .eq('channel', channel)

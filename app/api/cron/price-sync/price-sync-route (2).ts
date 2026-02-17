@@ -64,7 +64,7 @@ async function syncAllPrices() {
   let errors = 0;
 
   // Fetch all products with cost price
-  const { data: products, error } = await supabase
+  const { data: products, error } = await getSupabaseClient()
     .from('products')
     .select('id, asin, amazon_cost, list_price')
     .not('amazon_cost', 'is', null)
@@ -94,7 +94,7 @@ async function syncAllPrices() {
       const { listPrice, competitors, profit } = priceResult.data;
 
       // Update product prices
-      const { error: updateError } = await supabase
+      const { error: updateError } = await getSupabaseClient()
         .from('products')
         .update({
           list_price: listPrice,

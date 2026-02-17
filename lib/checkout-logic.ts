@@ -517,7 +517,7 @@ export async function validateCart(items: CartItem[]): Promise<{
 
   for (const item of items) {
     // Fetch current product data
-    const { data: product, error } = await supabase
+    const { data: product, error } = await getSupabaseClient()
       .from('products')
       .select('*')
       .eq('id', item.productId)

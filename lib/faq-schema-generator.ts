@@ -161,7 +161,7 @@ export async function generateAllFAQs(): Promise<{
   const errors: string[] = [];
 
   try {
-    const { data: products } = await supabase
+    const { data: products } = await getSupabaseClient()
       .from('products')
       .select('id, title, asin, retail_price, cost_price, category, vendor, rating, review_count, is_prime, features, amazon_display_price, shopify_product_id, shopify_id')
       .eq('status', 'active')

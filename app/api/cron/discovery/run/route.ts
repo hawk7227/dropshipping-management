@@ -209,7 +209,7 @@ function calculatePricing(amazonPrice: number): {
 // ═══════════════════════════════════════════════════════════════════════════
 
 async function productExistsInDB(asin: string): Promise<boolean> {
-  const { data } = await supabase
+  const { data } = await getSupabaseClient()
     .from('products')
     .select('id')
     .eq('asin', asin)
@@ -587,7 +587,7 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     // Get recent discovery runs
-    const { data: logs, error } = await supabase
+    const { data: logs, error } = await getSupabaseClient()
       .from('cron_job_logs')
       .select('*')
       .eq('job_type', 'discovery')

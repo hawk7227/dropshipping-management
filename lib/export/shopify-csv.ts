@@ -429,7 +429,7 @@ function determineGoogleCategory(category: string | null): string {
 async function queryProductsForShopify(options: ShopifyExportOptions = {}): Promise<any[]> {
   console.log('[ShopifyCSV] Querying products for export');
   
-  let query = supabase
+  let query = getSupabaseClient()
     .from('products')
     .select(`
       id,

@@ -201,7 +201,7 @@ async function testProductDiscovery(startTime: number): Promise<TestResult> {
 async function testPriceSync(startTime: number): Promise<TestResult> {
   try {
     // Get 3 products that need price checks
-    const { data: products, error } = await supabase
+    const { data: products, error } = await getSupabaseClient()
       .from('products')
       .select('id, title, asin, retail_price, cost_price, last_price_check')
       .not('asin', 'is', null)
@@ -292,12 +292,12 @@ async function testShopifySync(startTime: number): Promise<TestResult> {
     const data = await response.json();
 
     // Count synced vs unsynced in our DB
-    const { count: synced } = await supabase
+    const { count: synced } = await getSupabaseClient()
       .from('products')
       .select('*', { count: 'exact', head: true })
       .not('shopify_product_id', 'is', null);
 
-    const { count: total } = await supabase
+    const { count: total } = await getSupabaseClient()
       .from('products')
       .select('*', { count: 'exact', head: true });
 
@@ -334,7 +334,7 @@ async function testStaleCheck(startTime: number): Promise<TestResult> {
     const staleDate = new Date(Date.now() - staleThresholdDays * 24 * 60 * 60 * 1000).toISOString();
 
     // Products with no price check or last check before threshold
-    const { data: staleProducts, error } = await supabase
+    const { data: staleProducts, error } = await getSupabaseClient()
       .from('products')
       .select('id, title, asin, last_price_check, retail_price')
       .or(`last_price_check.is.null,last_price_check.lt.${staleDate}`)
@@ -351,7 +351,7 @@ async function testStaleCheck(startTime: number): Promise<TestResult> {
       };
     }
 
-    const { count: totalStale } = await supabase
+    const { count: totalStale } = await getSupabaseClient()
       .from('products')
       .select('*', { count: 'exact', head: true })
       .or(`last_price_check.is.null,last_price_check.lt.${staleDate}`)
@@ -388,7 +388,7 @@ async function testStaleCheck(startTime: number): Promise<TestResult> {
 
 async function testDemandCheck(startTime: number): Promise<TestResult> {
   try {
-    const { count: demandCount, error: demandErr } = await supabase
+    const { count: demandCount, error: demandErr } = await getSupabaseClient()
       .from('product_demand')
       .select('*', { count: 'exact', head: true });
 
@@ -402,11 +402,11 @@ async function testDemandCheck(startTime: number): Promise<TestResult> {
       };
     }
 
-    const { count: productCount } = await supabase
+    const { count: productCount } = await getSupabaseClient()
       .from('products')
       .select('*', { count: 'exact', head: true });
 
-    const { data: topDemand } = await supabase
+    const { data: topDemand } = await getSupabaseClient()
       .from('product_demand')
       .select('product_id, demand_score, bsr_rank')
       .order('demand_score', { ascending: false })
@@ -445,13 +445,13 @@ async function testDemandCheck(startTime: number): Promise<TestResult> {
 async function testGoogleShopping(startTime: number): Promise<TestResult> {
   try {
     // Check how many products have Shopify data (needed for feed)
-    const { count: syncedCount } = await supabase
+    const { count: syncedCount } = await getSupabaseClient()
       .from('products')
       .select('*', { count: 'exact', head: true })
       .not('shopify_product_id', 'is', null)
       .eq('status', 'active');
 
-    const { count: withImages } = await supabase
+    const { count: withImages } = await getSupabaseClient()
       .from('products')
       .select('*', { count: 'exact', head: true })
       .not('shopify_product_id', 'is', null)

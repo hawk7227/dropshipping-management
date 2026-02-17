@@ -220,7 +220,7 @@ function meetsDemandCriteria(
  */
 async function checkDuplicate(asin: string): Promise<boolean> {
   // Check products table
-  const { data: existingProduct } = await supabase
+  const { data: existingProduct } = await getSupabaseClient()
     .from('products')
     .select('id')
     .eq('asin', asin)
@@ -232,7 +232,7 @@ async function checkDuplicate(asin: string): Promise<boolean> {
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
   
-  const { data: recentRejection } = await supabase
+  const { data: recentRejection } = await getSupabaseClient()
     .from('rejection_log')
     .select('id')
     .eq('asin', asin)
@@ -761,7 +761,7 @@ async function generateMasterBackup(
     const csvContent = [csvHeaders, ...csvRows].join('\n');
 
     // Store backup metadata in discovery_runs
-    await supabase
+    await getSupabaseClient()
       .from('discovery_runs')
       .update({
         backup_json: exportData,
@@ -796,7 +796,7 @@ export async function exportDiscoveryResults(runDate: string): Promise<{
   error?: string;
 }> {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await getSupabaseClient()
       .from('discovery_runs')
       .select('backup_json, backup_csv')
       .eq('run_date', runDate)

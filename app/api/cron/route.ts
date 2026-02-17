@@ -64,7 +64,7 @@ interface CronJobLog {
  */
 async function createCronLog(jobType: CronJobType): Promise<string> {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await getSupabaseClient()
       .from('cron_job_logs')
       .insert({
         job_type,
@@ -102,7 +102,7 @@ async function updateCronLog(
     if (result.message) updateData.message = result.message;
     if (result.details) updateData.details = result.details;
 
-    await supabase
+    await getSupabaseClient()
       .from('cron_job_logs')
       .update(updateData)
       .eq('id', logId);
@@ -116,7 +116,7 @@ async function updateCronLog(
  */
 async function logCronError(logId: string, error: any): Promise<void> {
   try {
-    await supabase
+    await getSupabaseClient()
       .from('cron_job_logs')
       .update({
         status: 'failed',
@@ -173,7 +173,7 @@ export async function GET(request: NextRequest) {
           let discoveryEnabled = true;
 
           try {
-            const { data: settings } = await supabase
+            const { data: settings } = await getSupabaseClient()
               .from('sourcing_settings')
               .select('enabled, criteria, cron_interval')
               .limit(1)
@@ -214,7 +214,7 @@ export async function GET(request: NextRequest) {
           });
 
           // Update last_run in sourcing_settings
-          await supabase
+          await getSupabaseClient()
             .from('sourcing_settings')
             .update({
               last_run_at: new Date().toISOString(),
@@ -317,7 +317,7 @@ export async function GET(request: NextRequest) {
           }
 
           // Get products that need Shopify sync (no real shopify_product_id)
-          const { data: unsyncedProducts } = await supabase
+          const { data: unsyncedProducts } = await getSupabaseClient()
             .from('products')
             .select('id, asin, title, brand, category, product_type, description, image_url, images, rating, review_count, retail_price, cost_price, amazon_price, compare_at_price, status, tags, source_url')
             .or('shopify_product_id.is.null,shopify_product_id.like.sync-%')
@@ -424,7 +424,7 @@ export async function GET(request: NextRequest) {
                 }
 
                 // Update Supabase with REAL Shopify product ID
-                await supabase
+                await getSupabaseClient()
                   .from('products')
                   .update({
                     shopify_product_id: shopifyProductId,
@@ -468,7 +468,7 @@ export async function GET(request: NextRequest) {
           // This would sync orders from Shopify, eBay, TikTok, etc.
           // For now, we'll implement a basic order aggregation
           
-          const { data: orders } = await supabase
+          const { data: orders } = await getSupabaseClient()
             .from('unified_orders')
             .select('id, channel, channel_order_id, total, created_at')
             .gte('created_at', new Date(Date.now() - 15 * 60 * 1000).toISOString())
@@ -484,7 +484,7 @@ export async function GET(request: NextRequest) {
             }, {} as Record<string, number>);
 
             for (const [channel, count] of Object.entries(channelStats)) {
-              await supabase
+              await getSupabaseClient()
                 .from('channel_performance')
                 .upsert({
                   date: new Date().toISOString().split('T')[0],
@@ -516,13 +516,13 @@ export async function GET(request: NextRequest) {
           const today = new Date().toISOString().split('T')[0];
           
           // Product stats
-          const { data: productStats } = await supabase
+          const { data: productStats } = await getSupabaseClient()
             .from('products')
             .select('status, source')
             .gte('created_at', today);
 
           // Order stats
-          const { data: orderStats } = await supabase
+          const { data: orderStats } = await getSupabaseClient()
             .from('unified_orders')
             .select('total, channel')
             .gte('created_at', today);
@@ -684,7 +684,7 @@ export async function POST(request: NextRequest) {
  */
 async function getAIAnalysisStats(): Promise<{ success: boolean; data?: any }> {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await getSupabaseClient()
       .from('ai_scores')
       .select('overall_score, score_tier, scored_at');
 

@@ -40,7 +40,7 @@ export async function GET() {
     for (const tableName of TABLES_TO_CHECK) {
       try {
         // Try to count rows in the table
-        const { count, error } = await supabase
+        const { count, error } = await getSupabaseClient()
           .from(tableName)
           .select('*', { count: 'exact', head: true });
         

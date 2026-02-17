@@ -75,7 +75,7 @@ export async function GET(request: NextRequest) {
           );
         }
 
-        const { data, error } = await supabase
+        const { data, error } = await getSupabaseClient()
           .from('social_posts')
           .select('*')
           .eq('id', id)
@@ -115,7 +115,7 @@ export async function GET(request: NextRequest) {
           );
         }
 
-        const { data, error } = await supabase
+        const { data, error } = await getSupabaseClient()
           .from('marketing_campaigns')
           .select('*')
           .eq('id', id)
@@ -155,7 +155,7 @@ export async function GET(request: NextRequest) {
       }
 
       case 'contact-tags': {
-        const { data } = await supabase
+        const { data } = await getSupabaseClient()
           .from('marketing_contacts')
           .select('tags');
 
@@ -172,36 +172,36 @@ export async function GET(request: NextRequest) {
 
       case 'stats': {
         // Posts stats
-        const { count: totalPosts } = await supabase
+        const { count: totalPosts } = await getSupabaseClient()
           .from('social_posts')
           .select('*', { count: 'exact', head: true });
 
-        const { count: publishedPosts } = await supabase
+        const { count: publishedPosts } = await getSupabaseClient()
           .from('social_posts')
           .select('*', { count: 'exact', head: true })
           .eq('status', 'published');
 
-        const { count: scheduledPosts } = await supabase
+        const { count: scheduledPosts } = await getSupabaseClient()
           .from('social_posts')
           .select('*', { count: 'exact', head: true })
           .eq('status', 'scheduled');
 
         // Campaign stats
-        const { count: totalCampaigns } = await supabase
+        const { count: totalCampaigns } = await getSupabaseClient()
           .from('marketing_campaigns')
           .select('*', { count: 'exact', head: true });
 
-        const { count: activeCampaigns } = await supabase
+        const { count: activeCampaigns } = await getSupabaseClient()
           .from('marketing_campaigns')
           .select('*', { count: 'exact', head: true })
           .eq('status', 'active');
 
         // Contact stats
-        const { count: totalContacts } = await supabase
+        const { count: totalContacts } = await getSupabaseClient()
           .from('marketing_contacts')
           .select('*', { count: 'exact', head: true });
 
-        const { count: subscribedContacts } = await supabase
+        const { count: subscribedContacts } = await getSupabaseClient()
           .from('marketing_contacts')
           .select('*', { count: 'exact', head: true })
           .eq('is_subscribed', true);
@@ -314,7 +314,7 @@ export async function POST(request: NextRequest) {
         }
 
         // Get product
-        const { data: product } = await supabase
+        const { data: product } = await getSupabaseClient()
           .from('products')
           .select('title, description, vendor, product_type, images')
           .eq('id', productId)
@@ -355,7 +355,7 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        const { data: product } = await supabase
+        const { data: product } = await getSupabaseClient()
           .from('products')
           .select('title, description, vendor, product_type, images')
           .eq('id', productId)
@@ -387,7 +387,7 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        const { data: product } = await supabase
+        const { data: product } = await getSupabaseClient()
           .from('products')
           .select('title, description, vendor, product_type')
           .eq('id', productId)
@@ -415,7 +415,7 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        const { data: post } = await supabase
+        const { data: post } = await getSupabaseClient()
           .from('social_posts')
           .select('*')
           .eq('id', postId)
@@ -511,7 +511,7 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        const { data: product } = await supabase
+        const { data: product } = await getSupabaseClient()
           .from('products')
           .select('title, description, vendor, product_type, images')
           .eq('id', productId)
@@ -543,7 +543,7 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        const { data: product } = await supabase
+        const { data: product } = await getSupabaseClient()
           .from('products')
           .select('title, description, handle')
           .eq('id', productId)
@@ -732,7 +732,7 @@ export async function POST(request: NextRequest) {
         }
 
         // Get existing contacts
-        const { data: contacts } = await supabase
+        const { data: contacts } = await getSupabaseClient()
           .from('marketing_contacts')
           .select('id, tags')
           .in('id', contactIds);
@@ -746,7 +746,7 @@ export async function POST(request: NextRequest) {
             newTags = [...new Set([...newTags, ...tags])];
           }
 
-          await supabase
+          await getSupabaseClient()
             .from('marketing_contacts')
             .update({ tags: newTags, updated_at: new Date().toISOString() })
             .eq('id', contact.id);
@@ -820,7 +820,7 @@ export async function PUT(request: NextRequest) {
         if (scheduledFor !== undefined) updates.scheduled_for = scheduledFor;
         if (status !== undefined) updates.status = status;
 
-        const { data, error } = await supabase
+        const { data, error } = await getSupabaseClient()
           .from('marketing_campaigns')
           .update(updates)
           .eq('id', id)
@@ -848,7 +848,7 @@ export async function PUT(request: NextRequest) {
         if (content !== undefined) updates.content = content;
         if (variables !== undefined) updates.variables = variables;
 
-        const { data, error } = await supabase
+        const { data, error } = await getSupabaseClient()
           .from('message_templates')
           .update(updates)
           .eq('id', id)
@@ -878,7 +878,7 @@ export async function PUT(request: NextRequest) {
         if (tags !== undefined) updates.tags = tags;
         if (isSubscribed !== undefined) updates.is_subscribed = isSubscribed;
 
-        const { data, error } = await supabase
+        const { data, error } = await getSupabaseClient()
           .from('marketing_contacts')
           .update(updates)
           .eq('id', id)
@@ -937,7 +937,7 @@ export async function DELETE(request: NextRequest) {
           );
         }
 
-        const { error } = await supabase
+        const { error } = await getSupabaseClient()
           .from('marketing_campaigns')
           .delete()
           .eq('id', id);
@@ -958,7 +958,7 @@ export async function DELETE(request: NextRequest) {
           );
         }
 
-        const { error } = await supabase
+        const { error } = await getSupabaseClient()
           .from('message_templates')
           .delete()
           .eq('id', id);
@@ -979,7 +979,7 @@ export async function DELETE(request: NextRequest) {
           );
         }
 
-        const { error } = await supabase
+        const { error } = await getSupabaseClient()
           .from('marketing_contacts')
           .delete()
           .eq('id', id);
@@ -1003,7 +1003,7 @@ export async function DELETE(request: NextRequest) {
           );
         }
 
-        const { error } = await supabase
+        const { error } = await getSupabaseClient()
           .from('marketing_contacts')
           .delete()
           .in('id', contactIds);

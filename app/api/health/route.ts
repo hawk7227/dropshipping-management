@@ -201,7 +201,7 @@ export async function GET() {
       let lastErrorTime = null;
       
       try {
-        const { data } = await supabase
+        const { data } = await getSupabaseClient()
           .from('cron_job_logs')
           .select('*')
           .eq('job_name', key)
@@ -256,7 +256,7 @@ export async function GET() {
     
     for (const table of tablesToCheck) {
       try {
-        const { count, error } = await supabase
+        const { count, error } = await getSupabaseClient()
           .from(table)
           .select('*', { count: 'exact', head: true });
         
@@ -281,7 +281,7 @@ export async function GET() {
     };
 
     try {
-      const { data: healthData } = await supabase
+      const { data: healthData } = await getSupabaseClient()
         .from('scraper_health')
         .select('*')
         .eq('id', 'current')
@@ -298,7 +298,7 @@ export async function GET() {
         scraperStatus.status = healthData.status;
       }
 
-      const { data: activeJob } = await supabase
+      const { data: activeJob } = await getSupabaseClient()
         .from('scraper_jobs')
         .select('*')
         .in('status', ['running', 'paused'])

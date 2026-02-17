@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
     const keys = subscription.keys || {};
 
     // Upsert — update if same endpoint exists
-    const { data, error } = await supabase
+    const { data, error } = await getSupabaseClient()
       .from('push_subscriptions')
       .upsert(
         {
@@ -73,7 +73,7 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'endpoint required' }, { status: 400 });
     }
 
-    const { error } = await supabase
+    const { error } = await getSupabaseClient()
       .from('push_subscriptions')
       .delete()
       .eq('endpoint', endpoint);

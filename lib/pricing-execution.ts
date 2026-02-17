@@ -116,7 +116,7 @@ export async function applyPricingRules(products: PricingProduct[]): Promise<{
       const profitPercent = roundToTwo((profitAmount / retailPrice) * 100);
       const competitors = generateCompetitorPrices(retailPrice);
 
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('products')
         .update({
           retail_price: retailPrice,
@@ -161,7 +161,7 @@ export async function enforceGracePeriod(): Promise<{
 
   try {
     // Get all active products with pricing
-    const { data: products, error: fetchErr } = await supabase
+    const { data: products, error: fetchErr } = await getSupabaseClient()
       .from('products')
       .select('id, asin, title, profit_percent, below_threshold_since, status')
       .in('status', ['active', 'pending'])
@@ -183,7 +183,7 @@ export async function enforceGracePeriod(): Promise<{
         if (margin < minimumMargin) {
           if (!product.below_threshold_since) {
             // First time below threshold — start grace period
-            await supabase
+            await getSupabaseClient()
               .from('products')
               .update({ below_threshold_since: now.toISOString(), updated_at: now.toISOString() })
               .eq('id', product.id);
@@ -194,7 +194,7 @@ export async function enforceGracePeriod(): Promise<{
             const sinceDate = new Date(product.below_threshold_since);
             if (now.getTime() - sinceDate.getTime() > graceMs) {
               // Auto-pause
-              await supabase
+              await getSupabaseClient()
                 .from('products')
                 .update({ status: 'paused', updated_at: now.toISOString() })
                 .eq('id', product.id);
@@ -217,7 +217,7 @@ export async function enforceGracePeriod(): Promise<{
           }
         } else if (product.below_threshold_since) {
           // Margin recovered — clear the flag
-          await supabase
+          await getSupabaseClient()
             .from('products')
             .update({ below_threshold_since: null, updated_at: now.toISOString() })
             .eq('id', product.id);
@@ -329,7 +329,7 @@ export async function executePricingCycle(): Promise<PricingCycleResult> {
 
   try {
     // 1. Fetch all products with cost prices
-    const { data: products, error: fetchErr } = await supabase
+    const { data: products, error: fetchErr } = await getSupabaseClient()
       .from('products')
       .select('id, asin, title, cost_price, retail_price, amazon_price, profit_percent, profit_amount, status, below_threshold_since, shopify_product_id, shopify_id, amazon_display_price, costco_display_price, ebay_display_price, sams_display_price, compare_at_price, updated_at')
       .not('cost_price', 'is', null)
@@ -362,7 +362,7 @@ export async function executePricingCycle(): Promise<PricingCycleResult> {
     result.errors.push(...graceResult.errors);
 
     // 4. Push to Shopify (re-fetch updated prices)
-    const { data: updatedProducts } = await supabase
+    const { data: updatedProducts } = await getSupabaseClient()
       .from('products')
       .select('id, asin, title, cost_price, retail_price, amazon_price, profit_percent, profit_amount, status, below_threshold_since, shopify_product_id, shopify_id, amazon_display_price, costco_display_price, ebay_display_price, sams_display_price, compare_at_price, updated_at')
       .not('cost_price', 'is', null)

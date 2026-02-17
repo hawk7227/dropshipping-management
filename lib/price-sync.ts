@@ -79,7 +79,7 @@ export async function getCompetitorPrices(productId?: string): Promise<Competito
 }
 
 export async function upsertCompetitorPrice(price: CompetitorPrice): Promise<CompetitorPrice | null> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('competitor_prices')
     .upsert({
       ...price,
@@ -105,7 +105,7 @@ export async function fetchCompetitorPrices(
   const prices: CompetitorPrice[] = [];
   
   // Get product info from database
-  const { data: product } = await supabase
+  const { data: product } = await getSupabaseClient()
     .from('products')
     .select('id, title, asin')
     .eq('id', productId)
@@ -240,7 +240,7 @@ export async function getPriceHistory(
 ): Promise<PriceHistory[]> {
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
   
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('price_history')
     .select('*')
     .eq('product_id', productId)
@@ -260,7 +260,7 @@ export async function recordPriceHistory(
   ourPrice: number,
   competitorPrices: Record<string, number>
 ): Promise<PriceHistory | null> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('price_history')
     .insert({
       product_id: productId,
@@ -286,7 +286,7 @@ export async function recordPriceHistory(
 export async function getStaleProducts(hoursThreshold: number = 24): Promise<string[]> {
   const threshold = new Date(Date.now() - hoursThreshold * 60 * 60 * 1000).toISOString();
   
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('competitor_prices')
     .select('product_id')
     .lt('last_checked', threshold);
@@ -306,7 +306,7 @@ export async function getStaleProducts(hoursThreshold: number = 24): Promise<str
 // ============================================================================
 
 export async function createSyncJob(jobType: string, productsTotal: number): Promise<SyncJob | null> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('price_sync_jobs')
     .insert({
       status: 'pending',
@@ -330,7 +330,7 @@ export async function updateSyncJob(
   jobId: string,
   updates: Partial<SyncJob>
 ): Promise<SyncJob | null> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('price_sync_jobs')
     .update(updates)
     .eq('id', jobId)
@@ -375,13 +375,13 @@ export async function getPriceStats(): Promise<{
   avgPriceDifference: number;
   lastSyncTime: string | null;
 }> {
-  const { data: competitorData } = await supabase
+  const { data: competitorData } = await getSupabaseClient()
     .from('competitor_prices')
     .select('product_id, price');
   
   const uniqueProducts = new Set((competitorData || []).map(d => d.product_id));
   
-  const { data: lastJob } = await supabase
+  const { data: lastJob } = await getSupabaseClient()
     .from('sync_jobs')
     .select('completed_at')
     .eq('status', 'completed')

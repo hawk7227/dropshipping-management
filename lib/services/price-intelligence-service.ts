@@ -88,7 +88,7 @@ export interface SyncJobStatus {
 export async function getCompetitorPrices(
   productId: string
 ): Promise<CompetitorPrice[]> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('competitor_prices')
     .select('*')
     .eq('product_id', productId)
@@ -109,7 +109,7 @@ export async function getCompetitorPrices(
 export async function getLatestCompetitorPrices(
   productId: string
 ): Promise<Record<string, CompetitorPrice | null>> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('competitor_prices')
     .select('*')
     .eq('product_id', productId)
@@ -229,7 +229,7 @@ export async function syncCompetitorPrice(
 
     // Store in database
     if (prices.length > 0) {
-      const { error: insertError } = await supabase
+      const { error: insertError } = await getSupabaseClient()
         .from('competitor_prices')
         .upsert(prices, { onConflict: 'product_id,competitor' });
 
@@ -301,7 +301,7 @@ export async function analyzeProductMargin(
   productId: string
 ): Promise<MarginAnalysis | null> {
   // Get product data
-  const { data: product, error: productError } = await supabase
+  const { data: product, error: productError } = await getSupabaseClient()
     .from('products')
     .select('id, title, cost_price, retail_price')
     .eq('id', productId)
@@ -362,7 +362,7 @@ export async function applyMarginRule(
   dryRun: boolean = false
 ): Promise<{ success: boolean; newPrice?: number; oldPrice?: number; error?: string }> {
   // Get product
-  const { data: product, error } = await supabase
+  const { data: product, error } = await getSupabaseClient()
     .from('products')
     .select('cost_price, retail_price')
     .eq('id', productId)
@@ -389,7 +389,7 @@ export async function applyMarginRule(
   }
 
   // Update product
-  const { error: updateError } = await supabase
+  const { error: updateError } = await getSupabaseClient()
     .from('products')
     .update({
       retail_price: newPrice,
@@ -402,7 +402,7 @@ export async function applyMarginRule(
   }
 
   // Record price history
-  const { data: productFull } = await supabase
+  const { data: productFull } = await getSupabaseClient()
     .from('products')
     .select('id, retail_price')
     .eq('id', productId)
@@ -474,7 +474,7 @@ export async function checkPriceAlerts(): Promise<PriceAlert[]> {
   const alerts: PriceAlert[] = [];
 
   // Get all active products with competitor prices
-  const { data: products } = await supabase
+  const { data: products } = await getSupabaseClient()
     .from('products')
     .select('id, title, cost_price, retail_price')
     .eq('status', 'active');
@@ -561,7 +561,7 @@ export async function getPriceHistory(
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - days);
 
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('price_history')
     .select('*')
     .eq('product_id', productId)
@@ -632,7 +632,7 @@ export async function getPriceTrend(productId: string, days: number = 30): Promi
  */
 export async function recordPriceHistory(productId: string): Promise<boolean> {
   // Get product current state
-  const { data: product } = await supabase
+  const { data: product } = await getSupabaseClient()
     .from('products')
     .select('retail_price')
     .eq('id', productId)
@@ -674,7 +674,7 @@ export async function getPriceTrackingStats(): Promise<{
   };
 }> {
   // Get all products
-  const { data: products, error } = await supabase
+  const { data: products, error } = await getSupabaseClient()
     .from('products')
     .select('id, cost_price, retail_price')
     .eq('status', 'active');
@@ -710,13 +710,13 @@ export async function getPriceTrackingStats(): Promise<{
 
   // Check for stale prices (>24 hours old)
   const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const { count: stalePrices } = await supabase
+  const { count: stalePrices } = await getSupabaseClient()
     .from('competitor_prices')
     .select('*', { count: 'exact', head: true })
     .lt('checked_at', oneDayAgo);
 
   // Get critical alerts
-  const { count: criticalAlerts } = await supabase
+  const { count: criticalAlerts } = await getSupabaseClient()
     .from('price_alerts')
     .select('*', { count: 'exact', head: true })
     .eq('severity', 'critical')

@@ -46,7 +46,7 @@ export async function getChannels(): Promise<ChannelConfig[]> {
 
 // ✅ ADDED: Update Channel Config
 export async function updateChannel(channelId: string, updates: any): Promise<ChannelConfig> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('channel_configs')
     .upsert({ channel: channelId, ...updates }, { onConflict: 'channel' })
     .select()
@@ -361,7 +361,7 @@ export async function getChannelOrders(
     const start = (page - 1) * pageSize;
     const end = start + pageSize - 1;
 
-    let query = supabase
+    let query = getSupabaseClient()
         .from('unified_orders')
         .select('*', { count: 'exact' })
         .order('created_at', { ascending: false })
@@ -392,7 +392,7 @@ export async function getChannelListings(
     const start = (page - 1) * pageSize;
     const end = start + pageSize - 1;
 
-    let query = supabase
+    let query = getSupabaseClient()
         .from('channel_listings')
         .select('*', { count: 'exact' })
         .range(start, end);
@@ -408,7 +408,7 @@ export async function getChannelListings(
 
 // ✅ ADDED: Update Order Fulfillment
 export async function updateOrderFulfillment(orderId: string, fulfillment: any): Promise<any> {
-    const { data, error } = await supabase
+    const { data, error } = await getSupabaseClient()
         .from('unified_orders')
         .update({
             status: 'shipped',
@@ -458,7 +458,7 @@ export async function syncAllChannelOrders(): Promise<{ synced: number; errors: 
 // =====================
 
 export async function updateChannelConfig(channel: string, updates: Partial<ChannelConfig>): Promise<void> {
-  await supabase
+  await getSupabaseClient()
     .from('channel_configs')
     .upsert({ channel, ...updates }, { onConflict: 'channel' });
 }

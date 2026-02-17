@@ -67,7 +67,7 @@ async function getProductsWithDetails({
 
   // Build the main query - select all columns to avoid missing column errors
   // The API will handle missing pricing columns gracefully
-  let query = supabase
+  let query = getSupabaseClient()
     .from('products')
     .select('*', { count: 'exact' });
 
@@ -125,7 +125,7 @@ async function getProductsWithDetails({
   
   if (productIds.length > 0) {
     try {
-      const { data: aiScores } = await supabase
+      const { data: aiScores } = await getSupabaseClient()
         .from('ai_scores')
         .select('product_id, overall_score, score_tier')
         .in('product_id', productIds);
@@ -146,7 +146,7 @@ async function getProductsWithDetails({
   
   if (productIds.length > 0) {
     try {
-      const { data: priceSnapshots } = await supabase
+      const { data: priceSnapshots } = await getSupabaseClient()
         .from('price_snapshots')
         .select('product_id, current_price, competitor_price, availability, fetched_at, is_latest')
         .in('product_id', productIds)
@@ -172,7 +172,7 @@ async function getProductsWithDetails({
       // Build composite IDs for Amazon competitor prices
       const amazonProductIds = productIds.map((id: string) => `${id}-amazon`);
       console.log("amazonProductIds:", amazonProductIds);
-      const { data: competitorPrices } = await supabase
+      const { data: competitorPrices } = await getSupabaseClient()
         .from('competitor_prices')
         .select('*')
         .in('id', amazonProductIds);
@@ -194,7 +194,7 @@ async function getProductsWithDetails({
   let variantsMap: Record<string, any[]> = {};
   if (productIds.length > 0) {
     try {
-      const { data: variants } = await supabase
+      const { data: variants } = await getSupabaseClient()
         .from('variants')
         .select(
           'id, product_id, title, sku, barcode, price, compare_at_price, cost, inventory_item_id, inventory_quantity, weight, weight_unit, requires_shipping, taxable, created_at, updated_at'
@@ -499,7 +499,7 @@ export async function GET(request: NextRequest) {
       }
 
       case 'vendors': {
-        const { data } = await supabase
+        const { data } = await getSupabaseClient()
           .from('products')
           .select('vendor')
           .not('vendor', 'is', null)
@@ -510,7 +510,7 @@ export async function GET(request: NextRequest) {
       }
 
       case 'product-types': {
-        const { data } = await supabase
+        const { data } = await getSupabaseClient()
           .from('products')
           .select('product_type')
           .not('product_type', 'is', null)
@@ -527,7 +527,7 @@ export async function GET(request: NextRequest) {
               const minProfit = parseFloat(searchParams.get('minProfit') || '0');
               const profitStatus = searchParams.get('profitStatus') || undefined;
       
-              let query = supabase
+              let query = getSupabaseClient()
                 .from('products')
                 .select('*')
                 .eq('source', 'rainforest')
@@ -563,7 +563,7 @@ export async function GET(request: NextRequest) {
       
             // Get profit summary for discovered products
             case 'profit-summary': {
-              const { data, error } = await supabase
+              const { data, error } = await getSupabaseClient()
                 .from('v_profit_summary')
                 .select('*')
                 .single();
@@ -661,7 +661,7 @@ export async function POST(request: NextRequest) {
 
             for (const pid of productIds) {
               try {
-                const { data: product, error: fetchErr } = await supabase
+                const { data: product, error: fetchErr } = await getSupabaseClient()
                   .from('products').select('*').eq('id', pid).single();
                 if (fetchErr || !product) { errors.push(`Product ${pid} not found`); continue; }
 
@@ -936,7 +936,7 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        const { error } = await supabase
+        const { error } = await getSupabaseClient()
           .from('products')
           .update({ status, updated_at: new Date().toISOString() })
           .in('id', productIds);
@@ -1032,7 +1032,7 @@ export async function PUT(request: NextRequest) {
         );
       }
 
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('products')
         .update({
           asin,
@@ -1063,7 +1063,7 @@ export async function PUT(request: NextRequest) {
 
       for (const update of updates) {
         try {
-          const { data, error } = await supabase
+          const { data, error } = await getSupabaseClient()
             .from('products')
             .update({
               asin: update.asin,
@@ -1128,7 +1128,7 @@ export async function PUT(request: NextRequest) {
     if (variants && Array.isArray(variants)) {
       for (const variant of variants) {
         if (variant.id) {
-          await supabase
+          await getSupabaseClient()
             .from('variants')
             .update({
               title: variant.title,
@@ -1179,13 +1179,13 @@ export async function DELETE(request: NextRequest) {
       }
 
       // Delete variants first
-      await supabase
+      await getSupabaseClient()
         .from('variants')
         .delete()
         .in('product_id', productIds);
 
       // Delete products
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('products')
         .delete()
         .in('id', productIds);
@@ -1206,13 +1206,13 @@ export async function DELETE(request: NextRequest) {
     }
 
     // Delete variants first
-    await supabase
+    await getSupabaseClient()
       .from('variants')
       .delete()
       .eq('product_id', id);
 
     // Delete product
-    const { error } = await supabase
+    const { error } = await getSupabaseClient()
       .from('products')
       .delete()
       .eq('id', id);
