@@ -422,6 +422,29 @@ export default function PushToShopifyPage() {
         ))}
       </div>
 
+      {/* Stock check progress */}
+      {(checkingStock || Object.keys(stockMap).length > 0) && (
+        <div style={{ background: '#1e293b', borderRadius: 8, padding: 16, marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
+            <strong>{checkingStock ? `🔍 Checking stock...` : '🔍 Stock Check Complete'}</strong>
+            <div style={{ display: 'flex', gap: 16, fontSize: 14 }}>
+              <span>Checked: <strong>{Object.keys(stockMap).length}</strong></span>
+              <span style={{ color: '#22c55e' }}>✅ In Stock: <strong>{Object.values(stockMap).filter(s => s.inStock === true).length}</strong></span>
+              <span style={{ color: '#ef4444' }}>❌ Out of Stock: <strong>{Object.values(stockMap).filter(s => s.inStock === false).length}</strong></span>
+              <span style={{ color: '#94a3b8' }}>⚠️ Unknown: <strong>{Object.values(stockMap).filter(s => s.inStock === null).length}</strong></span>
+            </div>
+          </div>
+          {checkingStock && (
+            <div style={{ background: '#334155', borderRadius: 4, height: 10, overflow: 'hidden' }}>
+              <div style={{ background: '#0ea5e9', height: '100%', width: `${stockProgress}%`, transition: 'width 0.3s' }} />
+            </div>
+          )}
+          {checkingStock && (
+            <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 6 }}>{stockProgress}% — ~{Math.max(0, Math.ceil((selectedIds.size - Object.keys(stockMap).length) * 1.2))}s remaining</div>
+          )}
+        </div>
+      )}
+
       {/* Push progress */}
       {(pushing || pushResults.length > 0) && (
         <div style={{ background: '#1e293b', borderRadius: 8, padding: 16, marginBottom: 16 }}>
