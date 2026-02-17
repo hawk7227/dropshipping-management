@@ -4,12 +4,24 @@
 import { createClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
 
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+  }
+  return _supabase;
+}
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let _openai: OpenAI | null = null;
+function getOpenAI(): OpenAI {
+  if (!_openai) {
+    _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  }
+  return _openai;
+}
 
 // ============================================================================
 // TYPES
@@ -181,7 +193,7 @@ ${options.customPrompt ? `Additional instructions: ${options.customPrompt}` : ''
 Return only the post text.`;
 
   try {
-    const response = await openai.chat.completions.create({
+    const response = await getOpenAI().chat.completions.create({
       model: 'gpt-4-turbo-preview',
       messages: [{ role: 'user', content: prompt }],
     });
@@ -213,7 +225,7 @@ export async function generateHashtags(
   count: number = 10
 ): Promise<string[]> {
   try {
-    const response = await openai.chat.completions.create({
+    const response = await getOpenAI().chat.completions.create({
       model: 'gpt-4-turbo-preview',
       messages: [{
         role: 'user',
@@ -358,7 +370,7 @@ export async function executeCampaign(campaignId: string): Promise<{
 
 export async function getTemplates(type?: string): Promise<Template[]> {
   // Use a dedicated message_templates table for all template types
-  let query = supabase.from('message_templates').select('*');
+  let query = getSupabaseClient().from('message_templates').select('*');
   
   if (type) {
     query = query.eq('type', type);
@@ -479,7 +491,7 @@ export async function generateEmailContent(
   } = {}
 ): Promise<{ subject: string; html: string; text: string }> {
   try {
-    const response = await openai.chat.completions.create({
+    const response = await getOpenAI().chat.completions.create({
       model: 'gpt-4-turbo-preview',
       messages: [{
         role: 'user',
@@ -556,7 +568,7 @@ export async function generateSMS(
   link?: string
 ): Promise<string> {
   try {
-    const response = await openai.chat.completions.create({
+    const response = await getOpenAI().chat.completions.create({
       model: 'gpt-4-turbo-preview',
       messages: [{
         role: 'user',

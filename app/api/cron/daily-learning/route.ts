@@ -27,12 +27,24 @@ import {
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+  }
+  return _supabase;
+}
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let _openai: OpenAI | null = null;
+function getOpenAI(): OpenAI {
+  if (!_openai) {
+    _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  }
+  return _openai;
+}
 
 // ============================================================================
 // MAIN LEARNING CYCLE
@@ -301,7 +313,7 @@ Return JSON:
 }`;
 
     try {
-      const strategyResponse = await openai.chat.completions.create({
+      const strategyResponse = await getOpenAI().chat.completions.create({
         model: 'gpt-4-turbo-preview',
         messages: [{ role: 'user', content: strategyPrompt }],
         response_format: { type: 'json_object' },
@@ -322,7 +334,7 @@ Return JSON:
     // ========================================
     console.log('\n💾 Step 7: Saving learning history...');
 
-    await supabase.from('learning_history').insert({
+    await getSupabaseClient().from('learning_history').insert({
       learning_type: 'strategy_shift',
       description: `Daily learning cycle completed for ${today}`,
       data: {

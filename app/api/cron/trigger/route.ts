@@ -9,10 +9,16 @@ import { createClient } from '@supabase/supabase-js';
 const CRON_SECRET = process.env.CRON_SECRET;
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY;
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 type CronJobType = 
   | 'product-discovery'    // P1.2 - Daily at 4 AM

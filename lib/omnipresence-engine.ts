@@ -19,12 +19,24 @@
 import OpenAI from 'openai';
 import { createClient } from '@supabase/supabase-js';
 
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+  }
+  return _supabase;
+}
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let _openai: OpenAI | null = null;
+function getOpenAI(): OpenAI {
+  if (!_openai) {
+    _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  }
+  return _openai;
+}
 
 // ============================================================================
 // TYPES
@@ -140,7 +152,7 @@ export async function publishViaZapier(
     }
 
     // Log the successful webhook call
-    await supabase.from('zapier_logs').insert({
+    await getSupabaseClient().from('zapier_logs').insert({
       post_id: post.id,
       webhook_url: zapierUrl,
       request_payload: {
@@ -169,7 +181,7 @@ export async function publishViaZapier(
     console.error('[Omnipresence] Zapier webhook error:', error);
 
     // Log the failed attempt
-    await supabase.from('zapier_logs').insert({
+    await getSupabaseClient().from('zapier_logs').insert({
       post_id: post.id,
       request_payload: {
         platform: post.platform,
@@ -831,7 +843,7 @@ Return JSON:
 }`;
 
   try {
-    const response = await openai.chat.completions.create({
+    const response = await getOpenAI().chat.completions.create({
       model: 'gpt-4-turbo-preview',
       messages: [{ role: 'user', content: prompt }],
       response_format: { type: 'json_object' },

@@ -20,10 +20,16 @@ import {
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+  }
+  return _supabase;
+}
 
 const SHOPIFY_SHOP_DOMAIN = process.env.SHOPIFY_SHOP_DOMAIN!;
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN!;
@@ -97,7 +103,7 @@ async function generateDailySocialContent(products: any[]): Promise<number> {
       const scheduledTime = getOptimalPostingTime(platform);
 
       // Save to database
-      await supabase.from('social_posts').insert({
+      await getSupabaseClient().from('social_posts').insert({
         platform: post.platform,
         content: post.content + '\n\n' + post.hashtags.map((h: string) => `#${h}`).join(' '),
         media_urls: post.mediaUrls,
@@ -231,7 +237,7 @@ async function processAbandonedCarts(): Promise<number> {
       );
 
       // Log the email (actual sending would integrate with SendGrid/Klaviyo)
-      await supabase.from('email_logs').insert({
+      await getSupabaseClient().from('email_logs').insert({
         sequence_id: 'cart_abandonment',
         recipient_email: checkout.email,
         subject,
@@ -284,7 +290,7 @@ async function processPostPurchase(): Promise<number> {
         'Your Store'
       );
 
-      await supabase.from('email_logs').insert({
+      await getSupabaseClient().from('email_logs').insert({
         sequence_id: 'post_purchase',
         recipient_email: order.email,
         subject,
@@ -382,7 +388,7 @@ async function updateAffiliateStats(): Promise<number> {
         const commission = orderTotal * (affiliate.commission_rate / 100);
 
         // Record the sale
-        await supabase.from('affiliate_sales').insert({
+        await getSupabaseClient().from('affiliate_sales').insert({
           affiliate_id: affiliate.id,
           order_id: order.id.toString(),
           order_total: orderTotal,

@@ -6,11 +6,16 @@
 import * as webpush from 'web-push';
 import { createClient } from '@supabase/supabase-js';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { autoRefreshToken: false, persistSession: false } }
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 // Configure VAPID (safe to call multiple times)
 let vapidConfigured = false;
@@ -98,7 +103,7 @@ async function sendToSubscriptions(
 
   // Cleanup expired subscriptions
   if (expired.length > 0) {
-    await supabase.from('push_subscriptions').delete().in('id', expired);
+    await getSupabaseClient().from('push_subscriptions').delete().in('id', expired);
   }
 
   console.log(`[pushNotify] sent=${sent}, failed=${failed}, cleaned=${expired.length}`);

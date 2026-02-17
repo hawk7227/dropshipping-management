@@ -12,10 +12,16 @@
 import { createClient } from '@supabase/supabase-js';
 import { PRICING_RULES, COMPETITOR_NAMES } from '@/lib/config/pricing-rules';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 // Shopify Admin API
 const SHOPIFY_SHOP = process.env.SHOPIFY_SHOP_DOMAIN || process.env.NEXT_PUBLIC_SHOPIFY_SHOP_DOMAIN;
@@ -194,7 +200,7 @@ export async function enforceGracePeriod(): Promise<{
                 .eq('id', product.id);
 
               // Create margin alert
-              await supabase.from('margin_alerts').insert({
+              await getSupabaseClient().from('margin_alerts').insert({
                 product_id: product.id,
                 alert_type: 'auto_pause',
                 alert_code: 'grace_period_expired',
@@ -369,7 +375,7 @@ export async function executePricingCycle(): Promise<PricingCycleResult> {
     }
 
     // 5. Record price history
-    await supabase.from('price_history').insert(
+    await getSupabaseClient().from('price_history').insert(
       (products as PricingProduct[])
         .filter(p => p.cost_price)
         .slice(0, 50) // Cap to avoid huge inserts

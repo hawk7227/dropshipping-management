@@ -12,11 +12,22 @@ import { getShopifyProducts } from '@/lib/shopify-admin';
 import { createClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let _openai: OpenAI | null = null;
+function getOpenAI(): OpenAI {
+  if (!_openai) {
+    _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  }
+  return _openai;
+}
 
-const supabase = process.env.SUPABASE_URL 
-  ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY!)
-  : null;
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!_supabase && url) {
+    _supabase = createClient(url, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+  }
+  return _supabase;
+}
 
 // Type for performance data
 interface PerformanceData {
@@ -32,7 +43,7 @@ interface PerformanceData {
 // Optimize product title with AI
 async function optimizeProductTitle(product: any, performance: PerformanceData): Promise<string> {
   try {
-    const response = await openai.chat.completions.create({
+    const response = await getOpenAI().chat.completions.create({
       model: 'gpt-4-turbo-preview',
       messages: [{
         role: 'user',
@@ -150,7 +161,7 @@ export async function GET(req: NextRequest) {
 
     // Log results
     if (supabase) {
-      await supabase.from('optimization_logs').insert({
+      await getSupabaseClient()?.from('optimization_logs').insert({
         timestamp: results.timestamp,
         products_analyzed: results.performance_fetched,
         underperforming: results.underperforming_found,

@@ -13,10 +13,16 @@
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 // Platform credentials
 const FB_PIXEL_ID = process.env.FB_PIXEL_ID || '';
@@ -258,7 +264,7 @@ export async function processPixelEvent(event: PixelEvent): Promise<PipelineResu
   };
 
   // Log to Supabase for audit
-  await supabase.from('pixel_events').insert({
+  await getSupabaseClient().from('pixel_events').insert({
     event_id: event.event_id,
     event_name: event.event_name,
     fb_sent: result.facebook.sent,

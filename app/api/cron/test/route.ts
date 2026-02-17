@@ -8,10 +8,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TYPES
@@ -541,7 +547,7 @@ async function testApiKeys(startTime: number): Promise<TestResult> {
   keys['supabase'] = { set: !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY), envVar: 'NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY' };
   try {
     const t0 = Date.now();
-    const { error } = await supabase.from('products').select('id').limit(1);
+    const { error } = await getSupabaseClient().from('products').select('id').limit(1);
     keys['supabase'].responseMs = Date.now() - t0;
     if (error) keys['supabase'].error = error.message;
   } catch (err) {

@@ -7,11 +7,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import * as webpush from 'web-push';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { autoRefreshToken: false, persistSession: false } }
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 // Configure VAPID (lazy init to avoid build errors)
 let vapidConfigured = false;
@@ -39,7 +44,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Get push subscriptions for the recipient
-    let query = supabase.from('push_subscriptions').select('*');
+    let query = getSupabaseClient().from('push_subscriptions').select('*');
 
     if (recipient_id) {
       query = query.eq('user_id', String(recipient_id));
@@ -103,7 +108,7 @@ export async function POST(request: NextRequest) {
 
     // Clean up expired subscriptions
     if (expiredSubscriptions.length > 0) {
-      await supabase.from('push_subscriptions').delete().in('id', expiredSubscriptions);
+      await getSupabaseClient().from('push_subscriptions').delete().in('id', expiredSubscriptions);
       console.log(`[PUSH] Cleaned up ${expiredSubscriptions.length} expired subscriptions`);
     }
 

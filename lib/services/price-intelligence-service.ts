@@ -3,10 +3,16 @@
 
 import { createClient } from '@supabase/supabase-js';
 
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+  }
+  return _supabase;
+}
 
 // ============================================================================
 // TYPES
@@ -404,7 +410,7 @@ export async function applyMarginRule(
 
   const competitorPrices = await getLatestCompetitorPrices(productId);
 
-  await supabase.from('price_history').insert({
+  await getSupabaseClient().from('price_history').insert({
     product_id: productId,
     our_price: newPrice,
     competitor_amazon: competitorPrices.amazon?.price,
@@ -531,7 +537,7 @@ export async function checkPriceAlerts(): Promise<PriceAlert[]> {
 export async function storeAlerts(alerts: PriceAlert[]): Promise<boolean> {
   if (alerts.length === 0) return true;
 
-  const { error } = await supabase.from('price_alerts').insert(alerts);
+  const { error } = await getSupabaseClient().from('price_alerts').insert(alerts);
 
   if (error) {
     console.error('Error storing alerts:', error);
@@ -637,7 +643,7 @@ export async function recordPriceHistory(productId: string): Promise<boolean> {
   // Get latest competitor prices
   const competitorPrices = await getLatestCompetitorPrices(productId);
 
-  const { error } = await supabase.from('price_history').insert({
+  const { error } = await getSupabaseClient().from('price_history').insert({
     product_id: productId,
     our_price: product.retail_price,
     competitor_amazon: competitorPrices.amazon?.price,

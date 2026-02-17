@@ -5,10 +5,16 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CRON JOB DEFINITIONS (from vercel.json)
@@ -54,7 +60,7 @@ export async function GET() {
     
     try {
       const dbStart = Date.now();
-      const { error } = await supabase.from('products').select('count').limit(1).single();
+      const { error } = await getSupabaseClient().from('products').select('count').limit(1).single();
       dbLatency = Date.now() - dbStart;
       dbConnected = !error || error.code === 'PGRST116';
     } catch {

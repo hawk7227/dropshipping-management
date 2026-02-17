@@ -32,7 +32,16 @@ export async function GET(request: NextRequest) {
         error: 'Missing Supabase credentials' 
       };
     } else {
-      const supabase = createClient(supabaseUrl, supabaseKey);
+      let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
       
       // Test query
       const { data, error } = await supabase
@@ -70,7 +79,7 @@ export async function GET(request: NextRequest) {
           diagnostics.database.insertError = insertError.message;
         } else {
           // Clean up test product
-          await supabase.from('products').delete().eq('id', testId);
+          await getSupabaseClient().from('products').delete().eq('id', testId);
           diagnostics.database.canInsert = true;
         }
       }
@@ -129,10 +138,16 @@ export async function GET(request: NextRequest) {
 
   // 4. Check products table schema
   try {
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     );
+  }
+  return _supabase;
+}
 
     // Check if critical columns exist by trying to select them
     const { error: schemaError } = await supabase

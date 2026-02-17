@@ -13,10 +13,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 const SHOPIFY_WEBHOOK_SECRET = process.env.SHOPIFY_WEBHOOK_SECRET || '';
 
@@ -105,7 +111,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Log the webhook
-    await supabase.from('webhook_logs').insert({
+    await getSupabaseClient().from('webhook_logs').insert({
       webhook_id: webhookId || `manual-${Date.now()}`,
       topic,
       shop_domain: shopDomain,
@@ -143,7 +149,7 @@ async function handleOrderCreate(payload: any) {
 
   try {
     // Insert order into unified_orders
-    await supabase.from('unified_orders').insert({
+    await getSupabaseClient().from('unified_orders').insert({
       shopify_order_id: orderId?.toString(),
       order_number: orderNumber?.toString(),
       total_price: totalPrice,
@@ -160,7 +166,7 @@ async function handleOrderCreate(payload: any) {
     // Update product demand scores
     for (const item of lineItems) {
       if (item.product_id) {
-        await supabase.rpc('increment_demand_score', {
+        await getSupabaseClient().rpc('increment_demand_score', {
           p_shopify_product_id: item.product_id.toString(),
           p_quantity: item.quantity || 1,
         }).catch(() => { /* RPC may not exist yet */ });
@@ -224,7 +230,7 @@ async function handleProductUpdate(payload: any) {
       if (status === 'archived') updateData.status = 'paused';
       if (status === 'draft') updateData.status = 'draft';
 
-      await supabase.from('products').update(updateData).eq('id', product.id);
+      await getSupabaseClient().from('products').update(updateData).eq('id', product.id);
     }
 
     return { success: true, message: `Product ${shopifyId} synced` };

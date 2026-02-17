@@ -17,11 +17,23 @@
 import OpenAI from 'openai';
 import { createClient } from '@supabase/supabase-js';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _openai: OpenAI | null = null;
+function getOpenAI(): OpenAI {
+  if (!_openai) {
+    _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  }
+  return _openai;
+}
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+  }
+  return _supabase;
+}
 
 // ============================================================================
 // TYPES
@@ -216,7 +228,7 @@ Return JSON:
 }`;
 
   try {
-    const response = await openai.chat.completions.create({
+    const response = await getOpenAI().chat.completions.create({
       model: 'gpt-4-turbo-preview',
       messages: [{ role: 'user', content: prompt }],
       response_format: { type: 'json_object' },
@@ -227,7 +239,7 @@ Return JSON:
     
     // Save discovered patterns
     for (const pattern of result.patterns || []) {
-      await supabase.from('winning_patterns').upsert({
+      await getSupabaseClient().from('winning_patterns').upsert({
         id: `${platform || 'all'}_${pattern.pattern_type}_${Date.now()}`,
         platform: platform || 'all',
         ...pattern,
@@ -409,7 +421,7 @@ Return JSON:
 }`;
 
   try {
-    const response = await openai.chat.completions.create({
+    const response = await getOpenAI().chat.completions.create({
       model: 'gpt-4-turbo-preview',
       messages: [{ role: 'user', content: prompt }],
       response_format: { type: 'json_object' },
@@ -554,7 +566,7 @@ Return JSON:
 }`;
 
   try {
-    const response = await openai.chat.completions.create({
+    const response = await getOpenAI().chat.completions.create({
       model: 'gpt-4-turbo-preview',
       messages: [{ role: 'user', content: prompt }],
       response_format: { type: 'json_object' },
@@ -656,7 +668,7 @@ export async function recordPerformance(
   metrics: PerformanceMetrics
 ): Promise<void> {
   // Save metrics
-  await supabase.from('post_performance').upsert({
+  await getSupabaseClient().from('post_performance').upsert({
     post_id: postId,
     ...metrics,
     recorded_at: new Date().toISOString(),
@@ -785,7 +797,7 @@ Return JSON:
   let tomorrowStrategy = '';
 
   try {
-    const response = await openai.chat.completions.create({
+    const response = await getOpenAI().chat.completions.create({
       model: 'gpt-4-turbo-preview',
       messages: [{ role: 'user', content: analysisPrompt }],
       response_format: { type: 'json_object' },
@@ -829,7 +841,7 @@ Return JSON:
   };
 
   // Save report
-  await supabase.from('daily_reports').upsert({
+  await getSupabaseClient().from('daily_reports').upsert({
     date: reportDate,
     ...report,
     created_at: new Date().toISOString(),

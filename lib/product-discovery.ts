@@ -10,10 +10,16 @@ const RAINFOREST_API_KEY = process.env.RAINFOREST_API_KEY!;
 const SHOPIFY_SHOP_DOMAIN = process.env.SHOPIFY_SHOP_DOMAIN!;
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN!;
 
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+  }
+  return _supabase;
+}
 
 // Discovery criteria
 const DISCOVERY_CONFIG = {
@@ -357,7 +363,7 @@ export async function discoverProducts(options?: {
 
         if (!meets) {
           // Log rejection
-          await supabase.from('rejection_log').insert({
+          await getSupabaseClient().from('rejection_log').insert({
             asin,
             reason: 'FAILED_DISCOVERY_CRITERIA',
             details: { reasons },
@@ -445,7 +451,7 @@ export async function discoverProducts(options?: {
 export async function importDiscoveredProduct(product: DiscoveredProduct, runId?: string) {
   // Upsert product record
   const productId = `prod_${product.asin}_${Date.now()}`;
-  const { data, error } = await supabase.from('products').upsert({
+  const { data, error } = await getSupabaseClient().from('products').upsert({
     id: productId,
     title: product.title,
     asin: product.asin,
@@ -463,7 +469,7 @@ export async function importDiscoveredProduct(product: DiscoveredProduct, runId?
   }, { onConflict: 'id' }).select().single();
 
   if (error) {
-    await supabase.from('rejection_log').insert({ asin: product.asin, reason: 'DB_UPSERT_FAILED', details: { error: error.message }, created_at: new Date().toISOString(), run_id: runId });
+    await getSupabaseClient().from('rejection_log').insert({ asin: product.asin, reason: 'DB_UPSERT_FAILED', details: { error: error.message }, created_at: new Date().toISOString(), run_id: runId });
     return null;
   }
 
@@ -473,7 +479,7 @@ export async function importDiscoveredProduct(product: DiscoveredProduct, runId?
   const demandScore = Math.round((100000 / (product.profitPercent + 1)) * 100) / 100; // simplistic score
   const demandTier = product.profitPercent >= 70 ? 'high' : (product.profitPercent >= 40 ? 'medium' : 'low');
 
-  await supabase.from('product_demand').upsert({
+  await getSupabaseClient().from('product_demand').upsert({
     product_id: pid,
     asin: product.asin,
     demand_tier: demandTier,
@@ -486,7 +492,7 @@ export async function importDiscoveredProduct(product: DiscoveredProduct, runId?
 
   // Associate to discovery_runs counts
   if (runId) {
-    await supabase.from('discovery_runs').update({ products_imported: (supabase.raw('products_imported + 1') as any) }).eq('id', runId);
+    await getSupabaseClient().from('discovery_runs').update({ products_imported: (supabase.raw('products_imported + 1') as any) }).eq('id', runId);
   }
 
   return pid;

@@ -3,7 +3,13 @@
 
 import OpenAI from 'openai';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let _openai: OpenAI | null = null;
+function getOpenAI(): OpenAI {
+  if (!_openai) {
+    _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  }
+  return _openai;
+}
 
 // SendGrid for email
 const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
@@ -54,7 +60,7 @@ Respond in JSON:
   "html": "full HTML email content..."
 }`;
 
-  const response = await openai.chat.completions.create({
+  const response = await getOpenAI().chat.completions.create({
     model: 'gpt-4-turbo-preview',
     messages: [{ role: 'user', content: prompt }],
     response_format: { type: 'json_object' },
@@ -145,7 +151,7 @@ Rules:
 
 Return only the message text, nothing else.`;
 
-  const response = await openai.chat.completions.create({
+  const response = await getOpenAI().chat.completions.create({
     model: 'gpt-4-turbo-preview',
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.7

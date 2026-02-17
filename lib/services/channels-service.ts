@@ -9,10 +9,16 @@ import type {
   OrderItem,
 } from '@/types/database';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 // =====================
 // SHOPIFY INTEGRATION
@@ -83,7 +89,7 @@ export async function syncProductToShopify(
     const shopifyId = result.product.id;
 
     // Update platform_listings
-    await supabase.from('platform_listings').upsert(
+    await getSupabaseClient().from('platform_listings').upsert(
       {
         product_id: productId,
         platform: 'shopify',
@@ -250,7 +256,7 @@ export async function getShopifyQueueStatus(
 export async function generateEbayExport(
   productIds?: string[]
 ): Promise<string> {
-  let query = supabase.from('products').select('*,variants(*)');
+  let query = getSupabaseClient().from('products').select('*,variants(*)');
 
   if (productIds && productIds.length > 0) {
     query = query.in('id', productIds);
@@ -424,7 +430,7 @@ export async function getUnifiedOrders(
     date_to?: string;
   }
 ): Promise<{ orders: UnifiedOrder[]; total: number }> {
-  let query = supabase.from('unified_orders').select('*', { count: 'exact' });
+  let query = getSupabaseClient().from('unified_orders').select('*', { count: 'exact' });
 
   if (filters?.channel) {
     query = query.eq('channel', filters.channel);
@@ -499,7 +505,7 @@ export async function getChannelsStatus(): Promise<
     }
   >
 > {
-  const { data: configs } = await supabase.from('channel_configs').select('*');
+  const { data: configs } = await getSupabaseClient().from('channel_configs').select('*');
 
   const channels: Record<string, any> = {
     shopify: { name: 'Shopify', configured: !!process.env.SHOPIFY_ACCESS_TOKEN },

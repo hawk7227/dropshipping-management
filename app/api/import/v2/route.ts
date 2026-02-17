@@ -10,10 +10,16 @@ import { enrichProductsWithKeepa, getTokenUsage } from '@/lib/services/keepa-enh
 // CONFIGURATION
 // ═══════════════════════════════════════════════════════════════════════════
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 const BATCH_SIZE = 50;
 const MAX_ITEMS_PER_IMPORT = 1000;
@@ -164,7 +170,7 @@ export async function POST(request: NextRequest) {
     const jobId = generateJobId();
     const now = new Date().toISOString();
     
-    await supabase.from('import_batches').insert({
+    await getSupabaseClient().from('import_batches').insert({
       id: jobId,
       job_type: mode,
       status: 'processing',

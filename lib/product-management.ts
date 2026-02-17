@@ -4,10 +4,16 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Product, Variant, ProductCost, ProductImport } from '@/types/database';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 const SHOPIFY_STORE = process.env.SHOPIFY_STORE_DOMAIN || '';
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ADMIN_ACCESS_TOKEN || '';
@@ -136,7 +142,7 @@ async function upsertProduct(shopifyProduct: any): Promise<void> {
   };
 
   // Upsert product
-  await supabase.from('products').upsert({
+  await getSupabaseClient().from('products').upsert({
     ...product,
     synced_at: new Date().toISOString(),
   });
@@ -160,7 +166,7 @@ async function upsertProduct(shopifyProduct: any): Promise<void> {
       taxable: v.taxable ?? true,
     }));
 
-    await supabase.from('variants').upsert(variants);
+    await getSupabaseClient().from('variants').upsert(variants);
   }
 }
 
@@ -375,7 +381,7 @@ export async function bulkImportProducts(
 
       // Record cost if provided
       if (productData.cost) {
-        await supabase.from('product_costs').insert({
+        await getSupabaseClient().from('product_costs').insert({
           product_id: shopifyProduct.product.id.toString(),
           variant_id: shopifyProduct.product.variants[0].id.toString(),
           supplier_cost: productData.cost,
@@ -533,7 +539,7 @@ export async function syncProductsFromShopify(
 
 // Get Single Product
 export async function getProduct(id: string): Promise<Product | null> {
-    const { data, error } = await supabase.from('products').select('*').eq('id', id).single();
+    const { data, error } = await getSupabaseClient().from('products').select('*').eq('id', id).single();
     if (error) return null;
     return data;
 }
@@ -544,7 +550,7 @@ export async function createProduct(data: any): Promise<Product> {
     if (!data.title) throw new Error("Title is required");
 
     // 1. Insert Product
-    const { data: product, error } = await supabase.from('products').insert({
+    const { data: product, error } = await getSupabaseClient().from('products').insert({
         id: crypto.randomUUID(),
         title: data.title,
         handle: data.handle || data.title.toLowerCase().replace(/\s+/g, '-'),
@@ -577,7 +583,7 @@ export async function createProduct(data: any): Promise<Product> {
             option2: v.option2,
             option3: v.option3
         }));
-        await supabase.from('variants').insert(variants);
+        await getSupabaseClient().from('variants').insert(variants);
     }
     return product;
 }
@@ -597,18 +603,18 @@ export async function updateProduct(id: string, updates: any): Promise<Product> 
 
 // Get Product Variants
 export async function getProductVariants(productId: string): Promise<Variant[]> {
-    const { data } = await supabase.from('variants').select('*').eq('product_id', productId);
+    const { data } = await getSupabaseClient().from('variants').select('*').eq('product_id', productId);
     return data || [];
 }
 
 // Update Inventory
 export async function updateInventory(variantId: string, quantity: number, reason?: string, reference?: string): Promise<void> {
     // Update variant record
-    const { error } = await supabase.from('variants').update({ inventory_quantity: quantity }).eq('id', variantId);
+    const { error } = await getSupabaseClient().from('variants').update({ inventory_quantity: quantity }).eq('id', variantId);
     if (error) throw error;
 
     // Log history (Assumes inventory_logs table exists)
-    await supabase.from('inventory_logs').insert({
+    await getSupabaseClient().from('inventory_logs').insert({
         variant_id: variantId,
         quantity_change: 0, // In a Set operation, change is implicit or needs calc. Simplified for CRUD.
         new_quantity: quantity,
@@ -621,7 +627,7 @@ export async function updateInventory(variantId: string, quantity: number, reaso
 // Get Inventory Logs
 export async function getInventoryLogs(productId: string, variantId?: string, limit: number = 50): Promise<any[]> {
     // Assumes join capability or simple select
-    let query = supabase.from('inventory_logs').select('*, variants!inner(product_id)').eq('variants.product_id', productId);
+    let query = getSupabaseClient().from('inventory_logs').select('*, variants!inner(product_id)').eq('variants.product_id', productId);
     if (variantId) query = query.eq('variant_id', variantId);
     
     const { data } = await query.limit(limit).order('created_at', { ascending: false });
@@ -630,8 +636,8 @@ export async function getInventoryLogs(productId: string, variantId?: string, li
 
 // Get Product Stats
 export async function getProductStats(): Promise<any> {
-    const { count: total } = await supabase.from('products').select('*', { count: 'exact', head: true });
-    const { count: active } = await supabase.from('products').select('*', { count: 'exact', head: true }).eq('status', 'active');
+    const { count: total } = await getSupabaseClient().from('products').select('*', { count: 'exact', head: true });
+    const { count: active } = await getSupabaseClient().from('products').select('*', { count: 'exact', head: true }).eq('status', 'active');
     
     return {
         total_products: total || 0,
@@ -643,7 +649,7 @@ export async function getProductStats(): Promise<any> {
 
 // Import Batch Management
 export async function createImportBatch(total: number, source: string): Promise<any> {
-    const { data, error } = await supabase.from('import_batches').insert({
+    const { data, error } = await getSupabaseClient().from('import_batches').insert({
         status: 'processing',
         total_rows: total,
         source: source,
@@ -655,11 +661,11 @@ export async function createImportBatch(total: number, source: string): Promise<
 }
 
 export async function updateImportBatch(id: string, updates: any): Promise<void> {
-    await supabase.from('import_batches').update(updates).eq('id', id);
+    await getSupabaseClient().from('import_batches').update(updates).eq('id', id);
 }
 
 export async function getImportBatches(): Promise<any[]> {
-    const { data } = await supabase.from('import_batches').select('*').order('created_at', { ascending: false }).limit(20);
+    const { data } = await getSupabaseClient().from('import_batches').select('*').order('created_at', { ascending: false }).limit(20);
     return data || [];
 }
 

@@ -20,10 +20,16 @@ import {
   getProductStats,
 } from '@/lib/product-management';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 // Enhanced product query with AI scores, sync status, and price freshness
 async function getProductsWithDetails({
@@ -746,7 +752,7 @@ export async function POST(request: NextRequest) {
                 const shopifyVariantId = shopifyData.product?.variants?.[0]?.id;
 
                 if (shopifyId) {
-                  await supabase.from('products').update({
+                  await getSupabaseClient().from('products').update({
                     shopify_product_id: String(shopifyId),
                     shopify_variant_id: shopifyVariantId ? String(shopifyVariantId) : null,
                     shopify_synced_at: new Date().toISOString(),

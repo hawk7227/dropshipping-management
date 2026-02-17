@@ -15,10 +15,16 @@ export interface DailyStat {
   visitors: number;
 }
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 // =====================================================
 // DAILY STATS SNAPSHOT
@@ -517,7 +523,7 @@ export async function recordChannelPerformance(
       itemsSold = metrics.items_sold || 0;
   }
 
-  await supabase.from('channel_performance').upsert({
+  await getSupabaseClient().from('channel_performance').upsert({
     date,
     channel,
     orders: orderCount,
@@ -639,7 +645,7 @@ export async function recordProductPerformance(
     ? (update.purchases / update.views) * 100 
     : 0;
 
-  await supabase.from('product_performance').upsert({
+  await getSupabaseClient().from('product_performance').upsert({
     ...update,
     conversion_rate: Math.round(conversionRate * 100) / 100,
   }, { onConflict: 'date,product_id' });

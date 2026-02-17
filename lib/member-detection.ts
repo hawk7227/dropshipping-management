@@ -12,10 +12,16 @@ import { createClient } from '@supabase/supabase-js';
 import { Database } from '../types/database';
 
 // Initialize Supabase client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-
-const supabase = createClient<Database>(supabaseUrl, supabaseServiceKey);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient<Database>(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+  }
+  return _supabase;
+}
 
 // ============================================================================
 // TYPE DEFINITIONS
@@ -570,4 +576,4 @@ function buildMembershipCheck(membership: Membership | null): MembershipCheck {
 }
 
 // Export supabase client for direct access if needed
-export { supabase };
+export { getSupabaseClient as supabase };

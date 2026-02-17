@@ -6,7 +6,13 @@ import OpenAI from 'openai';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let _openai: OpenAI | null = null;
+function getOpenAI(): OpenAI {
+  if (!_openai) {
+    _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  }
+  return _openai;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -17,7 +23,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Use AI to understand the command
-    const response = await openai.chat.completions.create({
+    const response = await getOpenAI().chat.completions.create({
       model: 'gpt-4-turbo-preview',
       messages: [
         {

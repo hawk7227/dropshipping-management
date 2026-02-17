@@ -12,10 +12,16 @@ const KEEPA_API_BASE = 'https://api.keepa.com';
 const KEEPA_EPOCH = new Date('2011-01-01T00:00:00Z').getTime();
 
 // Supabase client for caching
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 // Default cache durations (hours)
 const DEFAULT_CACHE = {
@@ -280,7 +286,7 @@ async function logTokenUsage(tokensUsed: number, requestType: string = 'product'
   try {
     const today = new Date().toISOString().split('T')[0];
     
-    await supabase.rpc('log_keepa_tokens', {
+    await getSupabaseClient().rpc('log_keepa_tokens', {
       p_tokens: tokensUsed,
       p_request_type: requestType,
     });

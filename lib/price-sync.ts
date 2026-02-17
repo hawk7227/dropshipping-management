@@ -3,10 +3,16 @@
 
 import { createClient } from '@supabase/supabase-js';
 
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+  }
+  return _supabase;
+}
 
 // ============================================================================
 // TYPES
@@ -56,7 +62,7 @@ interface MarginRule {
 // ============================================================================
 
 export async function getCompetitorPrices(productId?: string): Promise<CompetitorPrice[]> {
-  let query = supabase.from('competitor_prices').select('*');
+  let query = getSupabaseClient().from('competitor_prices').select('*');
   
   if (productId) {
     query = query.eq('product_id', productId);
@@ -340,7 +346,7 @@ export async function updateSyncJob(
 }
 
 export async function getLatestSyncJob(jobType?: string): Promise<SyncJob | null> {
-  let query = supabase.from('sync_jobs').select('*');
+  let query = getSupabaseClient().from('sync_jobs').select('*');
   
   if (jobType) {
     query = query.eq('job_type', jobType);
@@ -392,7 +398,7 @@ export async function getPriceStats(): Promise<{
 }
 
 export async function getMarginRules(category?: string): Promise<MarginRule[]> {
-  let query = supabase.from('margin_rules').select('*');
+  let query = getSupabaseClient().from('margin_rules').select('*');
   
   if (category) {
     query = query.eq('category', category);
@@ -505,7 +511,7 @@ export async function syncCompetitorPrices(options: {
   let idsToSync = productIds;
   if (products === 'all') {
     // Fetch all product IDs from database
-    const { data } = await supabase.from('products').select('id').limit(500);
+    const { data } = await getSupabaseClient().from('products').select('id').limit(500);
     idsToSync = (data || []).map(p => p.id);
   } else if (Array.isArray(products)) {
     idsToSync = products;

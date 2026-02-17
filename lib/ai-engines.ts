@@ -4,10 +4,16 @@
 import { createClient } from '@supabase/supabase-js';
 import type { AiContent, SeoMetadata, TrendData, ImageQueueItem } from '@/types/database';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const REMOVE_BG_API_KEY = process.env.REMOVE_BG_API_KEY || '';
@@ -48,7 +54,7 @@ async function callOpenAI(
   const tokensUsed = data.usage?.total_tokens || 0;
 
   // Save to database for tracking
-  await supabase.from('ai_content').insert({
+  await getSupabaseClient().from('ai_content').insert({
     type: 'api_call',
     input_data: { prompt: prompt.slice(0, 500) },
     output_text: content.slice(0, 1000),
@@ -328,7 +334,7 @@ export async function approveAIContent(contentId: string, approved: boolean): Pr
 
 // Corrected to match route: (no args)
 export async function getAIStats(): Promise<any> {
-  const { count } = await supabase.from('ai_content').select('*', { count: 'exact' });
+  const { count } = await getSupabaseClient().from('ai_content').select('*', { count: 'exact' });
   return {
     total_generated: count || 0,
     approval_rate: 85, 

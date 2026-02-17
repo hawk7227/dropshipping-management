@@ -215,14 +215,24 @@ export async function POST(request: NextRequest) {
 import { createClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || '',
-});
+let _openai: OpenAI | null = null;
+function getOpenAI(): OpenAI {
+  if (!_openai) {
+    _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  }
+  return _openai;
+}
 
 interface ParsedIntent {
   action: 'create' | 'update' | 'delete' | 'search' | 'analyze' | 'generate' | 'sync';
@@ -257,7 +267,7 @@ Examples:
 Return ONLY valid JSON, no other text.`;
 
   try {
-    const completion = await openai.chat.completions.create({
+    const completion = await getOpenAI().chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
         { role: 'system', content: systemPrompt },
@@ -288,7 +298,7 @@ Return ONLY valid JSON, no other text.`;
 
     if (intent.action !== 'create' && (intent.targets.includes('all') || Object.keys(intent.filters).length > 0)) {
       // Build query to count affected products
-      let query = supabase.from('products').select('id, title, price, status', { count: 'exact' });
+      let query = getSupabaseClient().from('products').select('id, title, price, status', { count: 'exact' });
       
       if (intent.filters.vendor) {
         query = query.eq('vendor', intent.filters.vendor);
@@ -385,7 +395,7 @@ async function executeProductCommand(
     switch (intent.action) {
       case 'search': {
         // Execute search
-        let query = supabase.from('products').select('*');
+        let query = getSupabaseClient().from('products').select('*');
         
         if (intent.filters.vendor) {
           query = query.eq('vendor', intent.filters.vendor);
@@ -416,7 +426,7 @@ async function executeProductCommand(
 
       case 'update': {
         // Build update query
-        let query = supabase.from('products').select('id, price');
+        let query = getSupabaseClient().from('products').select('id, price');
         
         if (intent.filters.vendor) {
           query = query.eq('vendor', intent.filters.vendor);
@@ -475,7 +485,7 @@ async function executeProductCommand(
           }
 
           if (Object.keys(updates).length > 0) {
-            await supabase.from('products').update(updates).eq('id', product.id);
+            await getSupabaseClient().from('products').update(updates).eq('id', product.id);
             updated++;
           }
         }
@@ -488,7 +498,7 @@ async function executeProductCommand(
       }
 
       case 'delete': {
-        let query = supabase.from('products').select('id');
+        let query = getSupabaseClient().from('products').select('id');
         
         if (intent.filters.inventory === 0) {
           query = query.eq('inventory_quantity', 0);
@@ -510,7 +520,7 @@ async function executeProductCommand(
         }
 
         const ids = products.map(p => p.id);
-        const { error } = await supabase.from('products').delete().in('id', ids);
+        const { error } = await getSupabaseClient().from('products').delete().in('id', ids);
         if (error) throw error;
 
         return {

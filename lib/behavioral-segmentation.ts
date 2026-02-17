@@ -15,10 +15,16 @@
 
 import { createClient } from '@supabase/supabase-js';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TYPES
@@ -246,12 +252,12 @@ export async function runSegmentation(): Promise<SegmentationResult> {
     // Store assignments in Supabase
     if (assignments.length > 0) {
       // Clear old assignments
-      await supabase.from('audience_segments').delete().gte('assigned_at', '2000-01-01');
+      await getSupabaseClient().from('audience_segments').delete().gte('assigned_at', '2000-01-01');
 
       // Batch insert in chunks of 100
       for (let i = 0; i < assignments.length; i += 100) {
         const batch = assignments.slice(i, i + 100);
-        const { error: insertErr } = await supabase.from('audience_segments').insert(batch);
+        const { error: insertErr } = await getSupabaseClient().from('audience_segments').insert(batch);
         if (insertErr) {
           result.errors.push(`Insert batch ${i}: ${insertErr.message}`);
         }

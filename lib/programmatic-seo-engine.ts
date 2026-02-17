@@ -15,10 +15,16 @@
 import { createClient } from '@supabase/supabase-js';
 import { analyzeKeywordClusters, generatePageContent, pushPageToShopify } from './landing-page-generator';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TYPES
@@ -94,7 +100,7 @@ export async function generateProductSEOMetadata(): Promise<{
           'Free shipping on all orders. Compare prices and save.',
         ].filter(Boolean).join('. ').slice(0, 160);
 
-        await supabase.from('seo_metadata').upsert({
+        await getSupabaseClient().from('seo_metadata').upsert({
           product_id: product.id,
           page_type: 'product',
           page_handle: `product-${(product.asin || product.id).toLowerCase()}`,
