@@ -53,6 +53,7 @@ export default function PushToShopifyPage() {
 
   // Filter
   const [filter, setFilter] = useState<'all' | 'not_pushed' | 'pushed'>('all');
+  const [forceCreate, setForceCreate] = useState(true); // Default ON since old IDs are stale
 
   // Load products
   useEffect(() => {
@@ -142,7 +143,7 @@ export default function PushToShopifyPage() {
         const res = await fetch('/api/shopify-push', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ productIds: batch }),
+          body: JSON.stringify({ productIds: batch, forceCreate }),
         });
 
         const json = await res.json();
@@ -256,6 +257,11 @@ export default function PushToShopifyPage() {
         </button>
 
         <div style={{ flex: 1 }} />
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#94a3b8', cursor: 'pointer' }}>
+          <input type="checkbox" checked={forceCreate} onChange={e => setForceCreate(e.target.checked)} />
+          Force create (ignore old Shopify IDs)
+        </label>
 
         {!pushing ? (
           <button

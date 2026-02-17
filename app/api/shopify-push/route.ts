@@ -63,9 +63,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Shopify not configured. Set SHOPIFY_STORE_DOMAIN and SHOPIFY_ADMIN_ACCESS_TOKEN.' }, { status: 400 });
     }
     const sb = getSupabase();
-    const { productIds } = await request.json();
+    const { productIds, forceCreate } = await request.json();
     if (!Array.isArray(productIds) || productIds.length === 0) {
       return NextResponse.json({ success: false, error: 'productIds[] required' }, { status: 400 });
+    }
+
+    // If forceCreate, clear all stale shopify IDs first
+    if (forceCreate) {
+      await sb.from('products').update({ shopify_product_id: null, shopify_variant_id: null }).in('id', productIds);
     }
 
     const API = '2024-01';
@@ -140,10 +145,18 @@ export async function POST(request: NextRequest) {
           res = await fetch(`${base}/products.json`, { method: 'POST', headers: hdr, body: JSON.stringify(payload) });
         }
 
+        // If 404, the old shopify_product_id is stale — retry as CREATE
+        if (!res.ok && res.status === 404 && p.shopify_product_id) {
+          console.log(`[ShopifyPush] 404 for ${p.title} — old Shopify ID ${p.shopify_product_id} is stale, creating new`);
+          // Clear stale ID in Supabase
+          await sb.from('products').update({ shopify_product_id: null, shopify_variant_id: null }).eq('id', p.id);
+          // Retry as CREATE
+          res = await fetch(`${base}/products.json`, { method: 'POST', headers: hdr, body: JSON.stringify(payload) });
+        }
+
         if (!res.ok) {
           const errText = await res.text();
           results.push({ id: p.id, title: p.title, success: false, error: `Shopify ${res.status}: ${errText.substring(0, 300)}` });
-          // Rate limit hit — back off
           if (res.status === 429) await new Promise(r => setTimeout(r, 5000));
           continue;
         }
