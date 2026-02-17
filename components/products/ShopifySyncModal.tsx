@@ -140,6 +140,7 @@ export function ShopifySyncModal({ isOpen, onClose, onConfirm, products, selecte
     console.log('[ShopifySyncModal] Starting Shopify sync for', syncCount, 'products');
     try {
       const productIds = syncProducts.map(p => p.id);
+      console.log('[ShopifySyncModal] Sending productIds:', productIds, 'count:', productIds.length);
       const res = await fetch('/api/products?action=sync-shopify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -149,7 +150,7 @@ export function ShopifySyncModal({ isOpen, onClose, onConfirm, products, selecte
         }),
       });
       const data = await res.json();
-      console.log('[ShopifySyncModal] Sync response:', data);
+      console.log('[ShopifySyncModal] Full response:', JSON.stringify(data));
       if (res.ok && data.success) {
         setSyncResult(data.data || { synced: 0, errors: [], message: 'Sync completed' });
         setPhase('success');
