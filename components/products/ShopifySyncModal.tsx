@@ -139,10 +139,14 @@ export function ShopifySyncModal({ isOpen, onClose, onConfirm, products, selecte
     setError(null);
     console.log('[ShopifySyncModal] Starting Shopify sync for', syncCount, 'products');
     try {
+      const productIds = syncProducts.map(p => p.id);
       const res = await fetch('/api/products?action=sync-shopify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fullSync: !selectedIds || selectedIds.size === 0 }),
+        body: JSON.stringify({ 
+          productIds,
+          fullSync: !selectedIds || selectedIds.size === 0 
+        }),
       });
       const data = await res.json();
       console.log('[ShopifySyncModal] Sync response:', data);
