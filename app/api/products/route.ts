@@ -702,6 +702,24 @@ export async function POST(request: NextRequest) {
                 const sData = await res.json();
                 const sId = sData.product?.id;
                 const svId = sData.product?.variants?.[0]?.id;
+                const invItemId = sData.product?.variants?.[0]?.inventory_item_id;
+
+                // Set inventory via Inventory Levels API
+                if (invItemId) {
+                  try {
+                    const locRes = await fetch(`${base}/locations.json`, { headers: hdr });
+                    if (locRes.ok) {
+                      const locData = await locRes.json();
+                      const locId = locData.locations?.[0]?.id;
+                      if (locId) {
+                        await fetch(`${base}/inventory_levels/set.json`, {
+                          method: 'POST', headers: hdr,
+                          body: JSON.stringify({ location_id: locId, inventory_item_id: invItemId, available: p.inventory_quantity ?? 999 }),
+                        });
+                      }
+                    }
+                  } catch (_) {}
+                }
 
                 if (sId) {
                   await sb.from('products').update({
