@@ -19,10 +19,16 @@ import {
 } from '@/lib/services/price-intelligence-service';
 import { createClient } from '@supabase/supabase-js';
 
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+  }
+  return _supabase;
+}
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -325,7 +331,7 @@ export async function GET(request: NextRequest) {
         const limit = parseInt(searchParams.get('limit') || '20');
         const severity = searchParams.get('severity');
 
-        let query = supabase
+        let query = getSupabaseClient()
           .from('price_alerts')
           .select('*')
           .is('resolved_at', null)
@@ -355,7 +361,7 @@ export async function GET(request: NextRequest) {
       // GET MARGIN RULES
       // ============================================================
       case 'margin-rules': {
-        const { data, error } = await supabase
+        const { data, error } = await getSupabaseClient()
           .from('margin_rules')
           .select('*')
           .eq('is_active', true)
@@ -382,7 +388,7 @@ export async function GET(request: NextRequest) {
         const offset = parseInt(searchParams.get('offset') || '0');
         const marginStatus = searchParams.get('marginStatus');
 
-        let query = supabase
+        let query = getSupabaseClient()
           .from('price_comparison')
           .select('*', { count: 'exact' })
           .order('last_updated', { ascending: false })
@@ -423,7 +429,7 @@ export async function GET(request: NextRequest) {
           );
         }
 
-        const { data, error } = await supabase
+        const { data, error } = await getSupabaseClient()
           .from('price_sync_jobs')
           .select('*')
           .eq('job_id', jobId)

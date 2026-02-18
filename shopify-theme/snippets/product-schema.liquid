@@ -1,0 +1,148 @@
+{% comment %}
+  product-schema.liquid — Spec Items 35, 40
+  JSON-LD Product structured data for Google rich results
+  
+  Usage: {% render 'product-schema', product: product %}
+  
+  Outputs:
+  - Product schema with price, availability, condition
+  - AggregateRating from metafields (rating + review count)
+  - AggregateOffer showing price range vs competitors
+  - Brand from vendor
+  - Image array
+  - SKU / GTIN from metafield
+  
+  Requires metafields:
+  - product.metafields.competitor.amazon_price
+  - product.metafields.competitor.costco_price
+  - product.metafields.competitor.ebay_price
+  - product.metafields.competitor.sams_price
+  - product.metafields.reviews.rating (number, 1-5)
+  - product.metafields.reviews.count (integer)
+  - product.metafields.custom.asin
+  - product.metafields.custom.upc
+{% endcomment %}
+
+{% assign our_price = product.price | divided_by: 100.0 %}
+{% assign compare_price = product.compare_at_price | divided_by: 100.0 %}
+{% assign rating = product.metafields.reviews.rating | default: 0 %}
+{% assign review_count = product.metafields.reviews.count | default: 0 %}
+{% assign amazon_price = product.metafields.competitor.amazon_price | default: 0 %}
+{% assign costco_price = product.metafields.competitor.costco_price | default: 0 %}
+{% assign ebay_price = product.metafields.competitor.ebay_price | default: 0 %}
+{% assign sams_price = product.metafields.competitor.sams_price | default: 0 %}
+{% assign asin = product.metafields.custom.asin %}
+{% assign upc = product.metafields.custom.upc %}
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Product",
+  "name": {{ product.title | json }},
+  "description": {{ product.description | strip_html | truncatewords: 100 | json }},
+  "url": "{{ shop.url }}{{ product.url }}",
+  {% if product.featured_image %}
+  "image": [
+    "{{ product.featured_image | image_url: width: 1200 }}"
+    {% for image in product.images offset: 1 limit: 4 %}
+    ,"{{ image | image_url: width: 1200 }}"
+    {% endfor %}
+  ],
+  {% endif %}
+  {% if product.vendor and product.vendor != blank %}
+  "brand": {
+    "@type": "Brand",
+    "name": {{ product.vendor | json }}
+  },
+  {% endif %}
+  {% if upc and upc != blank %}
+  "gtin": {{ upc | json }},
+  {% endif %}
+  {% if asin and asin != blank %}
+  "productID": {{ asin | json }},
+  "identifier_exists": "yes",
+  {% endif %}
+  "sku": {{ product.selected_or_first_available_variant.sku | default: product.id | json }},
+  "category": {{ product.type | default: "General" | json }},
+  {% if product.available %}
+  "availability": "https://schema.org/InStock",
+  {% else %}
+  "availability": "https://schema.org/OutOfStock",
+  {% endif %}
+  "itemCondition": "https://schema.org/NewCondition",
+  {% comment %} Offers — our price + competitor prices {% endcomment %}
+  "offers": {
+    "@type": "AggregateOffer",
+    "priceCurrency": "{{ shop.currency }}",
+    "lowPrice": "{{ our_price }}",
+    {% if compare_price > our_price %}
+    "highPrice": "{{ compare_price }}",
+    {% elsif amazon_price > our_price %}
+    "highPrice": "{{ amazon_price }}",
+    {% else %}
+    "highPrice": "{{ our_price }}",
+    {% endif %}
+    "offerCount": {% if amazon_price > 0 %}5{% else %}1{% endif %},
+    "offers": [
+      {
+        "@type": "Offer",
+        "name": "{{ shop.name }}",
+        "url": "{{ shop.url }}{{ product.url }}",
+        "price": "{{ our_price }}",
+        "priceCurrency": "{{ shop.currency }}",
+        "availability": "{% if product.available %}https://schema.org/InStock{% else %}https://schema.org/OutOfStock{% endif %}",
+        "seller": {
+          "@type": "Organization",
+          "name": {{ shop.name | json }}
+        }
+      }
+      {% if amazon_price > 0 %}
+      ,{
+        "@type": "Offer",
+        "name": "Amazon",
+        "price": "{{ amazon_price }}",
+        "priceCurrency": "{{ shop.currency }}",
+        "availability": "https://schema.org/InStock"
+      }
+      {% endif %}
+      {% if costco_price > 0 %}
+      ,{
+        "@type": "Offer",
+        "name": "Costco",
+        "price": "{{ costco_price }}",
+        "priceCurrency": "{{ shop.currency }}",
+        "availability": "https://schema.org/InStock"
+      }
+      {% endif %}
+      {% if ebay_price > 0 %}
+      ,{
+        "@type": "Offer",
+        "name": "eBay",
+        "price": "{{ ebay_price }}",
+        "priceCurrency": "{{ shop.currency }}",
+        "availability": "https://schema.org/InStock"
+      }
+      {% endif %}
+      {% if sams_price > 0 %}
+      ,{
+        "@type": "Offer",
+        "name": "Sam's Club",
+        "price": "{{ sams_price }}",
+        "priceCurrency": "{{ shop.currency }}",
+        "availability": "https://schema.org/InStock"
+      }
+      {% endif %}
+    ]
+  }
+  {% comment %} Aggregate Rating {% endcomment %}
+  {% if rating > 0 and review_count > 0 %}
+  ,"aggregateRating": {
+    "@type": "AggregateRating",
+    "ratingValue": "{{ rating }}",
+    "bestRating": "5",
+    "worstRating": "1",
+    "reviewCount": "{{ review_count }}"
+  }
+  {% endif %}
+}
+</script>

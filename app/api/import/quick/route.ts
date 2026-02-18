@@ -34,7 +34,16 @@ export async function POST(request: NextRequest) {
       }, { status: 500 });
     }
 
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
     
     const results = [];
     const errors = [];
@@ -49,7 +58,7 @@ export async function POST(request: NextRequest) {
 
       try {
         // Check if exists
-        const { data: existing } = await supabase
+        const { data: existing } = await getSupabaseClient()
           .from('products')
           .select('id')
           .eq('asin', asin)
@@ -98,7 +107,7 @@ export async function POST(request: NextRequest) {
         const productId = crypto.randomUUID();
 
         // Insert product
-        const { error: insertError } = await supabase
+        const { error: insertError } = await getSupabaseClient()
           .from('products')
           .insert({
             id: productId,

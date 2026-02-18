@@ -4,10 +4,16 @@
 import { createClient } from '@supabase/supabase-js';
 import type { AiContent, SeoMetadata, TrendData, ImageQueueItem } from '@/types/database';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const REMOVE_BG_API_KEY = process.env.REMOVE_BG_API_KEY || '';
@@ -48,7 +54,7 @@ async function callOpenAI(
   const tokensUsed = data.usage?.total_tokens || 0;
 
   // Save to database for tracking
-  await supabase.from('ai_content').insert({
+  await getSupabaseClient().from('ai_content').insert({
     type: 'api_call',
     input_data: { prompt: prompt.slice(0, 500) },
     output_text: content.slice(0, 1000),
@@ -180,7 +186,7 @@ Provide JSON output:
 // Corrected to match route: (productId)
 export async function analyzeProductSEO(productId: string): Promise<any> {
   // 1. Fetch product from DB
-  const { data: product } = await supabase
+  const { data: product } = await getSupabaseClient()
     .from('products')
     .select('title, description')
     .eq('id', productId)
@@ -231,7 +237,7 @@ export async function getRecentTrends(days: number = 7, limit: number = 20): Pro
   const since = new Date();
   since.setDate(since.getDate() - days);
 
-  const { data } = await supabase
+  const { data } = await getSupabaseClient()
     .from('trend_data')
     .select('*')
     .gte('recorded_at', since.toISOString())
@@ -272,7 +278,7 @@ export async function queueImageProcessing(
   processingType: 'enhance' | 'background_remove' | 'resize' | 'compress',
   options: { productId?: string; settings?: Record<string, unknown> } = {}
 ): Promise<ImageQueueItem> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('image_queue')
     .insert({
       product_id: options.productId || null,
@@ -299,7 +305,7 @@ export async function getAIContent(
   type?: string, 
   status?: string
 ): Promise<{ data: AiContent[], count: number }> {
-  let query = supabase
+  let query = getSupabaseClient()
     .from('ai_content')
     .select('*', { count: 'exact' })
     .order('created_at', { ascending: false })
@@ -315,7 +321,7 @@ export async function getAIContent(
 // Corrected to match route: (contentId, approved)
 export async function approveAIContent(contentId: string, approved: boolean): Promise<any> {
   const status = approved ? 'approved' : 'rejected';
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('ai_content')
     .update({ status })
     .eq('id', contentId)
@@ -328,7 +334,7 @@ export async function approveAIContent(contentId: string, approved: boolean): Pr
 
 // Corrected to match route: (no args)
 export async function getAIStats(): Promise<any> {
-  const { count } = await supabase.from('ai_content').select('*', { count: 'exact' });
+  const { count } = await getSupabaseClient().from('ai_content').select('*', { count: 'exact' });
   return {
     total_generated: count || 0,
     approval_rate: 85, 

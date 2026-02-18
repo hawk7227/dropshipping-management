@@ -4,10 +4,16 @@
 import { createClient } from '@supabase/supabase-js';
 import type { ChannelConfig, ChannelListing, UnifiedOrder, OrderRoutingRule } from '@/types/database';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 // Channel credentials
 const EBAY_AUTH_TOKEN = process.env.EBAY_AUTH_TOKEN || '';
@@ -26,7 +32,7 @@ const EBAY_API_BASE = EBAY_SANDBOX
 
 // ✅ ADDED: Get Channels List
 export async function getChannels(): Promise<ChannelConfig[]> {
-  const { data, error } = await supabase.from('channel_configs').select('*');
+  const { data, error } = await getSupabaseClient().from('channel_configs').select('*');
   if (error) {
      // Return default structure if table empty or error
      return [
@@ -40,7 +46,7 @@ export async function getChannels(): Promise<ChannelConfig[]> {
 
 // ✅ ADDED: Update Channel Config
 export async function updateChannel(channelId: string, updates: any): Promise<ChannelConfig> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('channel_configs')
     .upsert({ channel: channelId, ...updates }, { onConflict: 'channel' })
     .select()
@@ -52,7 +58,7 @@ export async function updateChannel(channelId: string, updates: any): Promise<Ch
 
 // Get channel status
 export async function getChannelStatus(channelId?: string): Promise<any> {
-  const { data } = await supabase.from('channel_configs').select('*');
+  const { data } = await getSupabaseClient().from('channel_configs').select('*');
   const configs = data || [];
   
   const status = {
@@ -148,7 +154,7 @@ async function createEbayListingInternal(product: {
 
 // ✅ UPDATED: Wrapper to match route call (productId, config)
 export async function createEbayListing(productId: string, listingConfig: any): Promise<any> {
-    const { data: product } = await supabase.from('products').select('*').eq('id', productId).single();
+    const { data: product } = await getSupabaseClient().from('products').select('*').eq('id', productId).single();
     if (!product) throw new Error("Product not found");
 
     const result = await createEbayListingInternal({
@@ -162,7 +168,7 @@ export async function createEbayListing(productId: string, listingConfig: any): 
     });
 
     // Record in DB
-    await supabase.from('channel_listings').upsert({
+    await getSupabaseClient().from('channel_listings').upsert({
         product_id: productId,
         channel: 'ebay',
         channel_listing_id: result.listingId,
@@ -253,7 +259,7 @@ async function createTikTokProductInternal(product: {
 
 // ✅ ADDED: Wrapper for TikTok Listing
 export async function createTikTokListing(productId: string, listingConfig: any): Promise<any> {
-    const { data: product } = await supabase.from('products').select('*').eq('id', productId).single();
+    const { data: product } = await getSupabaseClient().from('products').select('*').eq('id', productId).single();
     if (!product) throw new Error("Product not found");
 
     const result = await createTikTokProductInternal({
@@ -265,7 +271,7 @@ export async function createTikTokListing(productId: string, listingConfig: any)
         stock: listingConfig.quantity || product.inventory_quantity || 1,
     });
 
-    await supabase.from('channel_listings').upsert({
+    await getSupabaseClient().from('channel_listings').upsert({
         product_id: productId,
         channel: 'tiktok',
         channel_listing_id: result.productId,
@@ -305,7 +311,7 @@ function mapTikTokOrder(o: any): UnifiedOrder {
 // =====================
 
 export async function generateGoogleFeed(): Promise<string> {
-  const { data: products } = await supabase.from('products').select('*');
+  const { data: products } = await getSupabaseClient().from('products').select('*');
   if(!products) return "";
 
   const storeUrl = process.env.NEXT_PUBLIC_STORE_URL || 'https://example.com';
@@ -355,7 +361,7 @@ export async function getChannelOrders(
     const start = (page - 1) * pageSize;
     const end = start + pageSize - 1;
 
-    let query = supabase
+    let query = getSupabaseClient()
         .from('unified_orders')
         .select('*', { count: 'exact' })
         .order('created_at', { ascending: false })
@@ -386,7 +392,7 @@ export async function getChannelListings(
     const start = (page - 1) * pageSize;
     const end = start + pageSize - 1;
 
-    let query = supabase
+    let query = getSupabaseClient()
         .from('channel_listings')
         .select('*', { count: 'exact' })
         .range(start, end);
@@ -402,7 +408,7 @@ export async function getChannelListings(
 
 // ✅ ADDED: Update Order Fulfillment
 export async function updateOrderFulfillment(orderId: string, fulfillment: any): Promise<any> {
-    const { data, error } = await supabase
+    const { data, error } = await getSupabaseClient()
         .from('unified_orders')
         .update({
             status: 'shipped',
@@ -420,7 +426,7 @@ export async function updateOrderFulfillment(orderId: string, fulfillment: any):
 
 // ✅ ADDED: Sync Listing Inventory
 export async function syncListingInventory(productId: string, channelId: string): Promise<any> {
-    const { data: product } = await supabase.from('products').select('price, inventory_quantity').eq('id', productId).single();
+    const { data: product } = await getSupabaseClient().from('products').select('price, inventory_quantity').eq('id', productId).single();
     
     if (!product) throw new Error("Product not found");
 
@@ -428,7 +434,7 @@ export async function syncListingInventory(productId: string, channelId: string)
     // For now, we mock the success response or call the internal create methods if needed
     // In production, this would call specific updateInventory endpoints on eBay/TikTok
     
-    await supabase.from('channel_listings').update({
+    await getSupabaseClient().from('channel_listings').update({
         price: product.price,
         quantity: product.inventory_quantity,
         last_synced_at: new Date().toISOString()
@@ -452,7 +458,7 @@ export async function syncAllChannelOrders(): Promise<{ synced: number; errors: 
 // =====================
 
 export async function updateChannelConfig(channel: string, updates: Partial<ChannelConfig>): Promise<void> {
-  await supabase
+  await getSupabaseClient()
     .from('channel_configs')
     .upsert({ channel, ...updates }, { onConflict: 'channel' });
 }

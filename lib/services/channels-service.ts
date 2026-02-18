@@ -9,10 +9,16 @@ import type {
   OrderItem,
 } from '@/types/database';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 // =====================
 // SHOPIFY INTEGRATION
@@ -83,7 +89,7 @@ export async function syncProductToShopify(
     const shopifyId = result.product.id;
 
     // Update platform_listings
-    await supabase.from('platform_listings').upsert(
+    await getSupabaseClient().from('platform_listings').upsert(
       {
         product_id: productId,
         platform: 'shopify',
@@ -185,7 +191,7 @@ function convertShopifyOrder(shopifyOrder: any): UnifiedOrder {
 export async function createShopifyQueueJob(
   productIds: string[]
 ): Promise<{ job_id: string; status: string }> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('shopify_queue')
     .insert({
       product_ids: productIds,
@@ -210,7 +216,7 @@ export async function getShopifyQueueStatus(
   status: string;
   estimated_remaining_seconds: number;
 }> {
-  const { data } = await supabase
+  const { data } = await getSupabaseClient()
     .from('shopify_queue')
     .select('*')
     .eq('id', jobId)
@@ -250,7 +256,7 @@ export async function getShopifyQueueStatus(
 export async function generateEbayExport(
   productIds?: string[]
 ): Promise<string> {
-  let query = supabase.from('products').select('*,variants(*)');
+  let query = getSupabaseClient().from('products').select('*,variants(*)');
 
   if (productIds && productIds.length > 0) {
     query = query.in('id', productIds);
@@ -395,7 +401,7 @@ export async function syncChannelOrders(): Promise<{
 
     // Save to unified_orders table
     if (shopifyOrders.length > 0) {
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('unified_orders')
         .upsert(shopifyOrders, {
           onConflict: 'channel,channel_order_id',
@@ -424,7 +430,7 @@ export async function getUnifiedOrders(
     date_to?: string;
   }
 ): Promise<{ orders: UnifiedOrder[]; total: number }> {
-  let query = supabase.from('unified_orders').select('*', { count: 'exact' });
+  let query = getSupabaseClient().from('unified_orders').select('*', { count: 'exact' });
 
   if (filters?.channel) {
     query = query.eq('channel', filters.channel);
@@ -461,7 +467,7 @@ export async function getChannelListings(
     status?: string;
   }
 ): Promise<{ listings: ChannelListing[]; total: number }> {
-  let query = supabase
+  let query = getSupabaseClient()
     .from('platform_listings')
     .select('*,products(title,images)', { count: 'exact' });
 
@@ -499,7 +505,7 @@ export async function getChannelsStatus(): Promise<
     }
   >
 > {
-  const { data: configs } = await supabase.from('channel_configs').select('*');
+  const { data: configs } = await getSupabaseClient().from('channel_configs').select('*');
 
   const channels: Record<string, any> = {
     shopify: { name: 'Shopify', configured: !!process.env.SHOPIFY_ACCESS_TOKEN },
@@ -516,7 +522,7 @@ export async function getChannelsStatus(): Promise<
     channels[channel].active = config?.is_enabled || false;
     channels[channel].last_sync = config?.last_sync_at;
 
-    const { count } = await supabase
+    const { count } = await getSupabaseClient()
       .from('platform_listings')
       .select('*', { count: 'exact', head: true })
       .eq('platform', channel);
@@ -524,7 +530,7 @@ export async function getChannelsStatus(): Promise<
     channels[channel].listings_count = count || 0;
 
     // Get monthly revenue from orders
-    const { data: orders } = await supabase
+    const { data: orders } = await getSupabaseClient()
       .from('unified_orders')
       .select('total')
       .eq('channel', channel)

@@ -34,10 +34,16 @@ import type { KeepaProductData } from '@/types';
 // CONFIGURATION
 // ═══════════════════════════════════════════════════════════════════════════
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 const SHOPIFY_SHOP_DOMAIN = process.env.SHOPIFY_SHOP_DOMAIN;
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
@@ -214,7 +220,7 @@ function meetsDemandCriteria(
  */
 async function checkDuplicate(asin: string): Promise<boolean> {
   // Check products table
-  const { data: existingProduct } = await supabase
+  const { data: existingProduct } = await getSupabaseClient()
     .from('products')
     .select('id')
     .eq('asin', asin)
@@ -226,7 +232,7 @@ async function checkDuplicate(asin: string): Promise<boolean> {
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
   
-  const { data: recentRejection } = await supabase
+  const { data: recentRejection } = await getSupabaseClient()
     .from('rejection_log')
     .select('id')
     .eq('asin', asin)
@@ -611,7 +617,7 @@ export async function runP1Discovery(options?: {
           );
 
           // Save competitor prices to price_history
-          await supabase.from('price_history').insert({
+          await getSupabaseClient().from('price_history').insert({
             product_id: persistResult.id,
             source: 'keepa_discovery',
             price: product.amazonPrice,
@@ -619,7 +625,7 @@ export async function runP1Discovery(options?: {
           });
 
           // Update product with pricing data
-          await supabase.from('products').update({
+          await getSupabaseClient().from('products').update({
             amazon_price: product.amazonPrice,
             retail_price: product.yourPrice,
             compare_at_price: product.compareAtPrice,
@@ -635,7 +641,7 @@ export async function runP1Discovery(options?: {
           
           if (shopifyResult.success) {
             // Update product with Shopify ID
-            await supabase.from('products').update({
+            await getSupabaseClient().from('products').update({
               shopify_product_id: shopifyResult.shopifyId,
               synced_at: new Date().toISOString(),
             }).eq('id', persistResult.id);
@@ -755,7 +761,7 @@ async function generateMasterBackup(
     const csvContent = [csvHeaders, ...csvRows].join('\n');
 
     // Store backup metadata in discovery_runs
-    await supabase
+    await getSupabaseClient()
       .from('discovery_runs')
       .update({
         backup_json: exportData,
@@ -790,7 +796,7 @@ export async function exportDiscoveryResults(runDate: string): Promise<{
   error?: string;
 }> {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await getSupabaseClient()
       .from('discovery_runs')
       .select('backup_json, backup_csv')
       .eq('run_date', runDate)

@@ -17,11 +17,23 @@
 import OpenAI from 'openai';
 import { createClient } from '@supabase/supabase-js';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _openai: OpenAI | null = null;
+function getOpenAI(): OpenAI {
+  if (!_openai) {
+    _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  }
+  return _openai;
+}
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+  }
+  return _supabase;
+}
 
 // ============================================================================
 // TYPES
@@ -120,7 +132,7 @@ interface DailyReport {
  * Get or create brand style guide
  */
 export async function getBrandStyleGuide(): Promise<BrandStyleGuide> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('brand_style_guide')
     .select('*')
     .limit(1)
@@ -150,7 +162,7 @@ export async function getBrandStyleGuide(): Promise<BrandStyleGuide> {
  * Update brand style guide
  */
 export async function updateBrandStyleGuide(guide: Partial<BrandStyleGuide>): Promise<void> {
-  await supabase
+  await getSupabaseClient()
     .from('brand_style_guide')
     .upsert({ id: 'default', ...guide, updated_at: new Date().toISOString() });
 }
@@ -164,7 +176,7 @@ export async function updateBrandStyleGuide(guide: Partial<BrandStyleGuide>): Pr
  */
 export async function analyzeWinningPatterns(platform?: string): Promise<WinningPattern[]> {
   // Get posts with performance data
-  let query = supabase
+  let query = getSupabaseClient()
     .from('social_posts')
     .select('*, post_performance(*)')
     .eq('status', 'published')
@@ -216,7 +228,7 @@ Return JSON:
 }`;
 
   try {
-    const response = await openai.chat.completions.create({
+    const response = await getOpenAI().chat.completions.create({
       model: 'gpt-4-turbo-preview',
       messages: [{ role: 'user', content: prompt }],
       response_format: { type: 'json_object' },
@@ -227,7 +239,7 @@ Return JSON:
     
     // Save discovered patterns
     for (const pattern of result.patterns || []) {
-      await supabase.from('winning_patterns').upsert({
+      await getSupabaseClient().from('winning_patterns').upsert({
         id: `${platform || 'all'}_${pattern.pattern_type}_${Date.now()}`,
         platform: platform || 'all',
         ...pattern,
@@ -304,7 +316,7 @@ function getDefaultPatterns(): WinningPattern[] {
  * Get winning patterns for a platform
  */
 export async function getWinningPatterns(platform: string): Promise<WinningPattern[]> {
-  const { data } = await supabase
+  const { data } = await getSupabaseClient()
     .from('winning_patterns')
     .select('*')
     .or(`platform.eq.${platform},platform.eq.all`)
@@ -409,7 +421,7 @@ Return JSON:
 }`;
 
   try {
-    const response = await openai.chat.completions.create({
+    const response = await getOpenAI().chat.completions.create({
       model: 'gpt-4-turbo-preview',
       messages: [{ role: 'user', content: prompt }],
       response_format: { type: 'json_object' },
@@ -554,7 +566,7 @@ Return JSON:
 }`;
 
   try {
-    const response = await openai.chat.completions.create({
+    const response = await getOpenAI().chat.completions.create({
       model: 'gpt-4-turbo-preview',
       messages: [{ role: 'user', content: prompt }],
       response_format: { type: 'json_object' },
@@ -590,7 +602,7 @@ function predictEngagement(content: any, patterns: WinningPattern[]): number {
 // ============================================================================
 
 async function getContentTemplates(platform: string, contentType?: string): Promise<ContentTemplate[]> {
-  let query = supabase
+  let query = getSupabaseClient()
     .from('content_templates')
     .select('*')
     .eq('platform', platform);
@@ -656,14 +668,14 @@ export async function recordPerformance(
   metrics: PerformanceMetrics
 ): Promise<void> {
   // Save metrics
-  await supabase.from('post_performance').upsert({
+  await getSupabaseClient().from('post_performance').upsert({
     post_id: postId,
     ...metrics,
     recorded_at: new Date().toISOString(),
   });
 
   // Update the post's engagement
-  await supabase
+  await getSupabaseClient()
     .from('social_posts')
     .update({
       engagement: {
@@ -683,7 +695,7 @@ export async function recordPerformance(
  * Trigger the learning process
  */
 async function triggerLearning(): Promise<void> {
-  const { count } = await supabase
+  const { count } = await getSupabaseClient()
     .from('social_posts')
     .select('id', { count: 'exact' })
     .eq('status', 'published')
@@ -709,7 +721,7 @@ export async function generateDailyReport(date?: string): Promise<DailyReport> {
   const endOfDay = `${reportDate}T23:59:59Z`;
 
   // Get today's posts
-  const { data: todaysPosts } = await supabase
+  const { data: todaysPosts } = await getSupabaseClient()
     .from('social_posts')
     .select('*, post_performance(*)')
     .gte('created_at', startOfDay)
@@ -785,7 +797,7 @@ Return JSON:
   let tomorrowStrategy = '';
 
   try {
-    const response = await openai.chat.completions.create({
+    const response = await getOpenAI().chat.completions.create({
       model: 'gpt-4-turbo-preview',
       messages: [{ role: 'user', content: analysisPrompt }],
       response_format: { type: 'json_object' },
@@ -829,7 +841,7 @@ Return JSON:
   };
 
   // Save report
-  await supabase.from('daily_reports').upsert({
+  await getSupabaseClient().from('daily_reports').upsert({
     date: reportDate,
     ...report,
     created_at: new Date().toISOString(),
@@ -846,7 +858,7 @@ export async function generateWeeklySummary(): Promise<any> {
   const today = new Date();
   const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
 
-  const { data: reports } = await supabase
+  const { data: reports } = await getSupabaseClient()
     .from('daily_reports')
     .select('*')
     .gte('date', weekAgo.toISOString().split('T')[0])

@@ -1,0 +1,459 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   PRODUCTS DARK COMMAND CENTER THEME
+   ═══════════════════════════════════════════════════════════════════════════
+   
+   This file overrides Tailwind's light-mode utility classes inside the 
+   .products-dark wrapper so the entire Products page renders with the 
+   dark command-center aesthetic from Products-v3.html.
+
+   ZERO changes to page.tsx — pure CSS specificity overrides.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@import url('https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+
+/* ── CSS Variables (matching v3 HTML palette) ───────────────────────────── */
+.products-dark {
+  --bg:      #0a0a0f;
+  --bg2:     #12121a;
+  --bg3:     #1a1a24;
+  --border:  #1e1e2a;
+  --border2: #2a2a38;
+  --text:    #e4e4e7;
+  --muted:   #71717a;
+  --dim:     #52525b;
+  --cyan:    #22d3ee;
+  --green:   #22c55e;
+  --red:     #ef4444;
+  --yellow:  #eab308;
+  --orange:  #f97316;
+  --purple:  #a855f7;
+  --blue:    #3b82f6;
+  --shopify: #96bf48;
+
+  background: var(--bg) !important;
+  color: var(--text) !important;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  min-height: 100vh;
+}
+
+/* ── Selection & Scrollbar ──────────────────────────────────────────────── */
+.products-dark ::selection { background: rgba(34, 211, 238, 0.2); }
+.products-dark ::-webkit-scrollbar { width: 6px; height: 6px; }
+.products-dark ::-webkit-scrollbar-track { background: var(--bg); }
+.products-dark ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   GLOBAL TEXT COLOR OVERRIDES
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.products-dark .text-gray-900,
+.products-dark .text-gray-800 { color: var(--text) !important; }
+
+.products-dark .text-gray-700 { color: #a1a1aa !important; }
+
+.products-dark .text-gray-600 { color: var(--muted) !important; }
+
+.products-dark .text-gray-500 { color: var(--muted) !important; }
+
+.products-dark .text-gray-400 { color: var(--dim) !important; }
+
+.products-dark .text-gray-300 { color: var(--dim) !important; }
+
+/* Accent text colors — keep vibrant */
+.products-dark .text-blue-600 { color: var(--cyan) !important; }
+.products-dark .text-blue-700 { color: var(--cyan) !important; }
+.products-dark .text-blue-400 { color: var(--cyan) !important; }
+.products-dark .text-green-700 { color: var(--green) !important; }
+.products-dark .text-purple-700 { color: var(--purple) !important; }
+.products-dark .text-red-500 { color: var(--red) !important; }
+.products-dark .text-red-600 { color: var(--red) !important; }
+.products-dark .text-red-700 { color: var(--red) !important; }
+.products-dark .text-indigo-700 { color: var(--cyan) !important; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   GLOBAL BACKGROUND OVERRIDES
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.products-dark .bg-white { background-color: var(--bg2) !important; }
+.products-dark .bg-gray-50 { background-color: var(--bg3) !important; }
+.products-dark .bg-gray-100 { background-color: var(--bg3) !important; }
+.products-dark .bg-gray-200 { background-color: var(--border) !important; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   GLOBAL BORDER OVERRIDES
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.products-dark .border-gray-200,
+.products-dark .border-gray-300 { border-color: var(--border) !important; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   HOVER STATE OVERRIDES
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.products-dark .hover\:bg-gray-50:hover { background-color: var(--bg3) !important; }
+.products-dark .hover\:bg-gray-200:hover { background-color: var(--border2) !important; }
+.products-dark .hover\:bg-blue-700:hover { background-color: #0891b2 !important; }
+.products-dark .hover\:bg-green-100:hover { background-color: rgba(34, 197, 94, 0.15) !important; }
+.products-dark .hover\:bg-purple-100:hover { background-color: rgba(168, 85, 247, 0.15) !important; }
+.products-dark .hover\:text-gray-600:hover { color: var(--text) !important; }
+.products-dark .hover\:text-gray-700:hover { color: var(--text) !important; }
+.products-dark .hover\:text-blue-700:hover { color: var(--cyan) !important; }
+.products-dark .hover\:text-red-700:hover { color: var(--red) !important; }
+.products-dark .hover\:shadow-md:hover { box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3) !important; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   FOCUS STATE OVERRIDES
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.products-dark .focus\:ring-blue-500:focus { --tw-ring-color: var(--cyan) !important; }
+.products-dark .focus\:border-blue-500:focus { border-color: var(--cyan) !important; }
+.products-dark .focus\:ring-offset-2:focus { --tw-ring-offset-color: var(--bg) !important; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   INPUT / SEARCH OVERRIDES
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.products-dark input[type="text"],
+.products-dark input[type="number"],
+.products-dark input[type="search"],
+.products-dark select,
+.products-dark textarea {
+  background-color: var(--bg) !important;
+  border-color: var(--border) !important;
+  color: var(--text) !important;
+}
+
+.products-dark input::placeholder,
+.products-dark textarea::placeholder {
+  color: var(--dim) !important;
+}
+
+.products-dark .placeholder-gray-400::placeholder { color: var(--dim) !important; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   STAT CARDS (StatsRow) — the 6 clickable filter boxes
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Inactive stat card colors (dark glass) ── */
+
+/* Total Products — blue */
+.products-dark .bg-blue-50.border-blue-200.text-blue-700 {
+  background: rgba(34, 211, 238, 0.06) !important;
+  border-color: rgba(34, 211, 238, 0.15) !important;
+  color: var(--cyan) !important;
+}
+
+/* Active — green */
+.products-dark .bg-green-50.border-green-200.text-green-700 {
+  background: rgba(34, 197, 94, 0.06) !important;
+  border-color: rgba(34, 197, 94, 0.15) !important;
+  color: var(--green) !important;
+}
+
+/* Paused — yellow */
+.products-dark .bg-yellow-50.border-yellow-200.text-yellow-700 {
+  background: rgba(234, 179, 8, 0.06) !important;
+  border-color: rgba(234, 179, 8, 0.15) !important;
+  color: var(--yellow) !important;
+}
+
+/* Low Margin — red */
+.products-dark .bg-red-50.border-red-200.text-red-700 {
+  background: rgba(239, 68, 68, 0.06) !important;
+  border-color: rgba(239, 68, 68, 0.15) !important;
+  color: var(--red) !important;
+}
+
+/* Shopify Synced — purple */
+.products-dark .bg-purple-50.border-purple-200.text-purple-700 {
+  background: rgba(168, 85, 247, 0.06) !important;
+  border-color: rgba(168, 85, 247, 0.15) !important;
+  color: var(--purple) !important;
+}
+
+/* Stale Prices — orange */
+.products-dark .bg-orange-50.border-orange-200.text-orange-700 {
+  background: rgba(249, 115, 22, 0.06) !important;
+  border-color: rgba(249, 115, 22, 0.15) !important;
+  color: var(--orange) !important;
+}
+
+/* ── Active stat card colors (solid glow) ── */
+
+.products-dark .bg-blue-600.border-blue-600.text-white {
+  background: rgba(34, 211, 238, 0.2) !important;
+  border-color: var(--cyan) !important;
+  color: var(--cyan) !important;
+  box-shadow: 0 0 20px rgba(34, 211, 238, 0.15) !important;
+}
+
+.products-dark .bg-green-600.border-green-600.text-white {
+  background: rgba(34, 197, 94, 0.2) !important;
+  border-color: var(--green) !important;
+  color: var(--green) !important;
+  box-shadow: 0 0 20px rgba(34, 197, 94, 0.15) !important;
+}
+
+.products-dark .bg-yellow-500.border-yellow-500.text-white {
+  background: rgba(234, 179, 8, 0.2) !important;
+  border-color: var(--yellow) !important;
+  color: var(--yellow) !important;
+  box-shadow: 0 0 20px rgba(234, 179, 8, 0.15) !important;
+}
+
+.products-dark .bg-red-600.border-red-600.text-white {
+  background: rgba(239, 68, 68, 0.2) !important;
+  border-color: var(--red) !important;
+  color: var(--red) !important;
+  box-shadow: 0 0 20px rgba(239, 68, 68, 0.15) !important;
+}
+
+.products-dark .bg-purple-600.border-purple-600.text-white {
+  background: rgba(168, 85, 247, 0.2) !important;
+  border-color: var(--purple) !important;
+  color: var(--purple) !important;
+  box-shadow: 0 0 20px rgba(168, 85, 247, 0.15) !important;
+}
+
+.products-dark .bg-orange-500.border-orange-500.text-white {
+  background: rgba(249, 115, 22, 0.2) !important;
+  border-color: var(--orange) !important;
+  color: var(--orange) !important;
+  box-shadow: 0 0 20px rgba(249, 115, 22, 0.15) !important;
+}
+
+/* Active stat card shadow overrides (remove light shadows) */
+.products-dark .shadow-lg.shadow-blue-200,
+.products-dark .shadow-lg.shadow-green-200,
+.products-dark .shadow-lg.shadow-yellow-200,
+.products-dark .shadow-lg.shadow-red-200,
+.products-dark .shadow-lg.shadow-purple-200,
+.products-dark .shadow-lg.shadow-orange-200 {
+  --tw-shadow-color: transparent !important;
+}
+
+/* All stat card values get mono font */
+.products-dark [role="toolbar"] .text-2xl {
+  font-family: 'Geist Mono', monospace;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   HEADER BUTTONS
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Primary action button (Import) */
+.products-dark .bg-blue-600.text-white {
+  background-color: var(--cyan) !important;
+  color: #000 !important;
+}
+.products-dark .bg-blue-600.text-white:hover {
+  background-color: #06b6d4 !important;
+}
+
+/* Verify button */
+.products-dark .bg-purple-50.border-purple-200 {
+  background: rgba(168, 85, 247, 0.08) !important;
+  border-color: rgba(168, 85, 247, 0.2) !important;
+}
+
+/* Sync Shopify button */
+.products-dark .bg-green-50.border-green-200 {
+  background: rgba(150, 191, 72, 0.08) !important;
+  border-color: rgba(150, 191, 72, 0.2) !important;
+  color: var(--shopify) !important;
+}
+
+/* Refresh button */
+.products-dark .bg-white.border-gray-300 {
+  background: transparent !important;
+  border-color: var(--border) !important;
+  color: var(--muted) !important;
+}
+.products-dark .bg-white.border-gray-300:hover {
+  background: var(--bg3) !important;
+  color: var(--text) !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ERROR BANNER (inline red bar)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.products-dark .bg-red-50.border-red-200.text-red-700 {
+  background: rgba(239, 68, 68, 0.08) !important;
+  border-color: rgba(239, 68, 68, 0.2) !important;
+  color: #f87171 !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ERROR STATE (full page error box)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.products-dark .bg-red-100 {
+  background: rgba(239, 68, 68, 0.1) !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   FILTER INDICATOR PILLS
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.products-dark .bg-blue-50.text-blue-700 {
+  background: rgba(34, 211, 238, 0.1) !important;
+  color: var(--cyan) !important;
+}
+
+.products-dark .bg-gray-100.text-gray-600 {
+  background: var(--bg3) !important;
+  color: var(--muted) !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SOURCING TOGGLE BUTTON
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.products-dark .bg-indigo-100.text-indigo-700.border-indigo-200 {
+  background: rgba(34, 211, 238, 0.08) !important;
+  color: var(--cyan) !important;
+  border-color: rgba(34, 211, 238, 0.2) !important;
+}
+
+.products-dark .bg-gray-100.text-gray-600.border-gray-200 {
+  background: transparent !important;
+  color: var(--muted) !important;
+  border-color: var(--border) !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   EMPTY STATE
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.products-dark .bg-blue-50 {
+  background: rgba(34, 211, 238, 0.08) !important;
+}
+
+.products-dark .text-blue-400 {
+  color: var(--cyan) !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SVG ICON COLOR OVERRIDES
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.products-dark svg.text-gray-400 { color: var(--dim) !important; }
+.products-dark svg.text-gray-300 { color: var(--dim) !important; }
+.products-dark svg.text-red-600 { color: var(--red) !important; }
+.products-dark svg.text-blue-400 { color: var(--cyan) !important; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SPINNER OVERRIDE
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.products-dark .border-gray-400.border-t-transparent {
+  border-color: var(--dim) !important;
+  border-top-color: transparent !important;
+}
+
+.products-dark .border-blue-400.border-t-transparent {
+  border-color: var(--cyan) !important;
+  border-top-color: transparent !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ANIMATIONS
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.products-dark .animate-slide-up {
+  animation: pd-slideUp 0.25s ease-out;
+}
+
+@keyframes pd-slideUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CHILD COMPONENT CATCH-ALL OVERRIDES
+   Ensures ProductCardGrid, ProductsPanel, SourcingPanel, ViewToggle,
+   SkeletonCard, etc. all inherit the dark theme
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Tables */
+.products-dark table { background: var(--bg2) !important; color: var(--text) !important; }
+.products-dark th { background: var(--bg3) !important; color: var(--muted) !important; border-color: var(--border) !important; }
+.products-dark td { border-color: var(--border) !important; color: var(--text) !important; }
+.products-dark tr:hover td { background: var(--bg3) !important; }
+.products-dark thead { background: var(--bg3) !important; }
+.products-dark tbody tr { border-color: var(--border) !important; }
+.products-dark tbody tr:nth-child(even) { background: rgba(255, 255, 255, 0.01) !important; }
+
+/* Checkboxes */
+.products-dark input[type="checkbox"] { accent-color: var(--purple); }
+
+/* Badge variants from child components */
+.products-dark span[class*="bg-green-100"] { background: rgba(34, 197, 94, 0.15) !important; color: #4ade80 !important; }
+.products-dark span[class*="bg-red-100"] { background: rgba(239, 68, 68, 0.15) !important; color: #f87171 !important; }
+.products-dark span[class*="bg-yellow-100"] { background: rgba(234, 179, 8, 0.15) !important; color: #facc15 !important; }
+.products-dark span[class*="bg-blue-100"] { background: rgba(34, 211, 238, 0.15) !important; color: var(--cyan) !important; }
+.products-dark span[class*="bg-purple-100"] { background: rgba(168, 85, 247, 0.15) !important; color: #c084fc !important; }
+.products-dark span[class*="bg-orange-100"] { background: rgba(249, 115, 22, 0.15) !important; color: #fb923c !important; }
+
+/* Dropdown menus / popovers */
+.products-dark [role="menu"],
+.products-dark [role="listbox"] {
+  background: var(--bg2) !important;
+  border-color: var(--border) !important;
+}
+.products-dark [role="menuitem"]:hover,
+.products-dark [role="option"]:hover {
+  background: var(--bg3) !important;
+}
+
+/* Modal overlays */
+.products-dark [class*="fixed"][class*="inset-0"][class*="bg-black"] {
+  backdrop-filter: blur(4px);
+}
+
+/* Modal content */
+.products-dark [class*="bg-white"][class*="rounded-2xl"],
+.products-dark [class*="bg-white"][class*="rounded-xl"][class*="shadow"] {
+  background: var(--bg2) !important;
+  border: 1px solid var(--border) !important;
+}
+
+/* Shadows → darker */
+.products-dark [class*="shadow-sm"],
+.products-dark [class*="shadow-md"] {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3) !important;
+}
+.products-dark .shadow-lg {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4) !important;
+}
+
+/* Links */
+.products-dark a { color: var(--cyan); }
+.products-dark a:hover { color: #06b6d4; }
+
+/* Progress bars */
+.products-dark [class*="bg-gray-200"][class*="rounded-full"] {
+  background: var(--border) !important;
+}
+
+/* Dividers */
+.products-dark hr,
+.products-dark [class*="divide-gray"] > * + * {
+  border-color: var(--border) !important;
+}
+
+/* Disabled */
+.products-dark .disabled\:opacity-50:disabled {
+  opacity: 0.35 !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   FONT ENHANCEMENT — Geist Mono for data/numbers
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.products-dark .text-2xl.font-bold,
+.products-dark [class*="tabular-nums"],
+.products-dark [class*="font-mono"] {
+  font-family: 'Geist Mono', monospace !important;
+}

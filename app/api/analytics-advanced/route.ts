@@ -5,10 +5,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 interface RevenueChartData {
   date: string;
@@ -91,7 +97,7 @@ export async function GET(request: NextRequest) {
 async function getRevenueChartData(days: number): Promise<RevenueChartData[]> {
   const cutoffDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('channel_orders')
     .select('total, ordered_at')
     .gte('ordered_at', cutoffDate)
@@ -122,7 +128,7 @@ async function getRevenueChartData(days: number): Promise<RevenueChartData[]> {
 async function getScoreTrends(days: number): Promise<ScoreTrendData[]> {
   const cutoffDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('ai_analysis_log')
     .select(`
       created_at,
@@ -146,7 +152,7 @@ async function getScoreTrends(days: number): Promise<ScoreTrendData[]> {
 async function getHistoricalPricing(days: number): Promise<HistoricalPricingData[]> {
   const cutoffDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('price_snapshots')
     .select(`
       fetched_at,
@@ -195,7 +201,7 @@ async function getHistoricalPricing(days: number): Promise<HistoricalPricingData
 async function getTopProducts(metric: string, limit: number, days: number): Promise<any[]> {
   const cutoffDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
-  let query = supabase
+  let query = getSupabaseClient()
     .from('products')
     .select(`
       id,
@@ -247,7 +253,7 @@ async function getTopProducts(metric: string, limit: number, days: number): Prom
 async function getChannelPerformance(days: number): Promise<any[]> {
   const cutoffDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('channel_performance')
     .select('*')
     .gte('date', cutoffDate)
@@ -284,7 +290,7 @@ async function getChannelPerformance(days: number): Promise<any[]> {
 }
 
 async function getAIScoreDistribution(): Promise<any> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('ai_scores')
     .select('overall_score, score_tier');
 
@@ -315,7 +321,7 @@ async function getAIScoreDistribution(): Promise<any> {
 }
 
 async function getPriceFreshnessStats(): Promise<any> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('price_snapshots')
     .select('fetched_at')
     .eq('is_latest', true);

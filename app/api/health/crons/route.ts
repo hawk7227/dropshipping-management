@@ -4,15 +4,21 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 export async function GET() {
   try {
     // Get the most recent log for each job type
-    const { data: logs, error } = await supabase
+    const { data: logs, error } = await getSupabaseClient()
       .from('cron_job_logs')
       .select('job_type, status, started_at, completed_at, processed, errors, message')
       .order('started_at', { ascending: false })

@@ -4,10 +4,16 @@
 
 import { createClient } from '@supabase/supabase-js';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 export enum LogLevel {
   DEBUG = 'debug',
@@ -143,7 +149,7 @@ class Logger {
   private async persistLog(log: StructuredLog): Promise<void> {
     try {
       // Store in database for analysis
-      await supabase
+      await getSupabaseClient()
         .from('system_logs')
         .insert({
           id: log.id,
@@ -306,7 +312,7 @@ class Logger {
 
   async getLogs(filter: LogFilter = {}, limit: number = 100): Promise<StructuredLog[]> {
     try {
-      let query = supabase
+      let query = getSupabaseClient()
         .from('system_logs')
         .select('*')
         .order('timestamp', { ascending: false })
@@ -346,7 +352,7 @@ class Logger {
     try {
       const cutoffDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
       
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('system_logs')
         .select('level, category, pipeline')
         .gte('timestamp', cutoffDate);

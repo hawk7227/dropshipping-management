@@ -6,10 +6,16 @@ import { createClient } from '@supabase/supabase-js';
 import { logger, LogLevel, ErrorCategory, PipelineType } from './logging';
 import { retryDatabaseOperation } from './retry';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 export interface HealthCheck {
   pipeline: PipelineType;
@@ -203,7 +209,7 @@ class MonitoringService {
 
     try {
       // Get database connection info
-      const { data: dbInfo } = await supabase
+      const { data: dbInfo } = await getSupabaseClient()
         .from('pg_stat_activity')
         .select('count')
         .single();
@@ -218,7 +224,7 @@ class MonitoringService {
     try {
       // Get recent error rate from logs
       const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-      const { data: recentLogs } = await supabase
+      const { data: recentLogs } = await getSupabaseClient()
         .from('system_logs')
         .select('level')
         .gte('timestamp', fiveMinutesAgo);
@@ -316,7 +322,7 @@ class MonitoringService {
 
     // Persist alert
     try {
-      await supabase
+      await getSupabaseClient()
         .from('system_alerts')
         .insert(alert);
     } catch (error) {
@@ -405,7 +411,7 @@ class MonitoringService {
 
   private async persistMetrics(metrics: SystemMetrics): Promise<void> {
     try {
-      await supabase
+      await getSupabaseClient()
         .from('system_metrics')
         .insert(metrics);
     } catch (error) {
@@ -444,7 +450,7 @@ class MonitoringService {
       alert.acknowledged_at = new Date().toISOString();
       
       try {
-        await supabase
+        await getSupabaseClient()
           .from('system_alerts')
           .update({ acknowledged_at: alert.acknowledged_at })
           .eq('id', alertId);
@@ -461,7 +467,7 @@ class MonitoringService {
       alert.resolved_at = new Date().toISOString();
       
       try {
-        await supabase
+        await getSupabaseClient()
           .from('system_alerts')
           .update({ resolved_at: alert.resolved_at })
           .eq('id', alertId);

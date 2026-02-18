@@ -4,10 +4,16 @@
 
 import { createClient } from '@supabase/supabase-js';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 export interface PublicationRecord {
   id: string;
@@ -98,7 +104,7 @@ export async function createPublicationRecord(
       updated_at: new Date().toISOString()
     };
 
-    const { data, error } = await supabase
+    const { data, error } = await getSupabaseClient()
       .from('publication_tracking')
       .insert(record)
       .select('id')
@@ -144,7 +150,7 @@ export async function updatePublicationStatus(
       updateData.error_code = errorCode;
       
       // Get current retry count
-      const { data: currentRecord } = await supabase
+      const { data: currentRecord } = await getSupabaseClient()
         .from('publication_tracking')
         .select('retry_count, max_retries')
         .eq('id', recordId)
@@ -165,7 +171,7 @@ export async function updatePublicationStatus(
       // Retry count is already incremented in the failed status handling
     }
 
-    const { error } = await supabase
+    const { error } = await getSupabaseClient()
       .from('publication_tracking')
       .update(updateData)
       .eq('id', recordId);
@@ -189,7 +195,7 @@ export async function getPublicationsForRetry(): Promise<{ success: boolean; rec
   try {
     const now = new Date().toISOString();
 
-    const { data, error } = await supabase
+    const { data, error } = await getSupabaseClient()
       .from('publication_tracking')
       .select('*')
       .eq('status', 'retrying')
@@ -218,7 +224,7 @@ export async function getPublicationStats(
   try {
     const cutoffDate = new Date(Date.now() - days_back * 24 * 60 * 60 * 1000).toISOString();
 
-    const { data: publications, error } = await supabase
+    const { data: publications, error } = await getSupabaseClient()
       .from('publication_tracking')
       .select(`
         channel_type,
@@ -326,7 +332,7 @@ export async function getProductPublicationHistory(
   limit: number = 20
 ): Promise<{ success: boolean; records?: PublicationRecord[]; error?: string }> {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await getSupabaseClient()
       .from('publication_tracking')
       .select('*')
       .eq('product_id', productId)
@@ -353,7 +359,7 @@ export async function updateEngagementMetrics(
   engagement: PublicationRecord['engagement']
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const { error } = await supabase
+    const { error } = await getSupabaseClient()
       .from('publication_tracking')
       .update({
         engagement,
@@ -382,7 +388,7 @@ export async function cleanupOldRecords(
   try {
     const cutoffDate = new Date(Date.now() - days_to_keep * 24 * 60 * 60 * 1000).toISOString();
 
-    const { data, error } = await supabase
+    const { data, error } = await getSupabaseClient()
       .from('publication_tracking')
       .delete()
       .lt('created_at', cutoffDate)
@@ -414,7 +420,7 @@ export async function getChannelPerformance(
   try {
     const cutoffDate = new Date(Date.now() - days_back * 24 * 60 * 60 * 1000).toISOString();
 
-    let query = supabase
+    let query = getSupabaseClient()
       .from('publication_tracking')
       .select(`
         channel_type,

@@ -20,10 +20,16 @@ import {
   getProductStats,
 } from '@/lib/product-management';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 // Enhanced product query with AI scores, sync status, and price freshness
 async function getProductsWithDetails({
@@ -61,7 +67,7 @@ async function getProductsWithDetails({
 
   // Build the main query - select all columns to avoid missing column errors
   // The API will handle missing pricing columns gracefully
-  let query = supabase
+  let query = getSupabaseClient()
     .from('products')
     .select('*', { count: 'exact' });
 
@@ -119,7 +125,7 @@ async function getProductsWithDetails({
   
   if (productIds.length > 0) {
     try {
-      const { data: aiScores } = await supabase
+      const { data: aiScores } = await getSupabaseClient()
         .from('ai_scores')
         .select('product_id, overall_score, score_tier')
         .in('product_id', productIds);
@@ -140,7 +146,7 @@ async function getProductsWithDetails({
   
   if (productIds.length > 0) {
     try {
-      const { data: priceSnapshots } = await supabase
+      const { data: priceSnapshots } = await getSupabaseClient()
         .from('price_snapshots')
         .select('product_id, current_price, competitor_price, availability, fetched_at, is_latest')
         .in('product_id', productIds)
@@ -166,7 +172,7 @@ async function getProductsWithDetails({
       // Build composite IDs for Amazon competitor prices
       const amazonProductIds = productIds.map((id: string) => `${id}-amazon`);
       console.log("amazonProductIds:", amazonProductIds);
-      const { data: competitorPrices } = await supabase
+      const { data: competitorPrices } = await getSupabaseClient()
         .from('competitor_prices')
         .select('*')
         .in('id', amazonProductIds);
@@ -188,7 +194,7 @@ async function getProductsWithDetails({
   let variantsMap: Record<string, any[]> = {};
   if (productIds.length > 0) {
     try {
-      const { data: variants } = await supabase
+      const { data: variants } = await getSupabaseClient()
         .from('variants')
         .select(
           'id, product_id, title, sku, barcode, price, compare_at_price, cost, inventory_item_id, inventory_quantity, weight, weight_unit, requires_shipping, taxable, created_at, updated_at'
@@ -493,7 +499,7 @@ export async function GET(request: NextRequest) {
       }
 
       case 'vendors': {
-        const { data } = await supabase
+        const { data } = await getSupabaseClient()
           .from('products')
           .select('vendor')
           .not('vendor', 'is', null)
@@ -504,7 +510,7 @@ export async function GET(request: NextRequest) {
       }
 
       case 'product-types': {
-        const { data } = await supabase
+        const { data } = await getSupabaseClient()
           .from('products')
           .select('product_type')
           .not('product_type', 'is', null)
@@ -521,7 +527,7 @@ export async function GET(request: NextRequest) {
               const minProfit = parseFloat(searchParams.get('minProfit') || '0');
               const profitStatus = searchParams.get('profitStatus') || undefined;
       
-              let query = supabase
+              let query = getSupabaseClient()
                 .from('products')
                 .select('*')
                 .eq('source', 'rainforest')
@@ -557,7 +563,7 @@ export async function GET(request: NextRequest) {
       
             // Get profit summary for discovered products
             case 'profit-summary': {
-              const { data, error } = await supabase
+              const { data, error } = await getSupabaseClient()
                 .from('v_profit_summary')
                 .select('*')
                 .single();
@@ -622,34 +628,132 @@ export async function POST(request: NextRequest) {
       }
 
       case 'sync-shopify': {
+        // Delegates to the same logic as /api/shopify-push
+        // Uses the standalone, metafield-free Shopify push
         try {
-          const { fullSync = false } = body;
+          const { productIds, forceCreate = true, fullSync = false } = body;
 
-          console.log('[Products API] Starting Shopify sync...');
+          if (productIds && Array.isArray(productIds) && productIds.length > 0) {
+            const SHOPIFY_STORE = process.env.SHOPIFY_STORE_DOMAIN;
+            const SHOPIFY_TOKEN = process.env.SHOPIFY_ADMIN_ACCESS_TOKEN;
+            const API_VERSION = '2024-01';
+
+            if (!SHOPIFY_STORE || !SHOPIFY_TOKEN) {
+              return NextResponse.json({ success: false, error: 'Shopify not configured. Set SHOPIFY_STORE_DOMAIN and SHOPIFY_ADMIN_ACCESS_TOKEN.' }, { status: 400 });
+            }
+
+            const sb = getSupabaseClient();
+            const hdr = { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN };
+            const base = `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}`;
+
+            // Force create: clear stale Shopify IDs
+            if (forceCreate) {
+              await sb.from('products').update({ shopify_product_id: null, shopify_variant_id: null }).in('id', productIds);
+            }
+
+            const { data: products, error: fetchErr } = await sb.from('products').select('*').in('id', productIds);
+            if (fetchErr || !products) {
+              return NextResponse.json({ success: false, error: fetchErr?.message || 'No products found' }, { status: 500 });
+            }
+
+            const MARKUP = 1.70;
+            const rr = (lo: number, hi: number) => +(lo + Math.random() * (hi - lo)).toFixed(2);
+            let synced = 0;
+            const errors: string[] = [];
+
+            for (const p of products) {
+              try {
+                const asin = p.asin || p.source_product_id || p.sku || '';
+                const cost = p.cost_price || p.amazon_price || p.current_price || 0;
+                const sell = p.retail_price || +(cost * MARKUP).toFixed(2);
+                const compareAt = +(sell * rr(1.82, 1.93)).toFixed(2);
+
+                const imgs: { src: string }[] = [];
+                if (p.main_image) imgs.push({ src: p.main_image });
+                else if (p.image_url) imgs.push({ src: p.image_url });
+                if (Array.isArray(p.images)) {
+                  for (const img of p.images.slice(0, 5)) {
+                    const s = typeof img === 'string' ? img : img?.src;
+                    if (s && !imgs.find((i: any) => i.src === s)) imgs.push({ src: s });
+                  }
+                }
+
+                const payload = {
+                  product: {
+                    title: p.title,
+                    body_html: p.description || p.body_html || '',
+                    vendor: p.vendor || p.brand || '',
+                    product_type: p.product_type || p.category || '',
+                    tags: Array.isArray(p.tags) ? p.tags.join(', ') : (p.tags || ''),
+                    variants: [{ price: String(sell), compare_at_price: String(compareAt), sku: asin, inventory_management: 'shopify', inventory_quantity: p.inventory_quantity ?? 999, requires_shipping: true }],
+                    images: imgs,
+                  },
+                };
+
+                let res = await fetch(`${base}/products.json`, { method: 'POST', headers: hdr, body: JSON.stringify(payload) });
+
+                if (!res.ok) {
+                  const errText = await res.text();
+                  errors.push(`${p.title}: Shopify ${res.status} - ${errText.substring(0, 200)}`);
+                  if (res.status === 429) await new Promise(r => setTimeout(r, 5000));
+                  continue;
+                }
+
+                const sData = await res.json();
+                const sId = sData.product?.id;
+                const svId = sData.product?.variants?.[0]?.id;
+                const invItemId = sData.product?.variants?.[0]?.inventory_item_id;
+
+                // Set inventory via Inventory Levels API
+                if (invItemId) {
+                  try {
+                    const locRes = await fetch(`${base}/locations.json`, { headers: hdr });
+                    if (locRes.ok) {
+                      const locData = await locRes.json();
+                      const locId = locData.locations?.[0]?.id;
+                      if (locId) {
+                        await fetch(`${base}/inventory_levels/set.json`, {
+                          method: 'POST', headers: hdr,
+                          body: JSON.stringify({ location_id: locId, inventory_item_id: invItemId, available: p.inventory_quantity ?? 999 }),
+                        });
+                      }
+                    }
+                  } catch (_) {}
+                }
+
+                if (sId) {
+                  await sb.from('products').update({
+                    shopify_product_id: String(sId),
+                    shopify_variant_id: svId ? String(svId) : null,
+                    shopify_synced_at: new Date().toISOString(),
+                    retail_price: sell,
+                    compare_at_price: compareAt,
+                    updated_at: new Date().toISOString(),
+                  }).eq('id', p.id);
+                }
+
+                synced++;
+                await new Promise(r => setTimeout(r, 500));
+              } catch (pushErr) {
+                errors.push(`${p.title}: ${pushErr instanceof Error ? pushErr.message : 'Unknown error'}`);
+              }
+            }
+
+            return NextResponse.json({
+              success: true,
+              data: { synced, errors, message: `Pushed ${synced}/${productIds.length} products to Shopify` },
+            });
+          }
+
+          // PULL from Shopify (existing behavior)
           const result = await syncProductsFromShopify(fullSync);
-          
-          console.log('[Products API] Shopify sync result:', result);
-
           return NextResponse.json({
             success: true,
-            data: {
-              synced: result.synced || 0,
-              errors: result.errors || [],
-              message: `Synced ${result.synced || 0} products from Shopify`,
-            },
+            data: { synced: result.synced || 0, errors: result.errors || [], message: `Synced ${result.synced || 0} products from Shopify` },
           });
         } catch (syncError) {
           console.error('[Products API] Shopify sync error:', syncError);
-          
-          return NextResponse.json({
-            success: false,
-            error: {
-              code: 'SHOPIFY_SYNC_ERROR',
-              message: 'Failed to sync products from Shopify',
-              details: syncError instanceof Error ? syncError.message : 'Unknown error',
-              suggestion: 'Check Shopify credentials and connection'
-            }
-          }, { status: 500 });
+          return NextResponse.json({ success: false, error: String(syncError) }, { status: 500 });
         }
       }
 
@@ -790,7 +894,7 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        const { error } = await supabase
+        const { error } = await getSupabaseClient()
           .from('products')
           .update({ status, updated_at: new Date().toISOString() })
           .in('id', productIds);
@@ -886,7 +990,7 @@ export async function PUT(request: NextRequest) {
         );
       }
 
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('products')
         .update({
           asin,
@@ -917,7 +1021,7 @@ export async function PUT(request: NextRequest) {
 
       for (const update of updates) {
         try {
-          const { data, error } = await supabase
+          const { data, error } = await getSupabaseClient()
             .from('products')
             .update({
               asin: update.asin,
@@ -982,7 +1086,7 @@ export async function PUT(request: NextRequest) {
     if (variants && Array.isArray(variants)) {
       for (const variant of variants) {
         if (variant.id) {
-          await supabase
+          await getSupabaseClient()
             .from('variants')
             .update({
               title: variant.title,
@@ -1033,13 +1137,13 @@ export async function DELETE(request: NextRequest) {
       }
 
       // Delete variants first
-      await supabase
+      await getSupabaseClient()
         .from('variants')
         .delete()
         .in('product_id', productIds);
 
       // Delete products
-      const { error } = await supabase
+      const { error } = await getSupabaseClient()
         .from('products')
         .delete()
         .in('id', productIds);
@@ -1060,13 +1164,13 @@ export async function DELETE(request: NextRequest) {
     }
 
     // Delete variants first
-    await supabase
+    await getSupabaseClient()
       .from('variants')
       .delete()
       .eq('product_id', id);
 
     // Delete product
-    const { error } = await supabase
+    const { error } = await getSupabaseClient()
       .from('products')
       .delete()
       .eq('id', id);
@@ -1085,4 +1189,6 @@ export async function DELETE(request: NextRequest) {
     );
   }
 }
+
+
 

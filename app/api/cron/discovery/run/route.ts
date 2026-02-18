@@ -9,10 +9,16 @@ import { createClient } from '@supabase/supabase-js';
 // CONFIGURATION
 // ═══════════════════════════════════════════════════════════════════════════
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 const RAINFOREST_API_KEY = process.env.RAINFOREST_API_KEY;
 const SHOPIFY_SHOP_DOMAIN = process.env.SHOPIFY_SHOP_DOMAIN;
@@ -203,7 +209,7 @@ function calculatePricing(amazonPrice: number): {
 // ═══════════════════════════════════════════════════════════════════════════
 
 async function productExistsInDB(asin: string): Promise<boolean> {
-  const { data } = await supabase
+  const { data } = await getSupabaseClient()
     .from('products')
     .select('id')
     .eq('asin', asin)
@@ -215,7 +221,7 @@ async function productExistsInDB(asin: string): Promise<boolean> {
 async function importProductToDB(product: DiscoveredProduct): Promise<string | null> {
   const productId = `prod_${product.asin}_${Date.now()}`;
   
-  const { data, error } = await supabase.from('products').upsert({
+  const { data, error } = await getSupabaseClient().from('products').upsert({
     id: productId,
     asin: product.asin,
     title: product.title,
@@ -325,7 +331,7 @@ async function pushToShopify(product: DiscoveredProduct): Promise<string | null>
     
     if (data.product?.id) {
       // Update our DB with Shopify ID
-      await supabase.from('products')
+      await getSupabaseClient().from('products')
         .update({ 
           shopify_product_id: data.product.id.toString(),
           status: 'active',
@@ -506,7 +512,7 @@ export async function POST(request: NextRequest) {
     console.log(`[Discovery] Filters:`, activeFilters);
     
     // Log job start
-    const { data: logEntry } = await supabase.from('cron_job_logs').insert({
+    const { data: logEntry } = await getSupabaseClient().from('cron_job_logs').insert({
       job_type: 'discovery',
       status: 'running',
       message: `${dryRun ? 'Preview' : 'Discovery'} started from ${source}`,
@@ -525,7 +531,7 @@ export async function POST(request: NextRequest) {
     
     // Update log
     if (logEntry?.id) {
-      await supabase.from('cron_job_logs').update({
+      await getSupabaseClient().from('cron_job_logs').update({
         status: result.errors.length > 0 ? 'partial' : 'success',
         message: `Found ${result.found}, imported ${result.imported}, synced ${result.synced}`,
         processed: result.found,
@@ -581,7 +587,7 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     // Get recent discovery runs
-    const { data: logs, error } = await supabase
+    const { data: logs, error } = await getSupabaseClient()
       .from('cron_job_logs')
       .select('*')
       .eq('job_type', 'discovery')

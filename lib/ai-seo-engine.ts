@@ -4,7 +4,13 @@
 
 import OpenAI from 'openai';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let _openai: OpenAI | null = null;
+function getOpenAI(): OpenAI {
+  if (!_openai) {
+    _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  }
+  return _openai;
+}
 
 // Google Product Category taxonomy (subset of common categories)
 const GOOGLE_CATEGORIES = {
@@ -130,7 +136,7 @@ RESPOND IN JSON:
   "improvements_made": ["Improvement 1", "Improvement 2"]
 }`;
 
-  const response = await openai.chat.completions.create({
+  const response = await getOpenAI().chat.completions.create({
     model: 'gpt-4-turbo-preview',
     messages: [{ role: 'user', content: prompt }],
     response_format: { type: 'json_object' },
@@ -338,7 +344,7 @@ export async function generateAdContent(
     callout: `Generate 4 callout extensions (max 25 chars each) for: ${product.title}. Highlight benefits like free shipping, warranties, etc.`
   };
 
-  const response = await openai.chat.completions.create({
+  const response = await getOpenAI().chat.completions.create({
     model: 'gpt-4-turbo-preview',
     messages: [{
       role: 'user',

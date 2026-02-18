@@ -12,10 +12,16 @@ import { createClient } from '@supabase/supabase-js';
 import { Database } from '../types/database';
 
 // Initialize Supabase client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-
-const supabase = createClient<Database>(supabaseUrl, supabaseServiceKey);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient<Database>(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+  }
+  return _supabase;
+}
 
 // ============================================================================
 // TYPE DEFINITIONS
@@ -119,7 +125,7 @@ export async function checkMembership(userId: string): Promise<MembershipCheck> 
   console.log('[member-detection] Checking membership for:', userId);
 
   try {
-    const { data, error } = await supabase
+    const { data, error } = await getSupabaseClient()
       .from('memberships')
       .select('*')
       .eq('user_id', userId)
@@ -166,7 +172,7 @@ export async function getMembershipDetails(
   console.log('[member-detection] Getting membership details for:', userId);
 
   try {
-    const { data, error } = await supabase
+    const { data, error } = await getSupabaseClient()
       .from('memberships')
       .select('*')
       .eq('user_id', userId)
@@ -195,7 +201,7 @@ export async function getMembershipByEmail(
   email: string
 ): Promise<Membership | null> {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await getSupabaseClient()
       .from('memberships')
       .select('*')
       .eq('email', email.toLowerCase())
@@ -221,7 +227,7 @@ export async function getMembershipByStripeCustomer(
   stripeCustomerId: string
 ): Promise<Membership | null> {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await getSupabaseClient()
       .from('memberships')
       .select('*')
       .eq('stripe_customer_id', stripeCustomerId)
@@ -264,7 +270,7 @@ export async function upsertMembership(data: {
 
   try {
     // ✅ FIX: Cast payload to 'any' to bypass strict table schema check
-    const { data: membership, error } = await supabase
+    const { data: membership, error } = await getSupabaseClient()
       .from('memberships')
       .upsert(
         {
@@ -456,7 +462,7 @@ export async function getActiveMembers(
   offset: number = 0
 ): Promise<{ members: Membership[]; total: number }> {
   try {
-    const { data, error, count } = await supabase
+    const { data, error, count } = await getSupabaseClient()
       .from('memberships')
       .select('*', { count: 'exact' })
       .in('status', ['active', 'trialing'])
@@ -487,7 +493,7 @@ export async function getMembershipStats(): Promise<{
 }> {
   try {
     // ✅ FIX: Cast result to any[]
-    const { data } = await supabase
+    const { data } = await getSupabaseClient()
       .from('memberships')
       .select('status, tier');
 
@@ -570,4 +576,4 @@ function buildMembershipCheck(membership: Membership | null): MembershipCheck {
 }
 
 // Export supabase client for direct access if needed
-export { supabase };
+export { getSupabaseClient as supabase };

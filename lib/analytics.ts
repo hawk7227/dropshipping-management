@@ -15,10 +15,16 @@ export interface DailyStat {
   visitors: number;
 }
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 // =====================================================
 // DAILY STATS SNAPSHOT
@@ -28,11 +34,11 @@ export async function captureDailyStats(): Promise<DailyStats> {
   const today = new Date().toISOString().split('T')[0];
 
   // Product counts
-  const { count: totalProducts } = await supabase
+  const { count: totalProducts } = await getSupabaseClient()
     .from('products')
     .select('*', { count: 'exact', head: true });
 
-  const { count: activeProducts } = await supabase
+  const { count: activeProducts } = await getSupabaseClient()
     .from('products')
     .select('*', { count: 'exact', head: true })
     .eq('status', 'active');
@@ -40,7 +46,7 @@ export async function captureDailyStats(): Promise<DailyStats> {
   // Member counts (from members table if exists)
   let totalMembers = 0;
   try {
-    const { count } = await supabase
+    const { count } = await getSupabaseClient()
       .from('members')
       .select('*', { count: 'exact', head: true });
     totalMembers = count || 0;
@@ -49,7 +55,7 @@ export async function captureDailyStats(): Promise<DailyStats> {
   }
 
   // Today's orders
-  const { data: todayOrders } = await supabase
+  const { data: todayOrders } = await getSupabaseClient()
     .from('channel_orders')
     .select('total')
     .gte('ordered_at', `${today}T00:00:00Z`)
@@ -60,7 +66,7 @@ export async function captureDailyStats(): Promise<DailyStats> {
   const avgOrderValue = orderCount > 0 ? totalRevenue / orderCount : 0;
 
   // Price sync activity
-  const { count: priceUpdates } = await supabase
+  const { count: priceUpdates } = await getSupabaseClient()
     .from('competitor_prices')
     .select('*', { count: 'exact', head: true })
     .gte('fetched_at', `${today}T00:00:00Z`);
@@ -82,7 +88,7 @@ export async function captureDailyStats(): Promise<DailyStats> {
   };
 
   // Upsert for idempotency
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('daily_stats')
     .upsert(stats, { onConflict: 'date' })
     .select()
@@ -118,7 +124,7 @@ export async function getDailyStats(
   }
 
   try {
-    const { data: orders } = await supabase
+    const { data: orders } = await getSupabaseClient()
       .from('unified_orders')
       .select('total, created_at')
       .gte('created_at', start.toISOString())
@@ -209,7 +215,7 @@ export async function getDashboardOverview(): Promise<DashboardOverview> {
   const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
 
   // Today's stats
-  const { data: todayOrders } = await supabase
+  const { data: todayOrders } = await getSupabaseClient()
     .from('channel_orders')
     .select('total')
     .gte('ordered_at', `${todayStr}T00:00:00Z`);
@@ -218,7 +224,7 @@ export async function getDashboardOverview(): Promise<DashboardOverview> {
   const todayOrderCount = todayOrders?.length || 0;
 
   // This week
-  const { data: weekOrders } = await supabase
+  const { data: weekOrders } = await getSupabaseClient()
     .from('channel_orders')
     .select('total')
     .gte('ordered_at', `${weekAgoStr}T00:00:00Z`);
@@ -229,7 +235,7 @@ export async function getDashboardOverview(): Promise<DashboardOverview> {
   const twoWeeksAgo = new Date(weekAgo);
   twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 7);
   
-  const { data: lastWeekOrders } = await supabase
+  const { data: lastWeekOrders } = await getSupabaseClient()
     .from('channel_orders')
     .select('total')
     .gte('ordered_at', twoWeeksAgo.toISOString())
@@ -241,7 +247,7 @@ export async function getDashboardOverview(): Promise<DashboardOverview> {
     : 0;
 
   // This month
-  const { data: monthOrders } = await supabase
+  const { data: monthOrders } = await getSupabaseClient()
     .from('channel_orders')
     .select('total')
     .gte('ordered_at', `${monthStartStr}T00:00:00Z`);
@@ -249,7 +255,7 @@ export async function getDashboardOverview(): Promise<DashboardOverview> {
   const monthRevenue = monthOrders?.reduce((sum, o) => sum + (o.total || 0), 0) || 0;
 
   // Last month for comparison
-  const { data: lastMonthOrders } = await supabase
+  const { data: lastMonthOrders } = await getSupabaseClient()
     .from('channel_orders')
     .select('total')
     .gte('ordered_at', lastMonthStart.toISOString())
@@ -261,22 +267,22 @@ export async function getDashboardOverview(): Promise<DashboardOverview> {
     : 0;
 
   // Products
-  const { count: totalProducts } = await supabase
+  const { count: totalProducts } = await getSupabaseClient()
     .from('products')
     .select('*', { count: 'exact', head: true });
 
-  const { count: activeProducts } = await supabase
+  const { count: activeProducts } = await getSupabaseClient()
     .from('products')
     .select('*', { count: 'exact', head: true })
     .eq('status', 'active');
 
-  const { count: lowStock } = await supabase
+  const { count: lowStock } = await getSupabaseClient()
     .from('product_variants')
     .select('*', { count: 'exact', head: true })
     .gt('inventory_quantity', 0)
     .lt('inventory_quantity', 10);
 
-  const { count: outOfStock } = await supabase
+  const { count: outOfStock } = await getSupabaseClient()
     .from('product_variants')
     .select('*', { count: 'exact', head: true })
     .eq('inventory_quantity', 0);
@@ -286,12 +292,12 @@ export async function getDashboardOverview(): Promise<DashboardOverview> {
   let activeMembers = 0;
   let churnRiskMembers = 0;
   try {
-    const { count } = await supabase
+    const { count } = await getSupabaseClient()
       .from('members')
       .select('*', { count: 'exact', head: true });
     totalMembers = count || 0;
     
-    const { count: active } = await supabase
+    const { count: active } = await getSupabaseClient()
       .from('members')
       .select('*', { count: 'exact', head: true })
       .eq('status', 'active');
@@ -301,7 +307,7 @@ export async function getDashboardOverview(): Promise<DashboardOverview> {
   }
 
   // Price tracking
-  const { data: prices } = await supabase
+  const { data: prices } = await getSupabaseClient()
     .from('competitor_prices')
     .select('savings_percent, fetched_at');
 
@@ -359,7 +365,7 @@ export async function getDashboardOverview(): Promise<DashboardOverview> {
 export async function updateMemberAnalytics(memberId: string, updates?: any): Promise<MemberAnalytics> {
   // If manual updates provided, use them directly
   if (updates) {
-    const { data, error } = await supabase
+    const { data, error } = await getSupabaseClient()
     .from('member_analytics')
     .upsert({ member_id: memberId, ...updates }, { onConflict: 'member_id' })
     .select()
@@ -369,7 +375,7 @@ export async function updateMemberAnalytics(memberId: string, updates?: any): Pr
   }
 
   // Otherwise calculate from orders
-  const { data: memberData } = await supabase
+  const { data: memberData } = await getSupabaseClient()
     .from('members')
     .select('email')
     .eq('id', memberId)
@@ -377,7 +383,7 @@ export async function updateMemberAnalytics(memberId: string, updates?: any): Pr
 
   if (!memberData?.email) throw new Error('Member not found');
 
-  const { data: orders } = await supabase
+  const { data: orders } = await getSupabaseClient()
     .from('channel_orders')
     .select('total, ordered_at')
     .eq('customer_email', memberData.email)
@@ -413,7 +419,7 @@ export async function updateMemberAnalytics(memberId: string, updates?: any): Pr
     churn_risk_score: churnRisk,
   };
 
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('member_analytics')
     .upsert(analytics, { onConflict: 'member_id' })
     .select()
@@ -447,7 +453,7 @@ export async function getMemberAnalytics(
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
 
-  const { data, count } = await supabase
+  const { data, count } = await getSupabaseClient()
     .from('member_analytics')
     .select('*', { count: 'exact' })
     .order(sortBy, { ascending: sortOrder === 'asc' })
@@ -458,7 +464,7 @@ export async function getMemberAnalytics(
 
 // ✅ UPDATED: Accepts (minSpent, limit) signature
 export async function getHighValueMembers(minSpent: number = 100, limit: number = 20): Promise<MemberAnalytics[]> {
-  const { data } = await supabase
+  const { data } = await getSupabaseClient()
     .from('member_analytics')
     .select('*')
     .gte('total_spent', minSpent)
@@ -470,7 +476,7 @@ export async function getHighValueMembers(minSpent: number = 100, limit: number 
 
 // ✅ UPDATED: Accepts (inactiveDays, limit) signature
 export async function getChurnRiskMembers(inactiveDaysOrMinRisk: number = 60, limit: number = 20): Promise<MemberAnalytics[]> {
-  const { data } = await supabase
+  const { data } = await getSupabaseClient()
     .from('member_analytics')
     .select('*')
     .gte('churn_risk_score', 50) 
@@ -498,7 +504,7 @@ export async function recordChannelPerformance(
   let itemsSold = 0;
 
   if (!metrics) {
-      const { data: orders } = await supabase
+      const { data: orders } = await getSupabaseClient()
         .from('channel_orders')
         .select('total, line_items')
         .eq('channel', channel)
@@ -517,7 +523,7 @@ export async function recordChannelPerformance(
       itemsSold = metrics.items_sold || 0;
   }
 
-  await supabase.from('channel_performance').upsert({
+  await getSupabaseClient().from('channel_performance').upsert({
     date,
     channel,
     orders: orderCount,
@@ -549,7 +555,7 @@ export async function getChannelPerformance(
       endDate = channelOrOptions.endDate;
   }
 
-  let query = supabase
+  let query = getSupabaseClient()
     .from('channel_performance')
     .select('*')
     .order('date', { ascending: false });
@@ -571,7 +577,7 @@ export async function getChannelComparison(days: number = 30): Promise<Record<st
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - days);
 
-  const { data } = await supabase
+  const { data } = await getSupabaseClient()
     .from('channel_performance')
     .select('channel, revenue, orders')
     .gte('date', startDate.toISOString().split('T')[0]);
@@ -619,7 +625,7 @@ export async function recordProductPerformance(
     revenue?: number;
   }
 ): Promise<void> {
-  const { data: existing } = await supabase
+  const { data: existing } = await getSupabaseClient()
     .from('product_performance')
     .select('views, add_to_carts, purchases, revenue')
     .eq('product_id', productId)
@@ -639,7 +645,7 @@ export async function recordProductPerformance(
     ? (update.purchases / update.views) * 100 
     : 0;
 
-  await supabase.from('product_performance').upsert({
+  await getSupabaseClient().from('product_performance').upsert({
     ...update,
     conversion_rate: Math.round(conversionRate * 100) / 100,
   }, { onConflict: 'date,product_id' });
@@ -669,7 +675,7 @@ export async function getTopProducts(
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - days);
 
-  const { data: performance } = await supabase
+  const { data: performance } = await getSupabaseClient()
     .from('product_performance')
     .select('product_id, views, add_to_carts, purchases, revenue')
     .gte('date', startDate.toISOString().split('T')[0]);
@@ -711,7 +717,7 @@ export async function getTopProducts(
     .slice(0, limit);
 
   const productIds = sorted.map(p => p.product_id);
-  const { data: products } = await supabase
+  const { data: products } = await getSupabaseClient()
     .from('products')
     .select('*')
     .in('id', productIds);
@@ -744,7 +750,7 @@ export async function getRevenueChartData(days: number = 30): Promise<Array<{
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - days);
 
-  const { data } = await supabase
+  const { data } = await getSupabaseClient()
     .from('daily_stats')
     .select('date, total_revenue, total_orders')
     .gte('date', startDate.toISOString().split('T')[0])
@@ -766,7 +772,7 @@ export async function getMemberGrowthData(days: number = 30): Promise<Array<{
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - days);
 
-  const { data } = await supabase
+  const { data } = await getSupabaseClient()
     .from('daily_stats')
     .select('date, total_members, new_members, churned_members')
     .gte('date', startDate.toISOString().split('T')[0])
@@ -786,7 +792,7 @@ export async function getPriceComparisonData(limit: number = 20): Promise<Array<
   competitorPrice: number;
   savings: number;
 }>> {
-  const { data } = await supabase
+  const { data } = await getSupabaseClient()
     .from('competitor_prices')
     .select(`
       product_id,
@@ -827,13 +833,13 @@ export async function generateWeeklyReport(): Promise<ReportSummary> {
   twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 7);
 
   // This week
-  const { data: thisWeek } = await supabase
+  const { data: thisWeek } = await getSupabaseClient()
     .from('daily_stats')
     .select('*')
     .gte('date', weekAgo.toISOString().split('T')[0]);
 
   // Last week
-  const { data: lastWeek } = await supabase
+  const { data: lastWeek } = await getSupabaseClient()
     .from('daily_stats')
     .select('*')
     .gte('date', twoWeeksAgo.toISOString().split('T')[0])

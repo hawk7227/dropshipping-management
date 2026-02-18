@@ -1,8 +1,8 @@
+'use client';
+
 // components/products/BulkVerifyPanel.tsx
 // Bulk verification panel - 4-step wizard with AI bot and export options
 // Accessed from Products page via "Verify Supplier List" button
-
-'use client';
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 import * as XLSX from 'xlsx';
@@ -690,3 +690,4 @@ export function BulkVerifyPanel({
 }
 
 export default BulkVerifyPanel;
+

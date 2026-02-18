@@ -5,10 +5,16 @@
 import { createClient } from '@supabase/supabase-js';
 import { getTopScoringProducts } from './ai-analysis-pipeline';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 export interface MarketingProduct {
   id: string;
@@ -88,7 +94,7 @@ export async function getMarketingEligibleProducts(
 
   try {
     // Build query for eligible products
-    let query = supabase
+    let query = getSupabaseClient()
       .from('products')
       .select(`
         id,
@@ -370,7 +376,7 @@ export async function refreshMarketingCache(): Promise<{ success: boolean; refre
       refreshed_at: new Date().toISOString()
     };
 
-    const { error } = await supabase
+    const { error } = await getSupabaseClient()
       .from('marketing_cache')
       .upsert({
         id: 'main_cache',

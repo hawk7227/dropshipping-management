@@ -1,0 +1,88 @@
+{% comment %}
+  faq-howto-schema.liquid — Spec Item 43
+  FAQ and HowTo structured data for Google rich results
+  
+  Usage: {% render 'faq-howto-schema', product: product %}
+  
+  Generates:
+  - FAQPage schema from product.metafields.seo.faq_json
+  - HowTo schema from product.metafields.seo.howto_json
+  
+  FAQ metafield format (JSON array):
+    [{"q": "Is this product dishwasher safe?", "a": "Yes, all parts are..."}]
+  
+  HowTo metafield format (JSON):
+    {"name": "How to Set Up Your...", "steps": [{"name": "Unbox", "text": "Remove..."}]}
+  
+  If metafields are empty, auto-generates FAQ from product data.
+{% endcomment %}
+
+{% assign faq_data = product.metafields.seo.faq_json %}
+{% assign howto_data = product.metafields.seo.howto_json %}
+{% assign our_price = product.price | divided_by: 100.0 %}
+{% assign competitor_price = product.metafields.competitor.amazon_price | default: 0 %}
+
+{% comment %} ═══ FAQ Schema ═══ {% endcomment %}
+{% if faq_data and faq_data != blank %}
+  {% comment %} Use metafield FAQ data {% endcomment %}
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": {{ faq_data }}
+  }
+  </script>
+{% else %}
+  {% comment %} Auto-generate FAQ from product data {% endcomment %}
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": {{ product.title | prepend: "What is the price of " | append: "?" | json }},
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": {{ product.title | prepend: "The current price of " | append: " is $" | json | remove: '"' }}{{ our_price }}{% if competitor_price > our_price %}, which is {{ competitor_price | minus: our_price | money_without_currency }} less than the Amazon price of ${{ competitor_price }}{% endif %}. Free shipping included."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Does this product come with free shipping?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes! All orders include free standard shipping within the United States. Most orders arrive within 3-5 business days."
+        }
+      }
+      {% if product.metafields.reviews.count > 0 %}
+      ,{
+        "@type": "Question",
+        "name": {{ product.title | prepend: "How is " | append: " rated by customers?" | json }},
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "{{ product.title }} has an average rating of {{ product.metafields.reviews.rating }} out of 5 stars based on {{ product.metafields.reviews.count }} verified customer reviews."
+        }
+      }
+      {% endif %}
+      {% if product.available %}
+      ,{
+        "@type": "Question",
+        "name": {{ product.title | prepend: "Is " | append: " currently in stock?" | json }},
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes, {{ product.title }} is currently in stock and available for immediate purchase with free shipping."
+        }
+      }
+      {% endif %}
+    ]
+  }
+  </script>
+{% endif %}
+
+{% comment %} ═══ HowTo Schema ═══ {% endcomment %}
+{% if howto_data and howto_data != blank %}
+  <script type="application/ld+json">
+  {{ howto_data }}
+  </script>
+{% endif %}

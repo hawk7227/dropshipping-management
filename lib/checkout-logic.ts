@@ -14,10 +14,16 @@ import { checkMembership, getMemberBenefits } from './member-detection';
 import { stripe } from './stripe-products';
 
 // Initialize Supabase
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 // ============================================================================
 // TYPE DEFINITIONS
@@ -363,7 +369,7 @@ async function createFreeOrder(params: {
 
   const orderId = `ORD-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-  const { error } = await supabase.from('orders').insert({
+  const { error } = await getSupabaseClient().from('orders').insert({
     id: orderId,
     user_id: params.userId,
     email: params.email,
@@ -446,7 +452,7 @@ export async function processCompletedCheckout(
     : null;
 
   // Create order in database
-  const { error } = await supabase.from('orders').insert({
+  const { error } = await getSupabaseClient().from('orders').insert({
     id: orderId,
     user_id: metadata.user_id !== 'guest' ? metadata.user_id : null,
     email: session.customer_email || session.customer_details?.email || '',
@@ -511,7 +517,7 @@ export async function validateCart(items: CartItem[]): Promise<{
 
   for (const item of items) {
     // Fetch current product data
-    const { data: product, error } = await supabase
+    const { data: product, error } = await getSupabaseClient()
       .from('products')
       .select('*')
       .eq('id', item.productId)

@@ -3,10 +3,16 @@
 
 import { createClient } from '@supabase/supabase-js';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 export interface MarginRuleMatch {
   ruleId: string;
@@ -62,7 +68,7 @@ export async function getApplicableRules(
 ): Promise<any[]> {
   try {
     // Get all active rules ordered by priority
-    const { data: rules, error } = await supabase
+    const { data: rules, error } = await getSupabaseClient()
       .from('margin_rules')
       .select('*')
       .eq('is_active', true)
@@ -216,7 +222,7 @@ export async function createMarginAlert(
     const criticalRule = analysis.matchedRules.find((r) => r.status === 'critical');
 
     if (criticalRule) {
-      await supabase.from('margin_alerts').insert({
+      await getSupabaseClient().from('margin_alerts').insert({
         product_id: productId,
         alert_type: 'margin_critical',
         alert_code: 'margin_below_minimum',

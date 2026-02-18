@@ -21,10 +21,16 @@ import {
   getPriceStats,
 } from '@/lib/price-sync';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 // GET /api/prices
 export async function GET(request: NextRequest) {
@@ -39,7 +45,7 @@ export async function GET(request: NextRequest) {
         const source = searchParams.get('source') || undefined;
         const staleOnly = searchParams.get('staleOnly') === 'true';
 
-        let query = supabase
+        let query = getSupabaseClient()
           .from('competitor_prices')
           .select('*', { count: 'exact' });
 
@@ -133,7 +139,7 @@ export async function GET(request: NextRequest) {
       case 'sync-jobs': {
         const limit = parseInt(searchParams.get('limit') || '10');
 
-        const { data } = await supabase
+        const { data } = await getSupabaseClient()
           .from('price_sync_jobs')
           .select('*')
           .order('started_at', { ascending: false })
@@ -181,7 +187,7 @@ export async function GET(request: NextRequest) {
         const sortBy = searchParams.get('sortBy') || 'savings_percent';
         const order = searchParams.get('order') || 'desc';
 
-        const { data } = await supabase
+        const { data } = await getSupabaseClient()
           .from('competitor_prices')
           .select('*')
           .order(sortBy, { ascending: order === 'asc' })
@@ -191,7 +197,7 @@ export async function GET(request: NextRequest) {
       }
 
       case 'sources': {
-        const { data } = await supabase
+        const { data } = await getSupabaseClient()
           .from('competitor_prices')
           .select('source')
           .order('source');
@@ -208,7 +214,7 @@ export async function GET(request: NextRequest) {
         const limit = parseInt(searchParams.get('limit') || '50');
         const resolved = searchParams.get('resolved');
         
-        let query = supabase
+        let query = getSupabaseClient()
           .from('margin_alerts')
           .select('*')
           .order('created_at', { ascending: false })
@@ -228,7 +234,7 @@ export async function GET(request: NextRequest) {
 
       case 'monitoring-rules': {
         // Monitoring rules endpoint - queries margin rules
-        const { data, error } = await supabase
+        const { data, error } = await getSupabaseClient()
           .from('margin_rules')
           .select('*')
           .eq('is_active', true)
@@ -246,7 +252,7 @@ export async function GET(request: NextRequest) {
         const status = searchParams.get('status'); // in_stock, low_stock, out_of_stock
         const limit = parseInt(searchParams.get('limit') || '50');
         
-        let query = supabase
+        let query = getSupabaseClient()
           .from('competitor_prices')
           .select('*')
           .order('fetched_at', { ascending: false })
@@ -266,7 +272,7 @@ export async function GET(request: NextRequest) {
         const hours = parseInt(searchParams.get('hours') || '24');
         const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
         
-        const { data, error } = await supabase
+        const { data, error } = await getSupabaseClient()
           .from('margin_alerts')
           .select('*')
           .in('alert_code', ['back_in_stock', 'out_of_stock', 'low_stock'])
@@ -284,7 +290,7 @@ export async function GET(request: NextRequest) {
         const availability = searchParams.get('availability');
         const priceChange = searchParams.get('priceChange');
         
-        let query = supabase
+        let query = getSupabaseClient()
           .from('competitor_prices')
           .select('*, products(id, title)', { count: 'exact' })
           .order('fetched_at', { ascending: false })
@@ -412,7 +418,7 @@ export async function POST(request: NextRequest) {
 
           if (amazonProduct && amazonProduct.price) {
             // Get our price
-            const { data: product } = await supabase
+            const { data: product } = await getSupabaseClient()
               .from('products')
               .select('id, variants:product_variants(price)')
               .eq('id', productId)
@@ -521,7 +527,7 @@ export async function POST(request: NextRequest) {
         }
 
         // Update or create competitor price entry
-        const { data: product } = await supabase
+        const { data: product } = await getSupabaseClient()
           .from('products')
           .select('id, variants:product_variants(price)')
           .eq('id', productId)
@@ -558,7 +564,7 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        const { data, error } = await supabase
+        const { data, error } = await getSupabaseClient()
           .from('margin_rules')
           .insert({
             name,
@@ -712,7 +718,7 @@ export async function PUT(request: NextRequest) {
         if (applyToMembers !== undefined) updates.apply_to_members = applyToMembers;
         if (action !== undefined) updates.action = action;
 
-        const { data, error } = await supabase
+        const { data, error } = await getSupabaseClient()
           .from('margin_rules')
           .update(updates)
           .eq('id', id)
@@ -743,7 +749,7 @@ export async function PUT(request: NextRequest) {
 
         // Recalculate savings
         if (competitorPrice !== undefined || ourPrice !== undefined) {
-          const { data: existing } = await supabase
+          const { data: existing } = await getSupabaseClient()
             .from('competitor_prices')
             .select('competitor_price, our_price')
             .eq('product_id', productId)
@@ -759,7 +765,7 @@ export async function PUT(request: NextRequest) {
           }
         }
 
-        const { data, error } = await supabase
+        const { data, error } = await getSupabaseClient()
           .from('competitor_prices')
           .update(updates)
           .eq('product_id', productId)
@@ -806,7 +812,7 @@ export async function DELETE(request: NextRequest) {
           );
         }
 
-        let query = supabase
+        let query = getSupabaseClient()
           .from('competitor_prices')
           .delete()
           .eq('product_id', productId);
@@ -834,7 +840,7 @@ export async function DELETE(request: NextRequest) {
           );
         }
 
-        const { error } = await supabase
+        const { error } = await getSupabaseClient()
           .from('margin_rules')
           .delete()
           .eq('id', ruleId);
@@ -854,7 +860,7 @@ export async function DELETE(request: NextRequest) {
         const cutoff = new Date();
         cutoff.setDate(cutoff.getDate() - olderThanDays);
 
-        let query = supabase
+        let query = getSupabaseClient()
           .from('price_history')
           .delete()
           .lt('recorded_at', cutoff.toISOString());

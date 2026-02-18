@@ -3,10 +3,16 @@
 
 import { createClient } from '@supabase/supabase-js';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 export interface DashboardStats {
   totalProducts: number;
@@ -56,18 +62,18 @@ export interface ProfitTrend {
 export async function getDashboardStats(): Promise<DashboardStats> {
   try {
     // Total Products
-    const { count: totalProducts } = await supabase
+    const { count: totalProducts } = await getSupabaseClient()
       .from('products')
       .select('*', { count: 'exact', head: true });
 
     // Active Products
-    const { count: activeProducts } = await supabase
+    const { count: activeProducts } = await getSupabaseClient()
       .from('products')
       .select('*', { count: 'exact', head: true })
       .eq('status', 'active');
 
     // Calculate Average Profit Margin
-    const { data: profitData } = await supabase
+    const { data: profitData } = await getSupabaseClient()
       .from('products')
       .select('retail_price, cost_price')
       .not('retail_price', 'is', null)
@@ -83,20 +89,20 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     }
 
     // Products Below 30% Margin
-    const { count: productsBelowMargin } = await supabase
+    const { count: productsBelowMargin } = await getSupabaseClient()
       .from('products')
       .select('*', { count: 'exact', head: true })
       .not('profit_percent', 'is', null)
       .lt('profit_percent', 30);
 
     // Pending Sync (from shopify_queue)
-    const { count: pendingSync } = await supabase
+    const { count: pendingSync } = await getSupabaseClient()
       .from('shopify_queue')
       .select('*', { count: 'exact', head: true })
       .eq('status', 'pending');
 
     // Price Alerts (unacknowledged)
-    const { count: priceAlerts } = await supabase
+    const { count: priceAlerts } = await getSupabaseClient()
       .from('margin_alerts')
       .select('*', { count: 'exact', head: true })
       .eq('acknowledged', false);
@@ -122,7 +128,7 @@ export async function getDiscoveryStats(): Promise<DiscoveryStats | null> {
   try {
     const today = new Date().toISOString().split('T')[0];
     
-    const { data, error } = await supabase
+    const { data, error } = await getSupabaseClient()
       .from('discovery_runs')
       .select('*')
       .eq('date', today)
@@ -151,7 +157,7 @@ export async function getDiscoveryStats(): Promise<DiscoveryStats | null> {
  */
 export async function getDemandDistribution(): Promise<DemandDistribution> {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await getSupabaseClient()
       .from('product_demand')
       .select('demand_tier');
 
@@ -181,7 +187,7 @@ export async function getRevenueData(days: number = 30): Promise<RevenueData[]> 
     startDate.setDate(startDate.getDate() - days);
     const startDateStr = startDate.toISOString().split('T')[0];
 
-    const { data, error } = await supabase
+    const { data, error } = await getSupabaseClient()
       .from('orders')
       .select('ordered_at, total')
       .gte('ordered_at', startDateStr)
@@ -218,7 +224,7 @@ export async function getRevenueData(days: number = 30): Promise<RevenueData[]> 
  */
 export async function getCategoryBreakdown(): Promise<CategoryBreakdown[]> {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await getSupabaseClient()
       .from('products')
       .select('category')
       .not('category', 'is', null);
@@ -257,7 +263,7 @@ export async function getProfitTrend(days: number = 30): Promise<ProfitTrend[]> 
     startDate.setDate(startDate.getDate() - days);
     const startDateStr = startDate.toISOString();
 
-    const { data, error } = await supabase
+    const { data, error } = await getSupabaseClient()
       .from('price_history')
       .select('recorded_at, profit_amount, profit_percent')
       .gte('recorded_at', startDateStr)
@@ -265,7 +271,7 @@ export async function getProfitTrend(days: number = 30): Promise<ProfitTrend[]> 
 
     if (error || !data || data.length === 0) {
       // Fallback to current products data
-      const { data: currentData } = await supabase
+      const { data: currentData } = await getSupabaseClient()
         .from('products')
         .select('profit_percent, created_at')
         .not('profit_percent', 'is', null)
@@ -323,7 +329,7 @@ export async function getOrdersToday(): Promise<number> {
   try {
     const today = new Date().toISOString().split('T')[0];
     
-    const { count } = await supabase
+    const { count } = await getSupabaseClient()
       .from('orders')
       .select('*', { count: 'exact', head: true })
       .gte('ordered_at', `${today}T00:00:00Z`)
@@ -343,7 +349,7 @@ export async function getRevenueToday(): Promise<number> {
   try {
     const today = new Date().toISOString().split('T')[0];
     
-    const { data } = await supabase
+    const { data } = await getSupabaseClient()
       .from('orders')
       .select('total')
       .gte('ordered_at', `${today}T00:00:00Z`)
@@ -366,7 +372,7 @@ export async function getRevenueToday(): Promise<number> {
  */
 export async function getMarginAlerts(limit: number = 50) {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await getSupabaseClient()
       .from('margin_alerts')
       .select('*, products(title, asin)')
       .eq('acknowledged', false)
@@ -390,7 +396,7 @@ export async function getMarginAlerts(limit: number = 50) {
  */
 export async function acknowledgeAlert(alertId: string, acknowledgedBy: string) {
   try {
-    const { error } = await supabase
+    const { error } = await getSupabaseClient()
       .from('margin_alerts')
       .update({
         acknowledged: true,

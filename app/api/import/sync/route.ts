@@ -13,10 +13,16 @@ import { PRICING_RULES } from '@/lib/config/pricing-rules';
 // CONFIGURATION - Uses PRICING_RULES as single source of truth
 // ═══════════════════════════════════════════════════════════════════════════
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 const BATCH_SIZE = 10;
 const BATCH_DELAY_MS = 100;
@@ -234,20 +240,6 @@ const importJobs = new Map<string, ImportJob>();
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * Create Supabase client
- */
-function getSupabaseClient() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (!supabaseUrl || !supabaseKey) {
-    throw new Error('Missing Supabase configuration');
-  }
-
-  return createClient(supabaseUrl, supabaseKey);
-}
-
-/**
  * Validate ASIN format
  */
 function isValidAsin(asin: string): boolean {
@@ -331,7 +323,7 @@ async function processImport(
     let existingAsins = new Set<string>();
     if (options.skipExisting || options.updateExisting) {
       console.log(`[Import] Checking for existing ASINs...`);
-      const { data, error } = await supabase
+      const { data, error } = await getSupabaseClient()
         .from('products')
         .select('asin')
         .in('asin', items.map(i => i.asin));
@@ -540,7 +532,7 @@ async function processImport(
 
           if (exists && options.updateExisting) {
             // Update existing product
-            const { error } = await supabase
+            const { error } = await getSupabaseClient()
               .from('products')
               .update({
                 title: productData.title,
@@ -583,7 +575,7 @@ async function processImport(
           } else if (!exists) {
             // Insert new product with all fields and proper variant structure
             console.log(`[Import] Inserting new product for ASIN ${item.asin}`);
-            const { error } = await supabase
+            const { error } = await getSupabaseClient()
               .from('products')
               .insert({
                 id: crypto.randomUUID(),
@@ -724,7 +716,7 @@ async function processImport(
     job.completedAt = new Date().toISOString();
     
     // Fetch the created products to return them
-    const { data: createdProducts } = await supabase
+    const { data: createdProducts } = await getSupabaseClient()
       .from('products')
       .select('*')
       .in('asin', items.map(i => i.asin))

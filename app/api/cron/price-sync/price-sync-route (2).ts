@@ -6,10 +6,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { calculateAllPrices } from '@/lib/utils/pricing-calculator';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 export async function GET(request: NextRequest) {
   const startTime = Date.now();
@@ -58,7 +64,7 @@ async function syncAllPrices() {
   let errors = 0;
 
   // Fetch all products with cost price
-  const { data: products, error } = await supabase
+  const { data: products, error } = await getSupabaseClient()
     .from('products')
     .select('id, asin, amazon_cost, list_price')
     .not('amazon_cost', 'is', null)
@@ -88,7 +94,7 @@ async function syncAllPrices() {
       const { listPrice, competitors, profit } = priceResult.data;
 
       // Update product prices
-      const { error: updateError } = await supabase
+      const { error: updateError } = await getSupabaseClient()
         .from('products')
         .update({
           list_price: listPrice,

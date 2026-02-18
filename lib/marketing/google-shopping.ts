@@ -5,10 +5,16 @@
 import { createClient } from '@supabase/supabase-js';
 import { getGoogleShoppingProducts, MarketingProduct } from '../ai/marketing-selection';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 export interface GoogleShoppingProduct {
   id: string;
@@ -273,7 +279,7 @@ export async function generateGoogleShoppingFeed(
       updated_at: new Date().toISOString()
     };
 
-    const { error } = await supabase
+    const { error } = await getSupabaseClient()
       .from('marketing_feeds')
       .upsert(feedData, { onConflict: 'id' });
 
@@ -303,7 +309,7 @@ export async function generateGoogleShoppingFeed(
  */
 export async function getGoogleShoppingStats(): Promise<{ success: boolean; data?: any; error?: string }> {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await getSupabaseClient()
       .from('marketing_feeds')
       .select('*')
       .eq('feed_type', 'google_shopping')
@@ -406,7 +412,7 @@ export async function scheduleGoogleShoppingFeedGeneration(
   try {
     const nextRun = new Date(Date.now() + hours_between * 60 * 60 * 1000);
 
-    const { error } = await supabase
+    const { error } = await getSupabaseClient()
       .from('marketing_schedules')
       .upsert({
         id: 'google_shopping_feed',

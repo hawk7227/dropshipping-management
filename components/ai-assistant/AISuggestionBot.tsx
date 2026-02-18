@@ -1267,14 +1267,14 @@ export function AISuggestionBot({
     try {
       const stateToSave = {
         messages: state.messages.slice(-MAX_MESSAGES), // Keep last N messages
-        conversationHistory: state.conversationHistory.slice(-MAX_HISTORY),
+        conversationHistory: (state.history || []).slice(-MAX_HISTORY),
         settings: state.settings,
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(stateToSave));
     } catch (error) {
       console.error('Failed to save AI bot state:', error);
     }
-  }, [state.messages, state.conversationHistory, state.settings]);
+  }, [state.messages, state.history, state.settings]);
 
   // Keyboard navigation - Escape to minimize
   useEffect(() => {
@@ -1550,3 +1550,4 @@ export function AISuggestionBot({
 }
 
 export default AISuggestionBot;
+

@@ -4,12 +4,24 @@
 import { createClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
 
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+  }
+  return _supabase;
+}
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let _openai: OpenAI | null = null;
+function getOpenAI(): OpenAI {
+  if (!_openai) {
+    _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  }
+  return _openai;
+}
 
 // ============================================================================
 // TYPES
@@ -87,7 +99,7 @@ ${context ? `Context: ${JSON.stringify(context)}` : ''}
 Provide the JSON interpretation.`;
 
   try {
-    const response = await openai.chat.completions.create({
+    const response = await getOpenAI().chat.completions.create({
       model: 'gpt-4-turbo-preview',
       messages: [
         { role: 'system', content: systemPrompt },
@@ -203,7 +215,7 @@ export async function logCommandExecution(
   execution: Partial<CommandExecution>,
   dryRun: boolean = true
 ): Promise<AiCommandLog | null> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('ai_command_logs')
     .insert({
       command,
@@ -235,7 +247,7 @@ async function executePriceUpdate(
   const { filter, new_price, min_margin, max_margin } = interpretation.parameters;
 
   // Build query
-  let query = supabase.from('products').select('id, title, cost_price');
+  let query = getSupabaseClient().from('products').select('id, title, cost_price');
 
   if (filter?.category) {
     query = query.eq('category', filter.category);
@@ -272,7 +284,7 @@ async function executePriceUpdate(
     try {
       const calculatedPrice = new_price || (product.cost_price * (1 + (min_margin || 0.3)));
 
-      const { error: updateError } = await supabase
+      const { error: updateError } = await getSupabaseClient()
         .from('products')
         .update({ retail_price: calculatedPrice, updated_at: new Date().toISOString() })
         .eq('id', product.id);
@@ -299,7 +311,7 @@ async function executePriceSync(
 ): Promise<CommandExecution['results']> {
   const { source = 'amazon', limit = 50 } = interpretation.parameters;
 
-  const { data: products, error } = await supabase
+  const { data: products, error } = await getSupabaseClient()
     .from('products')
     .select('id, asin, title')
     .eq('status', 'active')
@@ -340,7 +352,7 @@ async function executeMarginRuleApplication(
 ): Promise<CommandExecution['results']> {
   const { category, min_margin, target_margin, max_margin } = interpretation.parameters;
 
-  let query = supabase.from('products').select('id, title, cost_price, retail_price');
+  let query = getSupabaseClient().from('products').select('id, title, cost_price, retail_price');
 
   if (category) {
     query = query.eq('category', category);
@@ -379,7 +391,7 @@ async function executeMarginRuleApplication(
 
       const newPrice = Math.max(minPrice, Math.min(targetPrice, maxPrice));
 
-      const { error: updateError } = await supabase
+      const { error: updateError } = await getSupabaseClient()
         .from('products')
         .update({ retail_price: newPrice, updated_at: new Date().toISOString() })
         .eq('id', product.id);
@@ -406,7 +418,7 @@ async function executePriceAdjustment(
 ): Promise<CommandExecution['results']> {
   const { percentage, filter } = interpretation.parameters;
 
-  let query = supabase.from('products').select('id, title, retail_price');
+  let query = getSupabaseClient().from('products').select('id, title, retail_price');
 
   if (filter?.category) {
     query = query.eq('category', filter.category);
@@ -443,7 +455,7 @@ async function executePriceAdjustment(
     try {
       const newPrice = product.retail_price * multiplier;
 
-      const { error: updateError } = await supabase
+      const { error: updateError } = await getSupabaseClient()
         .from('products')
         .update({ retail_price: newPrice, updated_at: new Date().toISOString() })
         .eq('id', product.id);
@@ -474,7 +486,7 @@ async function executeDescriptionGeneration(
 ): Promise<CommandExecution['results']> {
   const { tone = 'professional', length = 'medium' } = interpretation.parameters;
 
-  const { data: products, error } = await supabase
+  const { data: products, error } = await getSupabaseClient()
     .from('products')
     .select('id, title, category')
     .or('description.is.null,description.eq.""')
@@ -505,7 +517,7 @@ async function executeDescriptionGeneration(
     try {
       const prompt = `Generate a ${length} SEO-optimized product description in a ${tone} tone for: ${product.title} (Category: ${product.category})`;
 
-      const response = await openai.chat.completions.create({
+      const response = await getOpenAI().chat.completions.create({
         model: 'gpt-4-turbo-preview',
         messages: [{ role: 'user', content: prompt }],
         max_tokens: length === 'short' ? 100 : length === 'medium' ? 200 : 300,
@@ -513,7 +525,7 @@ async function executeDescriptionGeneration(
 
       const description = response.choices[0].message.content;
 
-      const { error: updateError } = await supabase
+      const { error: updateError } = await getSupabaseClient()
         .from('products')
         .update({ description, updated_at: new Date().toISOString() })
         .eq('id', product.id);
@@ -540,7 +552,7 @@ async function executeTitleUpdate(
 ): Promise<CommandExecution['results']> {
   const { style = 'seo', filter } = interpretation.parameters;
 
-  let query = supabase.from('products').select('id, title, category');
+  let query = getSupabaseClient().from('products').select('id, title, category');
 
   if (filter?.category) {
     query = query.eq('category', filter.category);
@@ -573,7 +585,7 @@ async function executeTitleUpdate(
     try {
       const prompt = `Optimize this product title for ${style}: "${product.title}". Return only the new title.`;
 
-      const response = await openai.chat.completions.create({
+      const response = await getOpenAI().chat.completions.create({
         model: 'gpt-4-turbo-preview',
         messages: [{ role: 'user', content: prompt }],
         max_tokens: 100,
@@ -581,7 +593,7 @@ async function executeTitleUpdate(
 
       const newTitle = response.choices[0].message.content?.trim() || product.title;
 
-      const { error: updateError } = await supabase
+      const { error: updateError } = await getSupabaseClient()
         .from('products')
         .update({ title: newTitle, updated_at: new Date().toISOString() })
         .eq('id', product.id);
@@ -608,7 +620,7 @@ async function executePauseProducts(
 ): Promise<CommandExecution['results']> {
   const { filter } = interpretation.parameters;
 
-  let query = supabase.from('products').select('id, title').eq('status', 'active');
+  let query = getSupabaseClient().from('products').select('id, title').eq('status', 'active');
 
   if (filter?.min_bsr) {
     // In real implementation, would filter by BSR
@@ -642,7 +654,7 @@ async function executePauseProducts(
 
   for (const product of products || []) {
     try {
-      const { error: updateError } = await supabase
+      const { error: updateError } = await getSupabaseClient()
         .from('products')
         .update({ status: 'paused', updated_at: new Date().toISOString() })
         .eq('id', product.id);
@@ -669,7 +681,7 @@ async function executeActivateProducts(
 ): Promise<CommandExecution['results']> {
   const { filter } = interpretation.parameters;
 
-  let query = supabase.from('products').select('id, title').eq('status', 'paused');
+  let query = getSupabaseClient().from('products').select('id, title').eq('status', 'paused');
 
   if (filter?.category) {
     query = query.eq('category', filter.category);
@@ -700,7 +712,7 @@ async function executeActivateProducts(
 
   for (const product of products || []) {
     try {
-      const { error: updateError } = await supabase
+      const { error: updateError } = await getSupabaseClient()
         .from('products')
         .update({ status: 'active', updated_at: new Date().toISOString() })
         .eq('id', product.id);
@@ -731,7 +743,7 @@ async function executeCreateSocialPosts(
 ): Promise<CommandExecution['results']> {
   const { platforms = ['instagram'], filter } = interpretation.parameters;
 
-  let query = supabase.from('products').select('id, title, image_url, retail_price').eq('status', 'active');
+  let query = getSupabaseClient().from('products').select('id, title, image_url, retail_price').eq('status', 'active');
 
   if (filter?.top_n) {
     query = query.limit(filter.top_n);
@@ -765,7 +777,7 @@ async function executeCreateSocialPosts(
       try {
         const prompt = `Generate a social media post caption for ${platform} for this product: ${product.title} ($${product.retail_price}). Make it engaging with emojis and CTAs.`;
 
-        const response = await openai.chat.completions.create({
+        const response = await getOpenAI().chat.completions.create({
           model: 'gpt-4-turbo-preview',
           messages: [{ role: 'user', content: prompt }],
           max_tokens: 150,
@@ -773,7 +785,7 @@ async function executeCreateSocialPosts(
 
         const caption = response.choices[0].message.content;
 
-        const { error: insertError } = await supabase.from('social_posts').insert({
+        const { error: insertError } = await getSupabaseClient().from('social_posts').insert({
           product_id: product.id,
           platform,
           caption,
@@ -805,7 +817,7 @@ async function executeGenerateSeoContent(
 ): Promise<CommandExecution['results']> {
   const { filter } = interpretation.parameters;
 
-  let query = supabase.from('products').select('id, title, category, description').eq('status', 'active');
+  let query = getSupabaseClient().from('products').select('id, title, category, description').eq('status', 'active');
 
   if (filter?.category) {
     query = query.eq('category', filter.category);
@@ -843,7 +855,7 @@ Description: ${product.description}
 
 Return JSON with: meta_title (60 chars), meta_description (155 chars), keywords (5-7)`;
 
-      const response = await openai.chat.completions.create({
+      const response = await getOpenAI().chat.completions.create({
         model: 'gpt-4-turbo-preview',
         messages: [{ role: 'user', content: prompt }],
         response_format: { type: 'json_object' },
@@ -851,7 +863,7 @@ Return JSON with: meta_title (60 chars), meta_description (155 chars), keywords 
 
       const seoData = JSON.parse(response.choices[0].message.content || '{}');
 
-      const { error: updateError } = await supabase
+      const { error: updateError } = await getSupabaseClient()
         .from('products')
         .update({
           meta_title: seoData.meta_title,
@@ -885,7 +897,7 @@ Return JSON with: meta_title (60 chars), meta_description (155 chars), keywords 
  * Get recent command executions
  */
 export async function getCommandHistory(limit: number = 20): Promise<AiCommandLog[]> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('ai_command_logs')
     .select('*')
     .order('created_at', { ascending: false })
@@ -910,7 +922,7 @@ export async function getCommandStats(): Promise<{
   by_category: Record<string, number>;
   by_action: Record<string, number>;
 }> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from('ai_command_logs')
     .select('*');
 

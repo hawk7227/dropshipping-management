@@ -20,10 +20,16 @@ import {
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+  }
+  return _supabase;
+}
 
 const SHOPIFY_SHOP_DOMAIN = process.env.SHOPIFY_SHOP_DOMAIN!;
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN!;
@@ -97,7 +103,7 @@ async function generateDailySocialContent(products: any[]): Promise<number> {
       const scheduledTime = getOptimalPostingTime(platform);
 
       // Save to database
-      await supabase.from('social_posts').insert({
+      await getSupabaseClient().from('social_posts').insert({
         platform: post.platform,
         content: post.content + '\n\n' + post.hashtags.map((h: string) => `#${h}`).join(' '),
         media_urls: post.mediaUrls,
@@ -126,7 +132,7 @@ async function publishScheduledPosts(): Promise<number> {
   const now = new Date().toISOString();
   
   // Find posts that are scheduled and ready to publish
-  const { data: readyPosts, error } = await supabase
+  const { data: readyPosts, error } = await getSupabaseClient()
     .from('social_posts')
     .select('*')
     .eq('status', 'scheduled')
@@ -204,7 +210,7 @@ async function processAbandonedCarts(): Promise<number> {
     if (!checkout.email) continue;
 
     // Check if we've already emailed this checkout
-    const { data: existing } = await supabase
+    const { data: existing } = await getSupabaseClient()
       .from('email_logs')
       .select('id')
       .eq('recipient_email', checkout.email)
@@ -231,7 +237,7 @@ async function processAbandonedCarts(): Promise<number> {
       );
 
       // Log the email (actual sending would integrate with SendGrid/Klaviyo)
-      await supabase.from('email_logs').insert({
+      await getSupabaseClient().from('email_logs').insert({
         sequence_id: 'cart_abandonment',
         recipient_email: checkout.email,
         subject,
@@ -263,7 +269,7 @@ async function processPostPurchase(): Promise<number> {
     if (order.fulfillment_status !== 'fulfilled') continue;
 
     // Check if we've already sent follow-up
-    const { data: existing } = await supabase
+    const { data: existing } = await getSupabaseClient()
       .from('email_logs')
       .select('id')
       .eq('recipient_email', order.email)
@@ -284,7 +290,7 @@ async function processPostPurchase(): Promise<number> {
         'Your Store'
       );
 
-      await supabase.from('email_logs').insert({
+      await getSupabaseClient().from('email_logs').insert({
         sequence_id: 'post_purchase',
         recipient_email: order.email,
         subject,
@@ -371,7 +377,7 @@ async function updateAffiliateStats(): Promise<number> {
     
     for (const discount of discountCodes) {
       // Check if this is an affiliate code
-      const { data: affiliate } = await supabase
+      const { data: affiliate } = await getSupabaseClient()
         .from('affiliates')
         .select('*')
         .eq('promo_code', discount.code.toUpperCase())
@@ -382,7 +388,7 @@ async function updateAffiliateStats(): Promise<number> {
         const commission = orderTotal * (affiliate.commission_rate / 100);
 
         // Record the sale
-        await supabase.from('affiliate_sales').insert({
+        await getSupabaseClient().from('affiliate_sales').insert({
           affiliate_id: affiliate.id,
           order_id: order.id.toString(),
           order_total: orderTotal,
@@ -391,7 +397,7 @@ async function updateAffiliateStats(): Promise<number> {
         });
 
         // Update affiliate totals
-        await supabase
+        await getSupabaseClient()
           .from('affiliates')
           .update({
             total_sales: affiliate.total_sales + orderTotal,

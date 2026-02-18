@@ -10,10 +10,16 @@ import { analyzeProduct, rescoreAllProducts } from '@/lib/ai/ai-analysis-pipelin
 
 // Auth check for cron jobs
 const CRON_SECRET = process.env.CRON_SECRET;
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 // P2 Job type definitions
 type CronJobType = 
@@ -58,7 +64,7 @@ interface CronJobLog {
  */
 async function createCronLog(jobType: CronJobType): Promise<string> {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await getSupabaseClient()
       .from('cron_job_logs')
       .insert({
         job_type,
@@ -96,7 +102,7 @@ async function updateCronLog(
     if (result.message) updateData.message = result.message;
     if (result.details) updateData.details = result.details;
 
-    await supabase
+    await getSupabaseClient()
       .from('cron_job_logs')
       .update(updateData)
       .eq('id', logId);
@@ -110,7 +116,7 @@ async function updateCronLog(
  */
 async function logCronError(logId: string, error: any): Promise<void> {
   try {
-    await supabase
+    await getSupabaseClient()
       .from('cron_job_logs')
       .update({
         status: 'failed',
@@ -161,11 +167,65 @@ export async function GET(request: NextRequest) {
       switch (jobType) {
         case 'product-discovery': {
           // P1.2: Product Discovery - Daily at 4 AM
+          // Item 21: Read config from sourcing_settings table
+          let discoveryCategories = ['kitchen', 'home', 'beauty'];
+          let discoveryMaxProducts = 100;
+          let discoveryEnabled = true;
+
+          try {
+            const { data: settings } = await getSupabaseClient()
+              .from('sourcing_settings')
+              .select('enabled, criteria, cron_interval')
+              .limit(1)
+              .maybeSingle();
+
+            if (settings) {
+              discoveryEnabled = settings.enabled !== false;
+              const criteria = settings.criteria as any;
+              if (criteria?.search_terms && Array.isArray(criteria.search_terms)) {
+                discoveryCategories = criteria.search_terms;
+              }
+              if (criteria?.max_products_per_run) {
+                discoveryMaxProducts = criteria.max_products_per_run;
+              }
+            }
+          } catch (settingsErr) {
+            console.warn('[Cron] Could not read sourcing_settings:', settingsErr);
+          }
+
+          if (!discoveryEnabled) {
+            result = {
+              job: 'product-discovery',
+              success: true,
+              processed: 0,
+              errors: 0,
+              message: 'Auto sourcing is disabled in sourcing_settings',
+              duration_seconds: duration(),
+              timestamp: new Date().toISOString(),
+            };
+            break;
+          }
+
+          console.log(`[Cron] Product discovery: categories=${discoveryCategories.join(', ')}, max=${discoveryMaxProducts}`);
           const discoveryResult = await runP1Discovery({
-            searchTerms: ['kitchen gadgets', 'phone accessories', 'home organization'],
-            maxProducts: 100,
+            categories: discoveryCategories,
+            maxProducts: discoveryMaxProducts,
             dryRun: false
           });
+
+          // Update last_run in sourcing_settings
+          await getSupabaseClient()
+            .from('sourcing_settings')
+            .update({
+              last_run_at: new Date().toISOString(),
+              last_run_status: discoveryResult.errors.length === 0 ? 'completed' : 'failed',
+              last_run_found: discoveryResult.found,
+              last_run_imported: discoveryResult.imported,
+            })
+            .not('id', 'is', null)
+            .then(({ error: updateErr }) => {
+              if (updateErr) console.warn('[Cron] sourcing_settings update error:', updateErr.message);
+            });
 
           result = {
             job: 'product-discovery',
@@ -187,19 +247,31 @@ export async function GET(request: NextRequest) {
 
         case 'price-sync': {
           // P2.2: Price Sync - Every hour
+          // Step 1: Fetch latest prices from Keepa
           const priceResult = await runP1PriceSync({ limit: 50 });
+
+          // Step 2: Apply pricing rules + grace period enforcement (Items 34, 39)
+          let pricingCycleResult = null;
+          try {
+            const { executePricingCycle } = await import('@/lib/pricing-execution');
+            pricingCycleResult = await executePricingCycle();
+          } catch (pricingErr) {
+            console.warn('[Cron] Pricing execution skipped:', pricingErr instanceof Error ? pricingErr.message : pricingErr);
+          }
 
           result = {
             job: 'price-sync',
             success: priceResult.errors === 0,
             processed: priceResult.processed,
             errors: priceResult.errors,
-            message: `Price sync completed: ${priceResult.updated} updated, ${priceResult.errors} errors`,
+            message: `Price sync: ${priceResult.updated} updated, ${priceResult.errors} errors` +
+              (pricingCycleResult ? ` | Pricing: ${pricingCycleResult.pricesUpdated} repriced, ${pricingCycleResult.autoPaused} paused, ${pricingCycleResult.shopifyPushed} pushed` : ''),
             duration_seconds: duration(),
             timestamp: new Date().toISOString(),
             details: {
               updated: priceResult.updated,
-              errorDetails: priceResult.errorDetails
+              errorDetails: priceResult.errorDetails,
+              pricingCycle: pricingCycleResult || null,
             }
           };
           break;
@@ -227,64 +299,166 @@ export async function GET(request: NextRequest) {
 
         case 'shopify-sync': {
           // P2.4: Shopify Sync - Every 6 hours
-          // Get products that need Shopify sync
-          const { data: products } = await supabase
+          // REAL sync: creates products in Shopify via Admin API
+          const SHOP_DOMAIN = process.env.SHOPIFY_STORE_DOMAIN || process.env.SHOPIFY_SHOP_DOMAIN || process.env.NEXT_PUBLIC_SHOPIFY_SHOP_DOMAIN;
+          const SHOP_TOKEN = process.env.SHOPIFY_ADMIN_ACCESS_TOKEN || process.env.SHOPIFY_ACCESS_TOKEN;
+
+          if (!SHOP_DOMAIN || !SHOP_TOKEN) {
+            result = {
+              job: 'shopify-sync',
+              success: false,
+              processed: 0,
+              errors: 1,
+              message: 'Shopify credentials not configured (SHOPIFY_STORE_DOMAIN + SHOPIFY_ACCESS_TOKEN)',
+              duration_seconds: duration(),
+              timestamp: new Date().toISOString()
+            };
+            break;
+          }
+
+          // Get products that need Shopify sync (no real shopify_product_id)
+          const { data: unsyncedProducts } = await getSupabaseClient()
             .from('products')
-            .select('id, asin, title, brand, category, description, image_url, rating, review_count, source, created_at, updated_at')
-            .not('asin', 'is', null)
-            .is('shopify_product_id', 'is', null)
-            .limit(100);
+            .select('id, asin, title, brand, category, product_type, description, image_url, images, rating, review_count, retail_price, cost_price, amazon_price, compare_at_price, status, tags, source_url')
+            .or('shopify_product_id.is.null,shopify_product_id.like.sync-%')
+            .not('title', 'is', null)
+            .limit(50);
 
           let synced = 0;
-          let errors = 0;
+          let syncErrors = 0;
+          const syncErrorDetails: string[] = [];
 
-          if (products && products.length > 0) {
-            for (const product of products) {
+          if (unsyncedProducts && unsyncedProducts.length > 0) {
+            console.log(`[Cron] Shopify sync: ${unsyncedProducts.length} products to push`);
+
+            for (const product of unsyncedProducts) {
               try {
-                // Convert to normalized format
-                const normalizedProduct = {
-                  id: product.id,
-                  asin: product.asin,
-                  title: product.title,
-                  brand: product.brand || 'Unknown',
-                  category: product.category || 'General',
-                  description: product.description || '',
-                  main_image: product.image_url || '',
-                  images: [],
-                  rating: product.rating || null,
-                  ratings_total: product.review_count || null,
-                  status: 'active',
-                  source: product.source || 'unknown',
-                  created_at: product.created_at,
-                  updated_at: product.updated_at
+                const costFromAmazon = product.cost_price || product.amazon_price || 0;
+                const sellPrice = product.retail_price 
+                  ? product.retail_price.toFixed(2) 
+                  : costFromAmazon > 0 ? (costFromAmazon * 1.70).toFixed(2) : '0.00';
+                const sellNum = parseFloat(sellPrice);
+                const costPrice = costFromAmazon > 0 ? costFromAmazon.toFixed(2) : null;
+                
+                // Competitor display prices (multipliers on YOUR selling price)
+                const amazonDisplay = sellNum > 0 ? (sellNum * 1.85).toFixed(2) : null;
+                const costcoDisplay = sellNum > 0 ? (sellNum * 1.82).toFixed(2) : null;
+                const ebayDisplay = sellNum > 0 ? (sellNum * 1.90).toFixed(2) : null;
+                const samsDisplay = sellNum > 0 ? (sellNum * 1.80).toFixed(2) : null;
+                
+                // Compare-at = highest competitor (eBay) for strikethrough
+                const compareAtPrice = ebayDisplay;
+
+                // Build tags for collection matching
+                const tagParts: string[] = [];
+                if (product.asin) tagParts.push(`asin-${product.asin}`);
+                if (product.category) {
+                  tagParts.push(product.category);
+                  product.category.split(/[&,\/]/).map((t: string) => t.trim()).filter(Boolean).forEach((t: string) => {
+                    if (t !== product.category) tagParts.push(t);
+                  });
+                }
+                if (product.product_type) tagParts.push(product.product_type);
+                if (product.brand && product.brand !== 'Unknown') tagParts.push(product.brand);
+                tagParts.push('auto-imported');
+                if (product.tags && Array.isArray(product.tags)) {
+                  product.tags.forEach((t: string) => { if (t) tagParts.push(t); });
+                }
+                const uniqueTags = [...new Set(tagParts)].join(', ');
+
+                const shopifyPayload = {
+                  product: {
+                    title: product.title,
+                    body_html: product.description || `${product.title} - Premium quality product`,
+                    vendor: product.brand || 'Unknown',
+                    product_type: product.product_type || product.category || 'General',
+                    tags: uniqueTags,
+                    status: product.status === 'active' ? 'active' : 'draft',
+                    variants: [{
+                      price: sellPrice,
+                      compare_at_price: compareAtPrice,
+                      cost: costPrice,
+                      sku: product.asin || product.id,
+                      inventory_management: 'shopify',
+                      inventory_quantity: 100,
+                      requires_shipping: true,
+                    }],
+                    images: product.image_url ? [{ src: product.image_url }] : [],
+                    metafields: [
+                      product.asin ? { namespace: 'custom', key: 'asin', value: product.asin, type: 'single_line_text_field' } : null,
+                      costPrice ? { namespace: 'product_cost', key: 'cost_price', value: costPrice, type: 'number_decimal' } : null,
+                      amazonDisplay ? { namespace: 'compare_prices', key: 'amazon_price', value: amazonDisplay, type: 'number_decimal' } : null,
+                      costcoDisplay ? { namespace: 'compare_prices', key: 'costco_price', value: costcoDisplay, type: 'number_decimal' } : null,
+                      ebayDisplay ? { namespace: 'compare_prices', key: 'ebay_price', value: ebayDisplay, type: 'number_decimal' } : null,
+                      samsDisplay ? { namespace: 'compare_prices', key: 'sams_price', value: samsDisplay, type: 'number_decimal' } : null,
+                      product.rating ? { namespace: 'social_proof', key: 'rating', value: product.rating.toString(), type: 'number_decimal' } : null,
+                      product.review_count ? { namespace: 'social_proof', key: 'total_sold', value: product.review_count.toString(), type: 'single_line_text_field' } : null,
+                     (product.source_url || product.asin) ? { namespace: 'custom', key: 'supplier_url_flow_access', value: product.source_url || `https://www.amazon.com/dp/${product.asin}`, type: 'url' } : null,
+                     (product.source_url || product.asin) ? { namespace: 'custom', key: 'supplier_url', value: product.source_url || `https://www.amazon.com/dp/${product.asin}`, type: 'url' } : null,
+                    ].filter(Boolean),
+                  }
                 };
 
-                // Import to Shopify (this would use the import pipeline)
-                // For now, we'll just mark as synced
-                await supabase
+                const shopifyRes = await fetch(
+                  `https://${SHOP_DOMAIN}/admin/api/2024-01/products.json`,
+                  {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'X-Shopify-Access-Token': SHOP_TOKEN,
+                    },
+                    body: JSON.stringify(shopifyPayload),
+                  }
+                );
+
+                if (!shopifyRes.ok) {
+                  const errText = await shopifyRes.text().catch(() => '');
+                  throw new Error(`Shopify HTTP ${shopifyRes.status}: ${errText.slice(0, 200)}`);
+                }
+
+                const shopifyData = await shopifyRes.json();
+                const shopifyProductId = shopifyData.product?.id?.toString();
+
+                if (!shopifyProductId) {
+                  throw new Error('Shopify returned no product ID');
+                }
+
+                // Update Supabase with REAL Shopify product ID
+                await getSupabaseClient()
                   .from('products')
-                  .update({ 
-                    shopify_product_id: `sync-${Date.now()}`,
-                    synced_at: new Date().toISOString()
+                  .update({
+                    shopify_product_id: shopifyProductId,
+                    shopify_id: shopifyProductId,
+                    synced_at: new Date().toISOString(),
                   })
                   .eq('id', product.id);
 
                 synced++;
+                console.log(`[Cron] Shopify sync: ${product.asin || product.id} → Shopify #${shopifyProductId}`);
+
+                // Rate limit: 2 requests per second (Shopify standard)
+                await new Promise(resolve => setTimeout(resolve, 500));
+
               } catch (error) {
-                errors++;
-                console.error(`Shopify sync error for ${product.asin}:`, error);
+                syncErrors++;
+                const msg = `${product.asin || product.id}: ${error instanceof Error ? error.message : 'Unknown'}`;
+                syncErrorDetails.push(msg);
+                console.error(`[Cron] Shopify sync error:`, msg);
               }
             }
           }
 
           result = {
             job: 'shopify-sync',
-            success: errors === 0,
+            success: syncErrors === 0,
             processed: synced,
-            errors,
-            message: `Shopify sync completed: ${synced} synced, ${errors} errors`,
+            errors: syncErrors,
+            message: `Shopify sync: ${synced} pushed to Shopify, ${syncErrors} errors`,
             duration_seconds: duration(),
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            details: {
+              errorDetails: syncErrorDetails,
+            }
           };
           break;
         }
@@ -294,7 +468,7 @@ export async function GET(request: NextRequest) {
           // This would sync orders from Shopify, eBay, TikTok, etc.
           // For now, we'll implement a basic order aggregation
           
-          const { data: orders } = await supabase
+          const { data: orders } = await getSupabaseClient()
             .from('unified_orders')
             .select('id, channel, channel_order_id, total, created_at')
             .gte('created_at', new Date(Date.now() - 15 * 60 * 1000).toISOString())
@@ -310,7 +484,7 @@ export async function GET(request: NextRequest) {
             }, {} as Record<string, number>);
 
             for (const [channel, count] of Object.entries(channelStats)) {
-              await supabase
+              await getSupabaseClient()
                 .from('channel_performance')
                 .upsert({
                   date: new Date().toISOString().split('T')[0],
@@ -342,13 +516,13 @@ export async function GET(request: NextRequest) {
           const today = new Date().toISOString().split('T')[0];
           
           // Product stats
-          const { data: productStats } = await supabase
+          const { data: productStats } = await getSupabaseClient()
             .from('products')
             .select('status, source')
             .gte('created_at', today);
 
           // Order stats
-          const { data: orderStats } = await supabase
+          const { data: orderStats } = await getSupabaseClient()
             .from('unified_orders')
             .select('total, channel')
             .gte('created_at', today);
@@ -397,17 +571,62 @@ export async function GET(request: NextRequest) {
         }
 
         case 'google-shopping':
-        case 'omnipresence': 
-        case 'daily-learning': {
-          // P3 jobs - stubs for now
+        case 'omnipresence': {
+          // P3: Programmatic SEO + FAQ generation (Items 42, 43)
+          let seoResult = null;
+          let faqResult = null;
+          try {
+            const { executeSEOCycle } = await import('@/lib/programmatic-seo-engine');
+            seoResult = await executeSEOCycle();
+          } catch (seoErr) {
+            console.warn('[Cron] SEO cycle skipped:', seoErr instanceof Error ? seoErr.message : seoErr);
+          }
+          try {
+            const { generateAllFAQs } = await import('@/lib/faq-schema-generator');
+            faqResult = await generateAllFAQs();
+          } catch (faqErr) {
+            console.warn('[Cron] FAQ generation skipped:', faqErr instanceof Error ? faqErr.message : faqErr);
+          }
+
           result = {
-            job: jobType,
+            job: 'omnipresence',
             success: true,
-            processed: 0,
-            errors: 0,
-            message: `${jobType} completed (P3 stub)`,
+            processed: (seoResult?.pagesGenerated || 0) + (faqResult?.generated || 0),
+            errors: [...(seoResult?.errors || []), ...(faqResult?.errors || [])].length,
+            message: `SEO: ${seoResult?.pagesGenerated || 0} pages | FAQ: ${faqResult?.generated || 0} generated`,
             duration_seconds: duration(),
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            details: { seo: seoResult, faq: faqResult },
+          };
+          break;
+        }
+
+        case 'daily-learning': {
+          // P3: Behavioral segmentation + GSC fetch (Items 46, 47)
+          let segResult = null;
+          let gscResult = null;
+          try {
+            const { runSegmentation } = await import('@/lib/behavioral-segmentation');
+            segResult = await runSegmentation();
+          } catch (segErr) {
+            console.warn('[Cron] Segmentation skipped:', segErr instanceof Error ? segErr.message : segErr);
+          }
+          try {
+            const { fetchSearchPerformance } = await import('@/lib/google-search-console');
+            gscResult = await fetchSearchPerformance({ days: 7 });
+          } catch (gscErr) {
+            console.warn('[Cron] GSC fetch skipped:', gscErr instanceof Error ? gscErr.message : gscErr);
+          }
+
+          result = {
+            job: 'daily-learning',
+            success: true,
+            processed: (segResult?.assignments || 0) + (gscResult?.stored || 0),
+            errors: [...(segResult?.errors || []), ...(gscResult?.errors || [])].length,
+            message: `Segments: ${segResult?.assignments || 0} assignments | GSC: ${gscResult?.stored || 0} rows, ${gscResult?.opportunities?.length || 0} opportunities`,
+            duration_seconds: duration(),
+            timestamp: new Date().toISOString(),
+            details: { segmentation: segResult, gsc: gscResult },
           };
           break;
         }
@@ -465,7 +684,7 @@ export async function POST(request: NextRequest) {
  */
 async function getAIAnalysisStats(): Promise<{ success: boolean; data?: any }> {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await getSupabaseClient()
       .from('ai_scores')
       .select('overall_score, score_tier, scored_at');
 
@@ -488,3 +707,4 @@ async function getAIAnalysisStats(): Promise<{ success: boolean; data?: any }> {
     return { success: false };
   }
 }
+

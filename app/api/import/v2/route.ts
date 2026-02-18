@@ -10,10 +10,16 @@ import { enrichProductsWithKeepa, getTokenUsage } from '@/lib/services/keepa-enh
 // CONFIGURATION
 // ═══════════════════════════════════════════════════════════════════════════
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return _supabase;
+}
 
 const BATCH_SIZE = 50;
 const MAX_ITEMS_PER_IMPORT = 1000;
@@ -164,7 +170,7 @@ export async function POST(request: NextRequest) {
     const jobId = generateJobId();
     const now = new Date().toISOString();
     
-    await supabase.from('import_batches').insert({
+    await getSupabaseClient().from('import_batches').insert({
       id: jobId,
       job_type: mode,
       status: 'processing',
@@ -199,7 +205,7 @@ export async function POST(request: NextRequest) {
     // STEP 3: Check for existing products in database
     // ═══════════════════════════════════════════════════════════════════════
     
-    const { data: existingProducts } = await supabase
+    const { data: existingProducts } = await getSupabaseClient()
       .from('products')
       .select('asin')
       .in('asin', asinsToProcess);
@@ -262,6 +268,9 @@ export async function POST(request: NextRequest) {
         title: keepaData.title || existingFileData?.title || `Product ${asin}`,
         handle: `product-${asin.toLowerCase()}`,
         description: keepaData.description || null,
+        
+        // AI-optimized title (Spec Item 33) — set below after optimization
+        original_title: keepaData.title || existingFileData?.title || `Product ${asin}`,
         
         // Images - THIS IS THE KEY FIX
         image_url: keepaData.mainImage,
@@ -331,12 +340,62 @@ export async function POST(request: NextRequest) {
     }
     
     // ═══════════════════════════════════════════════════════════════════════
+    // STEP 4.5: AI Title Optimization (Spec Item 33)
+    // Optimizes titles for Google Shopping + SEO if OPENAI_API_KEY is set
+    // Falls back to raw title if AI unavailable or fails
+    // ═══════════════════════════════════════════════════════════════════════
+    
+    const allProducts = [...productsToInsert, ...productsToUpdate];
+    if (process.env.OPENAI_API_KEY && allProducts.length > 0) {
+      console.log(`[Import V2] Optimizing ${allProducts.length} titles with AI...`);
+      try {
+        const { optimizeTitle } = await import('@/lib/ai-optimization');
+        
+        // Process in parallel batches of 5 to avoid rate limits
+        const BATCH_SIZE = 5;
+        for (let i = 0; i < allProducts.length; i += BATCH_SIZE) {
+          const batch = allProducts.slice(i, i + BATCH_SIZE);
+          const optimizations = await Promise.allSettled(
+            batch.map(async (prod) => {
+              const aiProduct = {
+                id: prod.asin,
+                title: prod.original_title || prod.title,
+                description: prod.description || '',
+                price: prod.price || 0,
+                costPrice: prod.cost || prod.amazon_price,
+                category: prod.category,
+              };
+              const result = await optimizeTitle(aiProduct);
+              return { asin: prod.asin, optimizedTitle: result.title, score: result.score };
+            })
+          );
+          
+          // Apply successful optimizations
+          for (const opt of optimizations) {
+            if (opt.status === 'fulfilled' && opt.value.optimizedTitle) {
+              const target = allProducts.find(p => p.asin === opt.value.asin);
+              if (target && opt.value.score > 40) {
+                target.title = opt.value.optimizedTitle;
+                target.ai_title_score = opt.value.score;
+                target.ai_optimized_at = new Date().toISOString();
+              }
+            }
+          }
+        }
+        console.log(`[Import V2] AI title optimization complete`);
+      } catch (aiErr) {
+        // Non-fatal — continue with raw titles
+        console.warn('[Import V2] AI title optimization skipped:', aiErr instanceof Error ? aiErr.message : aiErr);
+      }
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════════
     // STEP 5: Insert/Update database
     // ═══════════════════════════════════════════════════════════════════════
     
     // Insert new products
     if (productsToInsert.length > 0) {
-      const { error: insertError } = await supabase
+      const { error: insertError } = await getSupabaseClient()
         .from('products')
         .insert(productsToInsert);
       
@@ -352,7 +411,7 @@ export async function POST(request: NextRequest) {
     // Update existing products
     if (productsToUpdate.length > 0) {
       for (const product of productsToUpdate) {
-        const { error: updateError } = await supabase
+        const { error: updateError } = await getSupabaseClient()
           .from('products')
           .update(product)
           .eq('asin', product.asin);
@@ -371,7 +430,7 @@ export async function POST(request: NextRequest) {
     // STEP 6: Update import batch record
     // ═══════════════════════════════════════════════════════════════════════
     
-    await supabase
+    await getSupabaseClient()
       .from('import_batches')
       .update({
         status: 'completed',
@@ -434,7 +493,7 @@ export async function GET(request: NextRequest) {
   }
   
   // Get job status
-  const { data: job, error } = await supabase
+  const { data: job, error } = await getSupabaseClient()
     .from('import_batches')
     .select('*')
     .eq('id', jobId)
