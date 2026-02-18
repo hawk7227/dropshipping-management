@@ -169,6 +169,11 @@ export async function POST(request: NextRequest) {
               taxable: true,
             }],
             images: imgs,
+            metafields: [
+              { namespace: 'comparisons', key: 'price_amazon', value: String(competitorAmazon), type: 'number_decimal' },
+              { namespace: 'comparisons', key: 'price_costco', value: String(competitorCostco), type: 'number_decimal' },
+              { namespace: 'comparisons', key: 'price_ebay', value: String(competitorEbay), type: 'number_decimal' },
+            ],
           },
         };
 
@@ -176,10 +181,26 @@ export async function POST(request: NextRequest) {
         let res: Response;
 
         if (p.shopify_product_id) {
+          // UPDATE — metafields must be sent separately for existing products
           const up = JSON.parse(JSON.stringify(payload));
+          const metafieldsToSet = up.product.metafields;
+          delete up.product.metafields;
           if (p.shopify_variant_id) up.product.variants[0].id = p.shopify_variant_id;
           res = await fetch(`${base}/products/${p.shopify_product_id}.json`, { method: 'PUT', headers: hdr, body: JSON.stringify(up) });
+
+          // Set metafields separately for updates
+          if (res.ok && metafieldsToSet?.length) {
+            for (const mf of metafieldsToSet) {
+              try {
+                await fetch(`${base}/products/${p.shopify_product_id}/metafields.json`, {
+                  method: 'POST', headers: hdr,
+                  body: JSON.stringify({ metafield: { ...mf, owner_id: p.shopify_product_id, owner_resource: 'product' } }),
+                });
+              } catch (_) {}
+            }
+          }
         } else {
+          // CREATE — metafields included in POST payload
           res = await fetch(`${base}/products.json`, { method: 'POST', headers: hdr, body: JSON.stringify(payload) });
         }
 
