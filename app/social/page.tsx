@@ -574,7 +574,6 @@ export default function MediaMarketingPage() {
   // GOOGLE SEO DASHBOARD STATE
   const [googleSubTab, setGoogleSubTab] = useState<'feed' | 'console' | 'seoengine' | 'sitemap' | 'schema' | 'setup'>('feed');
   const [gscDateRange, setGscDateRange] = useState<'7d' | '14d' | '28d' | '90d'>('7d');
-  const [seoPages, setSeoPages] = useState<{ title: string; slug: string; impressions: number; clicks: number; status: string; date: string }[]>([]);
   const [feedIssues, setFeedIssues] = useState(14);
 
   // EDIT POST STATE
@@ -582,9 +581,8 @@ export default function MediaMarketingPage() {
   const [editingContent, setEditingContent] = useState('');
   const [editingHook, setEditingHook] = useState('');
 
-  // GOOGLE SEO DASHBOARD STATE
   const [googleSeoTab, setGoogleSeoTab] = useState<'feed' | 'console' | 'engine' | 'sitemap' | 'schema' | 'setup'>('console');
-  const [seoPages, setSeoPages] = useState<{ id: string; title: string; slug: string; status: string; impressions: number; clicks: number; content: string; niche: string }[]>([]);
+  const [seoPages, setSeoPages] = useState<{ id: string; title: string; slug: string; status: string; impressions: number; clicks: number; content: string; niche: string; date: string }[]>([]);
   const [seoRunning, setSeoRunning] = useState(false);
 
   // VAULT EDIT STATE
@@ -4161,26 +4159,29 @@ export default function MediaMarketingPage() {
                 <table className="w-full text-xs">
                   <thead><tr className="border-b border-[#27272a] text-[#52525b]"><th className="text-left p-3">Product</th><th className="text-left p-3">Price</th><th className="text-left p-3">Status</th><th className="text-left p-3">Issues</th></tr></thead>
                   <tbody>
-                    {selectedNiche === 'evenbetterbuy' ? [
-                      { name: 'Wireless Earbuds Pro', price: '$24.99', status: 'Active', issues: 'None' },
-                      { name: 'USB-C Hub 7-in-1', price: '$18.49', status: 'Active', issues: 'None' },
-                      { name: 'LED Strip Lights 50ft', price: '$12.99', status: 'Disapproved', issues: 'Missing GTIN' },
-                      { name: 'Portable Blender', price: '$22.99', status: 'Disapproved', issues: 'Image quality' },
-                      { name: 'Phone Stand Adjustable', price: '$9.99', status: 'Active', issues: 'None' },
-                    ] : selectedNiche === 'xtremenad' ? [
-                      { name: 'XtremeNad 5-in-1 Gummy (30ct)', price: '$49.00', status: 'Active', issues: 'None' },
-                      { name: 'XtremeNad 5-in-1 Gummy (60ct)', price: '$89.00', status: 'Active', issues: 'None' },
-                      { name: 'XtremeNad Free Bottle Trial', price: '$1.95', status: 'Pending', issues: 'Subscription disclosure' },
-                    ] : [
-                      { name: 'No products configured yet', price: '-', status: 'N/A', issues: 'Setup required' },
-                    ]).map((p, i) => (
-                      <tr key={i} className="border-b border-[#1a1a24] hover:bg-[#1a1a24]">
-                        <td className="p-3 text-white">{p.name}</td>
-                        <td className="p-3 text-[#a1a1aa]">{p.price}</td>
-                        <td className="p-3"><span className={`text-[9px] px-2 py-0.5 rounded-full ${p.status === 'Active' ? 'bg-green-500/15 text-green-400' : p.status === 'Disapproved' ? 'bg-red-500/15 text-red-400' : 'bg-yellow-500/15 text-yellow-400'}`}>{p.status}</span></td>
-                        <td className="p-3 text-[#71717a]">{p.issues}</td>
-                      </tr>
-                    ))}
+                    {(() => {
+                      const products = selectedNiche === 'evenbetterbuy' ? [
+                        { name: 'Wireless Earbuds Pro', price: '$24.99', status: 'Active', issues: 'None' },
+                        { name: 'USB-C Hub 7-in-1', price: '$18.49', status: 'Active', issues: 'None' },
+                        { name: 'LED Strip Lights 50ft', price: '$12.99', status: 'Disapproved', issues: 'Missing GTIN' },
+                        { name: 'Portable Blender', price: '$22.99', status: 'Disapproved', issues: 'Image quality' },
+                        { name: 'Phone Stand Adjustable', price: '$9.99', status: 'Active', issues: 'None' },
+                      ] : selectedNiche === 'xtremenad' ? [
+                        { name: 'XtremeNad 5-in-1 Gummy (30ct)', price: '$49.00', status: 'Active', issues: 'None' },
+                        { name: 'XtremeNad 5-in-1 Gummy (60ct)', price: '$89.00', status: 'Active', issues: 'None' },
+                        { name: 'XtremeNad Free Bottle Trial', price: '$1.95', status: 'Pending', issues: 'Subscription disclosure' },
+                      ] : [
+                        { name: 'No products configured yet', price: '-', status: 'N/A', issues: 'Setup required' },
+                      ];
+                      return products.map((p, i) => (
+                        <tr key={i} className="border-b border-[#1a1a24] hover:bg-[#1a1a24]">
+                          <td className="p-3 text-white">{p.name}</td>
+                          <td className="p-3 text-[#a1a1aa]">{p.price}</td>
+                          <td className="p-3"><span className={`text-[9px] px-2 py-0.5 rounded-full ${p.status === 'Active' ? 'bg-green-500/15 text-green-400' : p.status === 'Disapproved' ? 'bg-red-500/15 text-red-400' : 'bg-yellow-500/15 text-yellow-400'}`}>{p.status}</span></td>
+                          <td className="p-3 text-[#71717a]">{p.issues}</td>
+                        </tr>
+                      ));
+                    })()}
                   </tbody>
                 </table>
               </div>
