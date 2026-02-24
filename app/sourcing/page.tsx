@@ -252,9 +252,8 @@ async function enrichProduct(raw:ReturnType<typeof parseCSV>[0], idx:number, onS
       flagReasons.push('Could not fetch image from Amazon — deploy /api/amazon-image route');
     }
   } else if (hasAsin && skipImageFetch) {
-    // Large import — build CDN URL from ASIN as placeholder, fetch real images later
-    enrichedImage = `https://m.media-amazon.com/images/I/${raw.asin}._AC_SL1500_.jpg`;
-    enrichedImages = [enrichedImage];
+    // Large import — skip live fetching, flag for later
+    flagReasons.push('Image fetch deferred (large import) — use retry button after import');
   } else {
     flagReasons.push('No image and no ASIN to source from');
   }
