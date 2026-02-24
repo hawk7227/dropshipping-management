@@ -358,7 +358,7 @@ export default function CommandCenter() {
         
         const enriched = data.enriched || {};
         const enrichedCount = Object.keys(enriched).length;
-        setEnrichProgress(prev => ({ ...prev, tokensLeft: data.summary?.tokensLeft || 0, currentBatch: `Batch ${Math.floor(i/BATCH)+1}: ${enrichedCount} products returned, ${data.summary?.passed || 0} passed criteria` }));
+        setEnrichProgress(prev => ({ ...prev, tokensLeft: 0, currentBatch: `Batch ${Math.floor(i/BATCH)+1}: ${enrichedCount} products returned, ${data.summary?.passed || 0} passed criteria` }));
 
         // Merge enriched data into products
         for (let j = 0; j < updated.length; j++) {
@@ -389,10 +389,10 @@ export default function CommandCenter() {
         if (testOnly) { setEnriching(false); return; }
       }
 
-      // Rate limit: wait 60s between batches (1 token/min refill, 50 tokens per batch)
+      // Rate limit: 200ms between parallel chunks (Rainforest has no token limit)
       if (i + BATCH < maxAsins.length) {
-        setEnrichProgress(prev => ({ ...prev, currentBatch: `Waiting 60s for token refill... (${prev.tokensLeft} tokens left)` }));
-        await new Promise(r => setTimeout(r, 60000));
+        setEnrichProgress(prev => ({ ...prev, currentBatch: `Processing next batch...` }));
+        await new Promise(r => setTimeout(r, 500));
       }
     }
 
@@ -562,7 +562,7 @@ export default function CommandCenter() {
                   </div>
                 </div>
                 <p style={{ fontSize:'10px', color:'#777', margin:'0 0 8px', lineHeight:'1.5' }}>
-                  Have a list of 15K ASINs? Drop it. Auto-extracts all ASINs, then hit &quot;Enrich via Keepa&quot; to pull 
+                  Have a list of 15K ASINs? Drop it. Auto-extracts all ASINs, then hit &quot;Enrich via Rainforest&quot; to pull 
                   title, image, price, brand, category, BSR, rating, availability — with criteria-first filtering 
                   to save API tokens.
                 </p>
@@ -720,10 +720,10 @@ export default function CommandCenter() {
             <div style={{ background:'#111', borderRadius:'10px', padding:'12px 16px', border:`1px solid ${enrichProgress.error ? '#ef444433' : '#7c3aed33'}`, marginBottom:'12px' }}>
               <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'6px' }}>
                 <span style={{ fontSize:'10px', color: enrichProgress.error ? '#ef4444' : '#7c3aed', fontWeight:600 }}>
-                  {enrichProgress.error ? '❌ Enrichment Error' : enriching ? '🔍 Enriching via Keepa API...' : '✅ Enrichment Complete'}
+                  {enrichProgress.error ? '❌ Enrichment Error' : enriching ? '🔍 Enriching via Rainforest API...' : '✅ Enrichment Complete'}
                 </span>
                 <span style={{ fontSize:'9px', color:'#555' }}>
-                  {enrichProgress.tokensLeft > 0 ? `Tokens left: ${enrichProgress.tokensLeft.toLocaleString()}` : ''}
+                  {enrichProgress.tokensLeft > 0 ? `Cost: ${enrichProgress.tokensLeft.toLocaleString()}` : ''}
                 </span>
               </div>
               <div style={{ background:'#1a1a2e', borderRadius:'4px', height:'6px', overflow:'hidden' }}>

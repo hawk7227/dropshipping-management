@@ -1,32 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const KEEPA_KEY = process.env.KEEPA_API_KEY || '';
-const KEEPA_BASE = 'https://api.keepa.com';
+const RAINFOREST_KEY = process.env.RAINFOREST_API_KEY || '';
+const RAINFOREST_BASE = 'https://api.rainforestapi.com/request';
 
-function keepaPrice(val: number | undefined): number {
-  if (!val || val < 0) return 0;
-  return val / 100;
-}
-
-// GET /api/enrich?check=true — verify API key + token balance
+// GET /api/enrich — check API config
 export async function GET() {
-  if (!KEEPA_KEY || KEEPA_KEY === 'your_keepa_api_key') {
-    return NextResponse.json({ error: 'KEEPA_API_KEY not set in environment', configured: false }, { status: 500 });
+  if (!RAINFOREST_KEY || RAINFOREST_KEY === 'your_rainforest_api_key') {
+    return NextResponse.json({ error: 'RAINFOREST_API_KEY not set', configured: false }, { status: 500 });
   }
-  try {
-    const res = await fetch(`${KEEPA_BASE}/token?key=${KEEPA_KEY}`);
-    const data = await res.json();
-    return NextResponse.json({ configured: true, tokensLeft: data.tokensLeft, refillIn: data.refillIn, refillRate: data.refillRate });
-  } catch (e: unknown) {
-    return NextResponse.json({ error: String(e), configured: false }, { status: 500 });
-  }
+  return NextResponse.json({ configured: true, api: 'rainforest', note: 'Ready. ~$0.02 per product lookup.' });
 }
 
-// POST /api/enrich — batch enrich ASINs via Keepa
-// Body: { asins: string[], criteria?: { minPrice, maxPrice, minRating, minReviews, primeOnly, maxBSR, markup, maxRetail } }
+// POST /api/enrich — enrich ASINs via Rainforest (one at a time, but no token limits)
+// Body: { asins: string[], criteria?: {...} }
 export async function POST(request: NextRequest) {
-  if (!KEEPA_KEY || KEEPA_KEY === 'your_keepa_api_key') {
-    return NextResponse.json({ error: 'KEEPA_API_KEY not set' }, { status: 500 });
+  if (!RAINFOREST_KEY || RAINFOREST_KEY === 'your_rainforest_api_key') {
+    return NextResponse.json({ error: 'RAINFOREST_API_KEY not set' }, { status: 500 });
   }
 
   try {
@@ -36,26 +25,10 @@ export async function POST(request: NextRequest) {
 
     if (!asins.length) return NextResponse.json({ error: 'No ASINs provided' }, { status: 400 });
 
-    // User has 60 tokens, 1/min refill — keep batches small
+    // Process up to 10 at a time (parallel) to stay fast but not overwhelm
+    const PARALLEL = 5;
     const batch = asins.slice(0, Math.min(asins.length, 50));
-
-    const params = new URLSearchParams({
-      key: KEEPA_KEY,
-      domain: '1', // amazon.com
-      asin: batch.join(','),
-      stats: '180', // 180-day stats summary
-      history: '0', // skip full price history
-      offers: '0', // skip offers
-    });
-
-    const res = await fetch(`${KEEPA_BASE}/product?${params.toString()}`);
-    if (!res.ok) {
-      const text = await res.text();
-      return NextResponse.json({ error: `Keepa ${res.status}: ${text}` }, { status: res.status });
-    }
-
-    const data = await res.json();
-    const products = data.products || [];
+    const markup = criteria.markup || 70;
 
     interface EnrichedProduct {
       title: string; asin: string; price: number; image: string; description: string;
@@ -68,88 +41,95 @@ export async function POST(request: NextRequest) {
     const enriched: Record<string, EnrichedProduct> = {};
     let passed = 0, rejected = 0;
     const rejectReasons: Record<string, number> = {};
+    const errors: string[] = [];
 
-    const markup = criteria.markup || 70; // default 70% markup
+    // Process in parallel chunks
+    for (let i = 0; i < batch.length; i += PARALLEL) {
+      const chunk = batch.slice(i, i + PARALLEL);
 
-    for (const p of products) {
-      const asin = p.asin;
-      const stats = p.stats || {};
+      const results = await Promise.allSettled(
+        chunk.map(async (asin) => {
+          const params = new URLSearchParams({
+            api_key: RAINFOREST_KEY,
+            type: 'product',
+            amazon_domain: 'amazon.com',
+            asin: asin,
+            include_a_plus_body: 'false',
+          });
 
-      // Prices — try current Amazon, then Buy Box, then avg
-      const amazonCurrent = keepaPrice(stats.current?.[0]);
-      const buyBox = keepaPrice(stats.current?.[18]);
-      const amazonAvg = keepaPrice(stats.avg?.[0]);
-      const newPrice = keepaPrice(stats.current?.[1]); // 3rd party new
-      const bestPrice = buyBox || amazonCurrent || newPrice || amazonAvg || 0;
+          const res = await fetch(`${RAINFOREST_BASE}?${params.toString()}`, { signal: AbortSignal.timeout(15000) });
+          if (!res.ok) {
+            const text = await res.text();
+            throw new Error(`${res.status}: ${text.substring(0, 200)}`);
+          }
+          return { asin, data: await res.json() };
+        })
+      );
 
-      // Rating/reviews
-      const rating = stats.current?.[16] ? stats.current[16] / 10 : 0;
-      const reviews = stats.current?.[17] || 0;
+      for (const result of results) {
+        if (result.status === 'rejected') {
+          errors.push(String(result.reason).substring(0, 100));
+          continue;
+        }
 
-      // BSR
-      const bsr = stats.current?.[3] || 0;
+        const { asin, data } = result.value;
+        const product = data.product || {};
 
-      // Availability
-      const isAvailable = bestPrice > 0;
+        // Extract data
+        const title = product.title || '';
+        const bestPrice = product.buybox_winner?.price?.value || product.price?.value || 0;
+        const mainImage = product.main_image?.link || (product.images?.length > 0 ? product.images[0]?.link : '') || '';
+        const brand = product.brand || product.manufacturer || '';
+        const rating = product.rating || 0;
+        const reviews = product.ratings_total || 0;
+        const bsr = product.bestsellers_rank?.[0]?.rank || 0;
+        const category = product.bestsellers_rank?.[0]?.category || product.categories_flat || '';
+        const isAvailable = product.buybox_winner?.availability?.type === 'in_stock' || bestPrice > 0;
+        const isPrime = product.buybox_winner?.is_prime || false;
 
-      // Category tree
-      const catTree = p.categoryTree || [];
-      const category = catTree.length > 0 ? catTree[catTree.length - 1]?.name || '' : '';
+        // Description from feature bullets
+        const features = product.feature_bullets || [];
+        const description = features.length > 0
+          ? features.map((f: string | { text?: string }) => typeof f === 'string' ? f : f?.text || '').filter(Boolean).slice(0, 6).join(' | ')
+          : (product.description || '');
 
-      // Brand
-      const brand = p.brand || p.manufacturer || '';
+        // Pricing
+        const sellPrice = bestPrice > 0 ? +(bestPrice * (1 + markup / 100)).toFixed(2) : 0;
+        const profit = sellPrice > 0 ? +(sellPrice - bestPrice).toFixed(2) : 0;
+        const profitPct = bestPrice > 0 ? +((profit / bestPrice) * 100).toFixed(1) : 0;
 
-      // Image — first from imagesCSV
-      const imageUrl = p.imagesCSV
-        ? `https://images-na.ssl-images-amazon.com/images/I/${p.imagesCSV.split(',')[0]}`
-        : '';
+        // Criteria filtering
+        let pass = true;
+        let reason = '';
 
-      // Description from features
-      const description = (p.features && p.features.length > 0)
-        ? p.features.slice(0, 6).join(' | ')
-        : (p.description || '');
+        if (!isAvailable) { pass = false; reason = 'Out of stock'; }
+        else if (!title) { pass = false; reason = 'No title'; }
+        else if (criteria.minPrice && bestPrice < criteria.minPrice) { pass = false; reason = `Price $${bestPrice.toFixed(2)} < $${criteria.minPrice}`; }
+        else if (criteria.maxPrice && bestPrice > criteria.maxPrice) { pass = false; reason = `Price $${bestPrice.toFixed(2)} > $${criteria.maxPrice}`; }
+        else if (criteria.minRating && rating > 0 && rating < criteria.minRating) { pass = false; reason = `Rating ${rating} < ${criteria.minRating}`; }
+        else if (criteria.minReviews && reviews < criteria.minReviews) { pass = false; reason = `${reviews} reviews < ${criteria.minReviews}`; }
+        else if (criteria.maxBSR && bsr > 0 && bsr > criteria.maxBSR) { pass = false; reason = `BSR ${bsr.toLocaleString()} > ${criteria.maxBSR.toLocaleString()}`; }
+        else if (criteria.maxRetail && sellPrice > criteria.maxRetail) { pass = false; reason = `Retail $${sellPrice} > cap $${criteria.maxRetail}`; }
 
-      const title = p.title || '';
-      const monthlySold = p.monthlySold || 0;
+        if (pass) passed++; else { rejected++; rejectReasons[reason] = (rejectReasons[reason] || 0) + 1; }
 
-      // Pricing calculations
-      const sellPrice = bestPrice > 0 ? +(bestPrice * (1 + markup / 100)).toFixed(2) : 0;
-      const profit = sellPrice > 0 ? +(sellPrice - bestPrice).toFixed(2) : 0;
-      const profitPct = bestPrice > 0 ? +((profit / bestPrice) * 100).toFixed(1) : 0;
-
-      // ── CRITERIA FILTERING ──
-      let pass = true;
-      let reason = '';
-
-      if (!isAvailable) { pass = false; reason = 'Out of stock'; }
-      else if (!title) { pass = false; reason = 'No title'; }
-      else if (criteria.minPrice && bestPrice < criteria.minPrice) { pass = false; reason = `Price $${bestPrice.toFixed(2)} < $${criteria.minPrice}`; }
-      else if (criteria.maxPrice && bestPrice > criteria.maxPrice) { pass = false; reason = `Price $${bestPrice.toFixed(2)} > $${criteria.maxPrice}`; }
-      else if (criteria.minRating && rating > 0 && rating < criteria.minRating) { pass = false; reason = `Rating ${rating} < ${criteria.minRating}`; }
-      else if (criteria.minReviews && reviews < criteria.minReviews) { pass = false; reason = `${reviews} reviews < ${criteria.minReviews}`; }
-      else if (criteria.maxBSR && bsr > 0 && bsr > criteria.maxBSR) { pass = false; reason = `BSR ${bsr.toLocaleString()} > ${criteria.maxBSR.toLocaleString()}`; }
-      else if (criteria.maxRetail && sellPrice > criteria.maxRetail) { pass = false; reason = `Retail $${sellPrice} > cap $${criteria.maxRetail}`; }
-
-      if (pass) passed++; else { rejected++; rejectReasons[reason] = (rejectReasons[reason] || 0) + 1; }
-
-      enriched[asin] = {
-        title, asin, price: bestPrice, image: imageUrl, description,
-        vendor: brand, category, rating, reviews, bsr,
-        isPrime: !!(stats.current?.[10] > 0 || amazonCurrent > 0),
-        isAvailable, monthlySold,
-        sellPrice, profit, profitPct,
-        passed: pass, rejectReason: reason,
-      };
+        enriched[asin] = {
+          title, asin, price: bestPrice, image: mainImage, description,
+          vendor: brand, category, rating, reviews, bsr,
+          isPrime, isAvailable, monthlySold: 0,
+          sellPrice, profit, profitPct,
+          passed: pass, rejectReason: reason,
+        };
+      }
     }
 
     return NextResponse.json({
       enriched,
       summary: {
-        requested: batch.length, returned: products.length,
-        passed, rejected, rejectReasons,
-        tokensLeft: data.tokensLeft || 0,
-        refillRate: data.refillRate || 0,
-        tokensUsed: batch.length,
+        requested: batch.length,
+        returned: Object.keys(enriched).length,
+        passed, rejected, rejectReasons, errors,
+        costEstimate: `~$${(Object.keys(enriched).length * 0.02).toFixed(2)}`,
       },
     });
   } catch (e: unknown) {
