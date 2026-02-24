@@ -318,7 +318,70 @@ export default function CommandCenter() {
   const [fileName, setFileName] = useState('');
   const [filter, setFilter] = useState<'all'|'passed'|'failed'|'warned'>('all');
   const [viewMode, setViewMode] = useState<ViewMode>('spreadsheet');
+  const [enriching, setEnriching] = useState(false);
+  const [enrichProgress, setEnrichProgress] = useState({ done: 0, total: 0, tokensLeft: 0, currentBatch: '' });
+  const [criteria, setCriteria] = useState({ minPrice: 3, maxPrice: 25, minRating: 3.5, minReviews: 500, maxBSR: 100000, markup: 70, maxRetail: 40 });
+  const [showCriteria, setShowCriteria] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Enrich ASINs via Keepa API in batches of 100
+  const enrichProducts = useCallback(async () => {
+    if (!analysis) return;
+    const unenriched = analysis.products.filter(p => p.gateCount < 5 && p.asin && /^B[0-9A-Z]{9}$/.test(p.asin));
+    if (!unenriched.length) return;
+    setEnriching(true);
+    const allAsins = unenriched.map(p => p.asin);
+    const BATCH = 100;
+    const updated = [...analysis.products];
+    let totalDone = 0;
+
+    for (let i = 0; i < allAsins.length; i += BATCH) {
+      const batch = allAsins.slice(i, i + BATCH);
+      setEnrichProgress({ done: totalDone, total: allAsins.length, tokensLeft: 0, currentBatch: `${batch[0]}...${batch[batch.length-1]}` });
+      try {
+        const res = await fetch('/api/enrich', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ asins: batch, criteria }),
+        });
+        const data = await res.json();
+        if (data.error) { console.error('Enrich error:', data.error); continue; }
+        const enriched = data.enriched || {};
+        setEnrichProgress(prev => ({ ...prev, tokensLeft: data.summary?.tokensLeft || 0 }));
+
+        // Merge enriched data into products
+        for (let j = 0; j < updated.length; j++) {
+          const p = updated[j];
+          const e = enriched[p.asin];
+          if (!e) continue;
+          const merged: CleanProduct = {
+            ...p,
+            title: e.title || p.title,
+            price: e.price || p.price,
+            image: e.image || p.image,
+            description: e.description || p.description,
+            vendor: e.vendor || p.vendor,
+            category: e.category || p.category,
+            status: e.isAvailable ? (e.passed ? 'Active' : 'Rejected') : 'Out of Stock',
+            quantity: e.isAvailable ? 999 : 0,
+            compareAt: e.sellPrice || p.compareAt,
+            tags: [e.isPrime ? 'Prime' : '', e.bsr > 0 ? `BSR:${e.bsr}` : '', e.rating > 0 ? `Rating:${e.rating}` : ''].filter(Boolean).join(', '),
+            gates: p.gates, gateCount: p.gateCount,
+          };
+          updated[j] = runGates(merged);
+        }
+        totalDone += batch.length;
+      } catch (err) { console.error('Batch failed:', err); }
+
+      // Rate limit: wait 1s between batches
+      if (i + BATCH < allAsins.length) await new Promise(r => setTimeout(r, 1000));
+    }
+
+    const passed = updated.filter(x => x.gateCount === 5).length;
+    const failed = updated.filter(x => x.gateCount < 3).length;
+    setAnalysis({ ...analysis, products: updated, passed, failed, warned: updated.length - passed - failed });
+    setEnrichProgress({ done: allAsins.length, total: allAsins.length, tokensLeft: enrichProgress.tokensLeft, currentBatch: 'Done!' });
+    setEnriching(false);
+  }, [analysis, criteria, enrichProgress.tokensLeft]);
 
   const handleFile = useCallback(async (file: File) => {
     setProcessing(true); setFileName(file.name); setAnalysis(null);
@@ -400,6 +463,19 @@ export default function CommandCenter() {
                 }}>{m === 'spreadsheet' ? '📊 Sheet' : '📋 Table'}</button>
               ))}
             </div>
+            {/* Enrich button for ASIN lists or products missing data */}
+            {analysis.products.some(p => p.gateCount < 5 && p.asin && /^B[0-9A-Z]{9}$/.test(p.asin)) && (
+              <>
+                <button onClick={() => setShowCriteria(!showCriteria)}
+                  style={{ padding:'6px 14px', borderRadius:'6px', border:'1px solid #06b6d4', background:'transparent', color:'#06b6d4', fontSize:'10px', fontWeight:600, cursor:'pointer' }}>
+                  ⚙️ Criteria
+                </button>
+                <button onClick={enrichProducts} disabled={enriching}
+                  style={{ padding:'6px 14px', borderRadius:'6px', border:'none', background: enriching ? '#333' : '#7c3aed', color:'#fff', fontSize:'10px', fontWeight:600, cursor: enriching ? 'wait' : 'pointer' }}>
+                  {enriching ? `⏳ ${enrichProgress.done}/${enrichProgress.total}` : `🔍 Enrich via Keepa (${analysis.products.filter(p=>p.gateCount<5&&p.asin).length})`}
+                </button>
+              </>
+            )}
             <button onClick={() => exportAndDownload(analysis.products.filter(p => p.gateCount === 5), `clean_passed_${Date.now()}.xlsx`)}
               style={{ padding:'6px 14px', borderRadius:'6px', border:'none', background:'#16a34a', color:'#fff', fontSize:'10px', fontWeight:600, cursor:'pointer' }}>
               📥 Export Passed ({analysis.passed})
@@ -466,6 +542,49 @@ export default function CommandCenter() {
               <p style={{ fontSize:'9px', color:'#333', margin:'2px 0 0' }}>{analysis.detectedFeatures.join(' · ')}</p>
             </div>
           </div>
+
+          {/* Criteria Panel */}
+          {showCriteria && (
+            <div style={{ background:'#111', borderRadius:'10px', padding:'16px', border:'1px solid #7c3aed33', marginBottom:'12px' }}>
+              <p style={{ fontSize:'10px', color:'#7c3aed', fontWeight:600, margin:'0 0 10px', textTransform:'uppercase', letterSpacing:'1px' }}>⚙️ Discovery Criteria (Criteria-First, Demand-Filtered)</p>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(140px, 1fr))', gap:'8px' }}>
+                {[
+                  { key:'minPrice', label:'Min Price ($)', type:'number', step:0.5 },
+                  { key:'maxPrice', label:'Max Price ($)', type:'number', step:1 },
+                  { key:'minRating', label:'Min Rating', type:'number', step:0.1 },
+                  { key:'minReviews', label:'Min Reviews', type:'number', step:50 },
+                  { key:'maxBSR', label:'Max BSR', type:'number', step:10000 },
+                  { key:'markup', label:'Markup (%)', type:'number', step:5 },
+                  { key:'maxRetail', label:'Max Retail ($)', type:'number', step:5 },
+                ].map(f => (
+                  <div key={f.key}>
+                    <label style={{ fontSize:'8px', color:'#555', textTransform:'uppercase', letterSpacing:'0.5px' }}>{f.label}</label>
+                    <input type={f.type} step={f.step} value={(criteria as Record<string,number>)[f.key]}
+                      onChange={e => setCriteria(prev => ({ ...prev, [f.key]: parseFloat(e.target.value) || 0 }))}
+                      style={{ width:'100%', padding:'6px 8px', borderRadius:'4px', border:'1px solid #222', background:'#0a0a0a', color:'#fff', fontSize:'11px', fontFamily:'inherit', marginTop:'2px' }}
+                    />
+                  </div>
+                ))}
+              </div>
+              <p style={{ fontSize:'9px', color:'#444', margin:'10px 0 0' }}>
+                Products are filtered BEFORE Keepa enrichment to save API tokens. Only products passing these criteria will show as &quot;passed&quot;.
+              </p>
+            </div>
+          )}
+
+          {/* Enrichment Progress */}
+          {enriching && (
+            <div style={{ background:'#111', borderRadius:'10px', padding:'12px 16px', border:'1px solid #7c3aed33', marginBottom:'12px' }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'6px' }}>
+                <span style={{ fontSize:'10px', color:'#7c3aed', fontWeight:600 }}>🔍 Enriching via Keepa API...</span>
+                <span style={{ fontSize:'9px', color:'#555' }}>Tokens left: {enrichProgress.tokensLeft.toLocaleString()}</span>
+              </div>
+              <div style={{ background:'#1a1a2e', borderRadius:'4px', height:'6px', overflow:'hidden' }}>
+                <div style={{ width:`${enrichProgress.total > 0 ? (enrichProgress.done/enrichProgress.total)*100 : 0}%`, height:'100%', background:'#7c3aed', borderRadius:'4px', transition:'width 0.3s' }} />
+              </div>
+              <p style={{ fontSize:'9px', color:'#444', margin:'4px 0 0' }}>{enrichProgress.done}/{enrichProgress.total} ASINs · {enrichProgress.currentBatch}</p>
+            </div>
+          )}
 
           {/* Filters */}
           <div style={{ display:'flex', gap:'4px', marginBottom:'12px' }}>
