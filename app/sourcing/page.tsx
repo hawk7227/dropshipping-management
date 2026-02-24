@@ -222,19 +222,18 @@ function parseCSV(text:string):{title:string;asin:string;vendor:string;category:
 // Fetches REAL images from Amazon at import time
 // Products arrive with images BEFORE push to Shopify
 // ═══════════════════════════════════════════════════════════
-async function enrichProduct(raw:ReturnType<typeof parseCSV>[0], idx:number, onStatus?:(msg:string)=>void): Promise<BulkProduct> {
+async function enrichProduct(raw:ReturnType<typeof parseCSV>[0], idx:number, onStatus?:(msg:string)=>void, skipImageFetch?:boolean): Promise<BulkProduct> {
   const hasAsin = raw.origHasAsin && raw.asin.length > 0;
   const flagReasons: string[] = [];
 
   // 1. IMAGE — fetch real Amazon images NOW during import
-  // If the /api/amazon-image route is deployed, this WILL get images.
-  // Products without images are flagged so you know, but still pushable.
+  // For large imports (>200), skip live fetching to prevent OOM — images deferred
   let enrichedImage = '';
   let enrichedImages: string[] = [];
   if (raw.origHasImage && raw.origImage) {
     enrichedImage = raw.origImage;
     enrichedImages = [raw.origImage];
-  } else if (hasAsin) {
+  } else if (hasAsin && !skipImageFetch) {
     if(onStatus) onStatus(`Fetching images for ${raw.asin}...`);
     // Try up to 2 times with a delay (Amazon can be flaky)
     for (let attempt = 0; attempt < 2 && enrichedImages.length === 0; attempt++) {
@@ -248,6 +247,10 @@ async function enrichProduct(raw:ReturnType<typeof parseCSV>[0], idx:number, onS
     if (enrichedImages.length === 0) {
       flagReasons.push('Could not fetch image from Amazon — deploy /api/amazon-image route');
     }
+  } else if (hasAsin && skipImageFetch) {
+    // Large import — build CDN URL from ASIN as placeholder, fetch real images later
+    enrichedImage = `https://m.media-amazon.com/images/I/${raw.asin}._AC_SL1500_.jpg`;
+    enrichedImages = [enrichedImage];
   } else {
     flagReasons.push('No image and no ASIN to source from');
   }
@@ -714,15 +717,16 @@ export default function SourcingEngine(){
       const parsed=parseCSV(text);
       const uniqueCount=parsed.length;
       const asinCount=parsed.filter(p=>p.origHasAsin).length;
-      setBulkJobs(prev=>prev.map(j=>j.id===jobId?{...j,totalRows:totalLines,uniqueProducts:uniqueCount,stage:`Found ${asinCount} ASINs — fetching images & data from Amazon...`,progress:15,status:'enriching'}:j));
+      setBulkJobs(prev=>prev.map(j=>j.id===jobId?{...j,totalRows:totalLines,uniqueProducts:uniqueCount,stage:`Found ${asinCount} ASINs — ${uniqueCount>200?'processing (images deferred for large imports)':'fetching images & data from Amazon'}...`,progress:15,status:'enriching'}:j));
+      const skipImageFetch=uniqueCount>200; // Skip live Amazon image fetch for large files to prevent OOM
       const enriched:BulkProduct[]=[];
       const CHUNK=50;
       for(let i=0;i<parsed.length;i++){
         const pct=Math.round(15+((i/parsed.length)*65));
-        const statusMsg=`[${i+1}/${parsed.length}] Enriching "${parsed[i].title.slice(0,45)}"${parsed[i].asin?` (${parsed[i].asin})`:''}...`;
+        const statusMsg=`[${i+1}/${parsed.length}] ${skipImageFetch?'Processing':'Enriching'} "${parsed[i].title.slice(0,45)}"${parsed[i].asin?` (${parsed[i].asin})`:''}...`;
         setBulkJobs(prev=>prev.map(j=>j.id===jobId?{...j,stage:statusMsg,progress:pct}:j));
         setGStatus({msg:statusMsg,progress:pct,type:'working'});
-        const product=await enrichProduct(parsed[i],i);
+        const product=await enrichProduct(parsed[i],i,undefined,skipImageFetch);
         enriched.push(product);
         // Yield to main thread every CHUNK items to prevent Chrome OOM
         if(i%CHUNK===0) await new Promise(r=>setTimeout(r,0));
@@ -739,17 +743,23 @@ export default function SourcingEngine(){
     };
 
     if(isXlsx){
-      // XLSX binary — use SheetJS with dense mode for lower memory
+      // XLSX binary — read and convert to CSV
       const reader=new FileReader();
       reader.onload=async(evt)=>{
         try{
-          const data=new Uint8Array(evt.target?.result as ArrayBuffer);
-          const wb=XLSX.read(data,{type:'array',dense:true});
+          const buf=evt.target?.result as ArrayBuffer;
+          setBulkJobs(prev=>prev.map(j=>j.id===jobId?{...j,stage:'Parsing spreadsheet...',progress:8}:j));
+          setGStatus({msg:'Parsing spreadsheet...',progress:8,type:'working'});
+          await new Promise(r=>setTimeout(r,50));
+          const wb=XLSX.read(new Uint8Array(buf),{type:'array',dense:true,cellStyles:false,cellNF:false,cellDates:false,cellFormula:false});
           const ws=wb.Sheets[wb.SheetNames[0]];
-          // Convert to CSV text and reuse our universal parser
+          if(!ws)throw new Error('No worksheet found');
+          await new Promise(r=>setTimeout(r,50));
           const csvText=XLSX.utils.sheet_to_csv(ws,{FS:',',RS:'\n'});
-          // Free workbook memory before processing
-          (wb as Record<string,unknown>).Sheets={};(wb as Record<string,unknown>).SheetNames=[];
+          // Free workbook + buffer from memory before heavy processing
+          (wb as unknown as Record<string,unknown>).Sheets={};
+          (wb as unknown as Record<string,unknown>).SheetNames=[];
+          await new Promise(r=>setTimeout(r,50));
           await processText(csvText);
         }catch(err:unknown){
           const msg=err instanceof Error?err.message:'Unknown error';
