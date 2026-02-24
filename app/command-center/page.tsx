@@ -11,6 +11,10 @@ type ViewMode = 'table' | 'spreadsheet';
 interface CleanProduct {
   title: string; asin: string; price: number; compareAt: number; image: string;
   description: string; vendor: string; category: string; tags: string; status: string; quantity: number;
+  profit: number; profitPct: number; sellPrice: number;
+  stockStatus: 'In Stock' | 'Out of Stock' | 'Unknown';
+  dateChecked: string;
+  rating: number; reviews: number; bsr: number;
   gates: { title: GateStatus; image: GateStatus; price: GateStatus; asin: GateStatus; description: GateStatus };
   gateCount: number;
 }
@@ -169,6 +173,9 @@ function processRows(jsonRows: Record<string,unknown>[], headers: string[], file
       tags: get(colMap.tags),
       status: get(colMap.status) || 'Active',
       quantity: parseInt(get(colMap.quantity)) || 999,
+      profit: 0, profitPct: 0, sellPrice: 0,
+      stockStatus: 'Unknown', dateChecked: '',
+      rating: 0, reviews: 0, bsr: 0,
       gates: { title:'fail', image:'fail', price:'fail', asin:'fail', description:'fail' }, gateCount: 0,
     };
     products.push(runGates(product));
@@ -198,6 +205,9 @@ function processASINList(jsonRows: Record<string,unknown>[]): FileAnalysis {
   const products: CleanProduct[] = [...asins].map(asin => runGates({
     title:'', asin, price:0, compareAt:0, image:'', description:'',
     vendor:'', category:'', tags:'', status:'Draft', quantity:999,
+    profit:0, profitPct:0, sellPrice:0,
+    stockStatus:'Unknown' as const, dateChecked:'',
+    rating:0, reviews:0, bsr:0,
     gates:{title:'fail',image:'fail',price:'fail',asin:'fail',description:'fail'}, gateCount:0,
   }));
   return {
@@ -212,9 +222,9 @@ function processASINList(jsonRows: Record<string,unknown>[]): FileAnalysis {
 // ═══════════════════════════════════════════════════════════
 // SPREADSHEET VIEWER/EDITOR
 // ═══════════════════════════════════════════════════════════
-const COLS = ['title','asin','price','compareAt','image','description','vendor','category','tags','status','quantity'] as const;
-const COL_LABELS = ['Title','ASIN/SKU','Price','Compare At','Image URL','Description','Vendor','Category','Tags','Status','Qty'];
-const COL_WIDTHS = [300,120,80,100,250,350,130,150,200,80,60];
+const COLS = ['title','asin','price','sellPrice','profit','profitPct','stockStatus','image','rating','reviews','bsr','vendor','category','description','dateChecked','status'] as const;
+const COL_LABELS = ['Title','ASIN/SKU','Cost','Sell Price','Profit $','Profit %','Stock','Image URL','Rating','Reviews','BSR','Vendor','Category','Description','Checked','Status'];
+const COL_WIDTHS = [280,120,70,80,70,70,85,200,60,80,80,120,140,300,90,70];
 
 function SpreadsheetView({ products, onUpdate }: { products: CleanProduct[]; onUpdate: (idx: number, field: string, val: string) => void }) {
   const [page, setPage] = useState(0);
@@ -268,11 +278,24 @@ function SpreadsheetView({ products, onUpdate }: { products: CleanProduct[]; onU
                     return (
                       <td key={ci} style={{ padding:0, borderLeft:'1px solid #111', position:'relative' }}>
                         <input
-                          defaultValue={col === 'price' || col === 'compareAt' ? (Number(val) > 0 ? Number(val).toFixed(2) : '') : val}
+                          defaultValue={
+                            ['price','sellPrice','profit','compareAt'].includes(col) ? (Number(val) > 0 ? `$${Number(val).toFixed(2)}` : '') :
+                            col === 'profitPct' ? (Number(val) > 0 ? `${Number(val).toFixed(0)}%` : '') :
+                            col === 'bsr' ? (Number(val) > 0 ? Number(val).toLocaleString() : '') :
+                            col === 'reviews' ? (Number(val) > 0 ? Number(val).toLocaleString() : '') :
+                            col === 'rating' ? (Number(val) > 0 ? `★${val}` : '') :
+                            col === 'stockStatus' ? (val === 'In Stock' ? '✅ In Stock' : val === 'Out of Stock' ? '❌ OOS' : '—') :
+                            val
+                          }
                           onBlur={e => onUpdate(globalIdx, col, e.target.value)}
                           style={{
                             width:'100%', padding:'6px 8px', background:'transparent', border:'none', outline:'none',
-                            color: gateStatus === 'fail' ? '#ef4444' : gateStatus === 'warn' ? '#f59e0b' : '#ccc',
+                            color: col === 'profit' || col === 'profitPct' ? (Number(val) > 0 ? '#16a34a' : '#ef4444') :
+                              col === 'stockStatus' ? (val === 'In Stock' ? '#16a34a' : val === 'Out of Stock' ? '#ef4444' : '#555') :
+                              col === 'rating' ? (Number(val) >= 4 ? '#16a34a' : Number(val) >= 3 ? '#f59e0b' : '#ef4444') :
+                              col === 'sellPrice' ? '#06b6d4' :
+                              col === 'bsr' ? '#8b5cf6' :
+                              gateStatus === 'fail' ? '#ef4444' : gateStatus === 'warn' ? '#f59e0b' : '#ccc',
                             fontSize:'11px', fontFamily:'inherit',
                             borderLeft: isGated ? `2px solid ${gateStatus==='pass'?'#16a34a33':gateStatus==='warn'?'#f59e0b33':'#ef444433'}` : 'none',
                           }}
@@ -297,12 +320,14 @@ function SpreadsheetView({ products, onUpdate }: { products: CleanProduct[]; onU
 async function exportAndDownload(products: CleanProduct[], filename: string) {
   const { utils, writeFile } = await import('xlsx');
   const data = products.map(p => ({
-    'Title': p.title, 'ASIN/SKU': p.asin, 'Price': p.price || '', 'Compare At Price': p.compareAt || '',
-    'Image URL': p.image, 'Description': p.description, 'Vendor': p.vendor, 'Category': p.category,
-    'Tags': p.tags, 'Status': p.status, 'Quantity': p.quantity, 'Gates': `${p.gateCount}/5`,
+    'Title': p.title, 'ASIN/SKU': p.asin, 'Cost': p.price || '', 'Sell Price': p.sellPrice || '',
+    'Profit $': p.profit || '', 'Profit %': p.profitPct ? `${p.profitPct}%` : '',
+    'Stock': p.stockStatus, 'Image URL': p.image, 'Rating': p.rating || '', 'Reviews': p.reviews || '',
+    'BSR': p.bsr || '', 'Vendor': p.vendor, 'Category': p.category,
+    'Description': p.description, 'Date Checked': p.dateChecked, 'Status': p.status, 'Gates': `${p.gateCount}/5`,
   }));
   const ws = utils.json_to_sheet(data);
-  ws['!cols'] = [55,14,10,14,60,80,20,25,40,10,10,8].map(w => ({ wch: w }));
+  ws['!cols'] = [55,14,10,12,10,10,12,60,8,10,10,20,25,80,12,10,8].map(w => ({ wch: w }));
   const wb = utils.book_new();
   utils.book_append_sheet(wb, ws, 'Products');
   writeFile(wb, filename);
@@ -385,7 +410,15 @@ export default function CommandCenter() {
             status: e.isAvailable ? (e.passed ? 'Active' : 'Rejected') : 'Out of Stock',
             quantity: e.isAvailable ? 999 : 0,
             compareAt: e.sellPrice || p.compareAt,
-            tags: [e.isPrime ? 'Prime' : '', e.bsr > 0 ? `BSR:${e.bsr}` : '', e.rating > 0 ? `Rating:${e.rating}` : ''].filter(Boolean).join(', '),
+            sellPrice: e.sellPrice || 0,
+            profit: e.profit || 0,
+            profitPct: e.profitPct || 0,
+            stockStatus: e.isAvailable ? 'In Stock' : 'Out of Stock',
+            dateChecked: new Date().toISOString().split('T')[0],
+            rating: e.rating || 0,
+            reviews: e.reviews || 0,
+            bsr: e.bsr || 0,
+            tags: [e.isPrime ? 'Prime' : '', e.bsr > 0 ? `BSR:${e.bsr.toLocaleString()}` : '', e.rating > 0 ? `★${e.rating}` : '', e.reviews > 0 ? `${e.reviews.toLocaleString()} reviews` : ''].filter(Boolean).join(', '),
             gates: p.gates, gateCount: p.gateCount,
           };
           updated[j] = runGates(merged);
