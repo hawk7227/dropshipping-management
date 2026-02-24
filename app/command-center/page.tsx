@@ -485,7 +485,7 @@ export default function CommandCenter() {
     const allAsins = unenriched.map(p => p.asin);
     const maxAsins = testOnly ? allAsins.slice(0, 10) : allAsins;
     const BATCH = 5; // ASINs per API call (Vercel 10s timeout safe)
-    const CONCURRENT = 10; // 10 parallel API calls × 5 = 50 ASINs/wave ≈ 1000/min
+    const CONCURRENT = 20; // 20 parallel API calls × 5 = 100 ASINs/wave ≈ 2000/min
     const updated = [...analysis.products];
     let totalDone = 0;
 
