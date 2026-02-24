@@ -807,8 +807,6 @@ export default function CommandCenter() {
                 ⏳ {pushProgress.done}/{pushProgress.total}
               </span>
             )}
-              </button>
-            )}
             {/* Bulk actions */}
             {selectedCount > 0 && (
               <button onClick={deleteSelected}
