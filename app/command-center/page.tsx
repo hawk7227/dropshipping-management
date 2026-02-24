@@ -356,7 +356,33 @@ export default function CommandCenter() {
   const [enrichProgress, setEnrichProgress] = useState({ done: 0, total: 0, tokensLeft: 0, currentBatch: '', error: '' });
   const [criteria, setCriteria] = useState({ minPrice: 3, maxPrice: 25, minRating: 3.5, minReviews: 500, maxBSR: 100000, markup: 70, maxRetail: 40 });
   const [showCriteria, setShowCriteria] = useState(false);
+  const [pushing, setPushing] = useState(false);
+  const [pushResult, setPushResult] = useState<{ saved: number; pushed: number; errors: string[] } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Push passed products to Shopify
+  const pushToShopify = useCallback(async () => {
+    if (!analysis) return;
+    const passed = analysis.products.filter(p => p.gateCount === 5 && p.image && p.title);
+    if (!passed.length) return;
+    setPushing(true); setPushResult(null);
+    try {
+      const payload = passed.slice(0, 50).map(p => ({
+        title: p.title, asin: p.asin, price: p.price, sellPrice: p.sellPrice, profit: p.profit,
+        image: p.image, description: p.description, vendor: p.vendor, category: p.category,
+        rating: p.rating, reviews: p.reviews, bsr: p.bsr, stockStatus: p.stockStatus,
+      }));
+      const res = await fetch('/api/command-center', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ products: payload, action: 'push' }),
+      });
+      const data = await res.json();
+      setPushResult({ saved: data.saved || 0, pushed: data.pushed || 0, errors: data.errors || [] });
+    } catch (e) {
+      setPushResult({ saved: 0, pushed: 0, errors: [String(e)] });
+    }
+    setPushing(false);
+  }, [analysis]);
 
   // Enrich ASINs via Keepa API in batches of 100
   const enrichProducts = useCallback(async (testOnly = false) => {
@@ -577,6 +603,12 @@ export default function CommandCenter() {
               style={{ padding:'6px 14px', borderRadius:'6px', border:'none', background:'#16a34a', color:'#fff', fontSize:'10px', fontWeight:600, cursor:'pointer' }}>
               📥 Export Passed ({analysis.passed})
             </button>
+            {analysis.passed > 0 && (
+              <button onClick={pushToShopify} disabled={pushing}
+                style={{ padding:'6px 14px', borderRadius:'6px', border:'none', background: pushing ? '#333' : '#f59e0b', color:'#000', fontSize:'10px', fontWeight:700, cursor: pushing ? 'wait' : 'pointer' }}>
+                {pushing ? '⏳ Pushing...' : `🛒 Push to Shopify (${Math.min(analysis.passed, 50)})`}
+              </button>
+            )}
             <button onClick={() => exportAndDownload(analysis.products, `clean_all_${Date.now()}.xlsx`)}
               style={{ padding:'6px 14px', borderRadius:'6px', border:'1px solid #333', background:'transparent', color:'#888', fontSize:'10px', fontWeight:600, cursor:'pointer' }}>
               📥 All ({analysis.uniqueProducts})
@@ -805,6 +837,26 @@ export default function CommandCenter() {
               <p style={{ fontSize:'9px', color: enrichProgress.error ? '#ef4444' : '#444', margin:'4px 0 0' }}>
                 {enrichProgress.error || `${enrichProgress.done}/${enrichProgress.total} ASINs · ${enrichProgress.currentBatch}`}
               </p>
+            </div>
+          )}
+
+          {/* Push Result */}
+          {pushResult && (
+            <div style={{ background:'#111', borderRadius:'10px', padding:'12px 16px', border:`1px solid ${pushResult.errors.length ? '#f59e0b33' : '#16a34a33'}`, marginBottom:'12px' }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                <span style={{ fontSize:'10px', color:'#16a34a', fontWeight:600 }}>
+                  🛒 {pushResult.pushed} pushed to Shopify · {pushResult.saved} saved to database
+                </span>
+                <button onClick={() => setPushResult(null)} style={{ background:'none', border:'none', color:'#555', cursor:'pointer', fontSize:'10px' }}>✕</button>
+              </div>
+              {pushResult.errors.length > 0 && (
+                <div style={{ marginTop:'6px', maxHeight:'80px', overflow:'auto' }}>
+                  {pushResult.errors.slice(0, 5).map((e, i) => (
+                    <p key={i} style={{ fontSize:'9px', color:'#f59e0b', margin:'2px 0' }}>⚠️ {e}</p>
+                  ))}
+                  {pushResult.errors.length > 5 && <p style={{ fontSize:'9px', color:'#555' }}>+{pushResult.errors.length - 5} more errors</p>}
+                </div>
+              )}
             </div>
           )}
 
