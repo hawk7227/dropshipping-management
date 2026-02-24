@@ -36,17 +36,16 @@ export async function POST(request: NextRequest) {
 
     if (!asins.length) return NextResponse.json({ error: 'No ASINs provided' }, { status: 400 });
 
-    // Keepa allows up to 100 ASINs per request
-    const batch = asins.slice(0, 100);
+    // User has 60 tokens, 1/min refill — keep batches small
+    const batch = asins.slice(0, Math.min(asins.length, 50));
 
     const params = new URLSearchParams({
       key: KEEPA_KEY,
       domain: '1', // amazon.com
       asin: batch.join(','),
-      stats: '180',
-      history: '0',
-      offers: '0',
-      rating: '1',
+      stats: '180', // 180-day stats summary
+      history: '0', // skip full price history
+      offers: '0', // skip offers
     });
 
     const res = await fetch(`${KEEPA_BASE}/product?${params.toString()}`);

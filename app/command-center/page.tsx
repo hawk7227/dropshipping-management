@@ -333,8 +333,8 @@ export default function CommandCenter() {
     setEnrichProgress({ done: 0, total: testOnly ? Math.min(100, unenriched.length) : unenriched.length, tokensLeft: 0, currentBatch: 'Starting...', error: '' });
 
     const allAsins = unenriched.map(p => p.asin);
-    const maxAsins = testOnly ? allAsins.slice(0, 100) : allAsins;
-    const BATCH = 100;
+    const maxAsins = testOnly ? allAsins.slice(0, 50) : allAsins;
+    const BATCH = 50;
     const updated = [...analysis.products];
     let totalDone = 0;
 
@@ -389,8 +389,11 @@ export default function CommandCenter() {
         if (testOnly) { setEnriching(false); return; }
       }
 
-      // Rate limit: wait 1s between batches
-      if (i + BATCH < maxAsins.length) await new Promise(r => setTimeout(r, 1000));
+      // Rate limit: wait 60s between batches (1 token/min refill, 50 tokens per batch)
+      if (i + BATCH < maxAsins.length) {
+        setEnrichProgress(prev => ({ ...prev, currentBatch: `Waiting 60s for token refill... (${prev.tokensLeft} tokens left)` }));
+        await new Promise(r => setTimeout(r, 60000));
+      }
     }
 
     const passed = updated.filter(x => x.gateCount === 5).length;
@@ -489,7 +492,7 @@ export default function CommandCenter() {
                 </button>
                 <button onClick={() => enrichProducts(true)} disabled={enriching}
                   style={{ padding:'6px 14px', borderRadius:'6px', border:'1px solid #7c3aed', background:'transparent', color:'#7c3aed', fontSize:'10px', fontWeight:600, cursor: enriching ? 'wait' : 'pointer' }}>
-                  🧪 Test First 100
+                  🧪 Test First 50
                 </button>
                 <button onClick={() => enrichProducts(false)} disabled={enriching}
                   style={{ padding:'6px 14px', borderRadius:'6px', border:'none', background: enriching ? '#333' : '#7c3aed', color:'#fff', fontSize:'10px', fontWeight:600, cursor: enriching ? 'wait' : 'pointer' }}>
