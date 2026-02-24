@@ -796,16 +796,17 @@ export default function CommandCenter() {
               style={{ padding:'6px 14px', borderRadius:'6px', border:'none', background:'#16a34a', color:'#fff', fontSize:'10px', fontWeight:600, cursor:'pointer' }}>
               📥 Export Passed ({analysis.passed})
             </button>
-            {analysis.passed > 0 && (
-              <button onClick={() => pushToShopify(selectedCount > 0)} disabled={pushing}
-                style={{ padding:'6px 14px', borderRadius:'6px', border:'none', background: pushing ? '#333' : '#f59e0b', color:'#000', fontSize:'10px', fontWeight:700, cursor: pushing ? 'wait' : 'pointer' }}>
-                {pushing ? `⏳ ${pushProgress.done}/${pushProgress.total}` : selectedCount > 0 ? `🛒 Push Selected (${selectedCount})` : `🛒 Push All Passed (${analysis.passed})`}
-              </button>
-            )}
             {analysis.passed > 0 && !pushing && (
               <button onClick={bulkPushToShopify}
-                style={{ padding:'6px 14px', borderRadius:'6px', border:'2px solid #f59e0b', background:'rgba(245,158,11,0.15)', color:'#f59e0b', fontSize:'10px', fontWeight:700, cursor:'pointer' }}>
-                🚀 Bulk Push All Passed ({analysis.products.filter(p => p.gateCount === 5 && p.image && p.title && p.shopifyStatus !== 'pushed').length})
+                style={{ padding:'6px 14px', borderRadius:'6px', border:'none', background:'#f59e0b', color:'#000', fontSize:'10px', fontWeight:700, cursor:'pointer' }}>
+                🚀 Push All Passed ({analysis.products.filter(p => p.gateCount === 5 && p.image && p.title && p.shopifyStatus !== 'pushed').length})
+              </button>
+            )}
+            {pushing && (
+              <span style={{ padding:'6px 14px', borderRadius:'6px', background:'#333', color:'#f59e0b', fontSize:'10px', fontWeight:700 }}>
+                ⏳ {pushProgress.done}/{pushProgress.total}
+              </span>
+            )}
               </button>
             )}
             {/* Bulk actions */}
