@@ -15,6 +15,9 @@ interface CleanProduct {
   stockStatus: 'In Stock' | 'Out of Stock' | 'Unknown';
   dateChecked: string;
   rating: number; reviews: number; bsr: number;
+  shopifyStatus: 'not_pushed' | 'pushing' | 'pushed' | 'failed';
+  shopifyError: string;
+  selected: boolean;
   gates: { title: GateStatus; image: GateStatus; price: GateStatus; asin: GateStatus; description: GateStatus };
   gateCount: number;
 }
@@ -131,7 +134,9 @@ function runGates(p: CleanProduct): CleanProduct {
   // Default stock status
   if (stockStatus === 'Unknown' && p.price > 0 && p.title) stockStatus = 'In Stock';
 
-  return { ...p, sellPrice, profit, profitPct, stockStatus, gates: g, gateCount: Object.values(g).filter(v => v === 'pass').length };
+  return { ...p, sellPrice, profit, profitPct, stockStatus,
+    shopifyStatus: p.shopifyStatus || 'not_pushed', shopifyError: p.shopifyError || '', selected: p.selected || false,
+    gates: g, gateCount: Object.values(g).filter(v => v === 'pass').length };
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -189,6 +194,7 @@ function processRows(jsonRows: Record<string,unknown>[], headers: string[], file
       profit: 0, profitPct: 0, sellPrice: 0,
       stockStatus: 'Unknown', dateChecked: '',
       rating: 0, reviews: 0, bsr: 0,
+      shopifyStatus: 'not_pushed', shopifyError: '', selected: false,
       gates: { title:'fail', image:'fail', price:'fail', asin:'fail', description:'fail' }, gateCount: 0,
     };
     products.push(runGates(product));
@@ -221,6 +227,7 @@ function processASINList(jsonRows: Record<string,unknown>[]): FileAnalysis {
     profit:0, profitPct:0, sellPrice:0,
     stockStatus:'Unknown' as const, dateChecked:'',
     rating:0, reviews:0, bsr:0,
+    shopifyStatus:'not_pushed' as const, shopifyError:'', selected:false,
     gates:{title:'fail',image:'fail',price:'fail',asin:'fail',description:'fail'}, gateCount:0,
   }));
   return {
@@ -239,7 +246,7 @@ const COLS = ['title','asin','price','sellPrice','profit','profitPct','stockStat
 const COL_LABELS = ['Title','ASIN/SKU','Cost','Sell Price','Profit $','Profit %','Stock','Image URL','Rating','Reviews','BSR','Vendor','Category','Description','Checked','Status'];
 const COL_WIDTHS = [280,120,70,80,70,70,85,200,60,80,80,120,140,300,90,70];
 
-function SpreadsheetView({ products, onUpdate, perPage = 50 }: { products: CleanProduct[]; onUpdate: (idx: number, field: string, val: string) => void; perPage?: number }) {
+function SpreadsheetView({ products, onUpdate, perPage = 50, onToggleSelect, onSelectAll }: { products: CleanProduct[]; onUpdate: (idx: number, field: string, val: string) => void; perPage?: number; onToggleSelect?: (idx: number) => void; onSelectAll?: (val: boolean) => void }) {
   const [page, setPage] = useState(0);
   const PAGE = perPage;
   const total = products.length;
@@ -264,8 +271,12 @@ function SpreadsheetView({ products, onUpdate, perPage = 50 }: { products: Clean
         <table style={{ borderCollapse:'collapse', width:'max-content', minWidth:'100%' }}>
           <thead>
             <tr>
+              <th style={{ padding:'8px 4px', fontSize:'9px', color:'#444', textAlign:'center', borderBottom:'1px solid #1a1a2e', background:'#0f0f0f', position:'sticky', top:0, width:28 }}>
+                <input type="checkbox" onChange={e => onSelectAll?.(e.target.checked)} style={{ cursor:'pointer' }} />
+              </th>
               <th style={{ padding:'8px 6px', fontSize:'9px', color:'#444', textAlign:'center', borderBottom:'1px solid #1a1a2e', background:'#0f0f0f', position:'sticky', top:0, width:36 }}>#</th>
               <th style={{ padding:'8px 6px', fontSize:'9px', color:'#444', textAlign:'center', borderBottom:'1px solid #1a1a2e', background:'#0f0f0f', position:'sticky', top:0, width:50 }}>Gate</th>
+              <th style={{ padding:'8px 6px', fontSize:'9px', color:'#444', textAlign:'center', borderBottom:'1px solid #1a1a2e', background:'#0f0f0f', position:'sticky', top:0, width:70 }}>Shopify</th>
               {COL_LABELS.map((label, ci) => (
                 <th key={ci} style={{ padding:'8px 6px', fontSize:'9px', color:'#555', textAlign:'left', borderBottom:'1px solid #1a1a2e', background:'#0f0f0f', position:'sticky', top:0, width:COL_WIDTHS[ci], letterSpacing:'0.5px', textTransform:'uppercase' }}>{label}</th>
               ))}
@@ -275,13 +286,22 @@ function SpreadsheetView({ products, onUpdate, perPage = 50 }: { products: Clean
             {slice.map((p, ri) => {
               const globalIdx = page * PAGE + ri;
               return (
-                <tr key={globalIdx} style={{ borderBottom:'1px solid #0a0a0a' }}>
+                <tr key={globalIdx} style={{ borderBottom:'1px solid #0a0a0a', background: p.selected ? '#1a1a2e22' : 'transparent' }}>
+                  <td style={{ padding:'4px 4px', textAlign:'center' }}>
+                    <input type="checkbox" checked={p.selected || false} onChange={() => onToggleSelect?.(globalIdx)} style={{ cursor:'pointer' }} />
+                  </td>
                   <td style={{ padding:'4px 6px', fontSize:'9px', color:'#333', textAlign:'center' }}>{globalIdx+1}</td>
                   <td style={{ padding:'4px 6px', textAlign:'center' }}>
                     <span style={{ fontSize:'9px', fontWeight:700, padding:'1px 6px', borderRadius:'3px',
                       background: p.gateCount===5?'rgba(22,163,74,0.15)':p.gateCount>=3?'rgba(245,158,11,0.15)':'rgba(239,68,68,0.15)',
                       color: p.gateCount===5?'#16a34a':p.gateCount>=3?'#f59e0b':'#ef4444',
                     }}>{p.gateCount}/5</span>
+                  </td>
+                  <td style={{ padding:'4px 6px', textAlign:'center' }}>
+                    <span style={{ fontSize:'8px', fontWeight:600, padding:'1px 6px', borderRadius:'3px',
+                      background: p.shopifyStatus==='pushed'?'rgba(22,163,74,0.15)':p.shopifyStatus==='pushing'?'rgba(245,158,11,0.15)':p.shopifyStatus==='failed'?'rgba(239,68,68,0.15)':'transparent',
+                      color: p.shopifyStatus==='pushed'?'#16a34a':p.shopifyStatus==='pushing'?'#f59e0b':p.shopifyStatus==='failed'?'#ef4444':'#333',
+                    }} title={p.shopifyError}>{p.shopifyStatus==='pushed'?'✅ Synced':p.shopifyStatus==='pushing'?'⏳':p.shopifyStatus==='failed'?'❌ Failed':'—'}</span>
                   </td>
                   {COLS.map((col, ci) => {
                     const val = String(p[col] ?? '');
@@ -374,18 +394,51 @@ export default function CommandCenter() {
   const [pushProgress, setPushProgress] = useState({ done: 0, total: 0, pushed: 0, errors: 0, lastError: '' });
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Push passed products to Shopify — one at a time to avoid timeout
-  const pushToShopify = useCallback(async () => {
+  // Toggle select
+  const toggleSelect = useCallback((idx: number) => {
     if (!analysis) return;
-    const passed = analysis.products.filter(p => p.gateCount === 5 && p.image && p.title);
-    if (!passed.length) return;
+    const updated = [...analysis.products];
+    updated[idx] = { ...updated[idx], selected: !updated[idx].selected };
+    setAnalysis({ ...analysis, products: updated });
+  }, [analysis]);
+
+  const selectAll = useCallback((val: boolean) => {
+    if (!analysis) return;
+    const updated = analysis.products.map(p => ({ ...p, selected: val }));
+    setAnalysis({ ...analysis, products: updated });
+  }, [analysis]);
+
+  const selectedCount = analysis?.products.filter(p => p.selected).length || 0;
+
+  // Bulk delete selected
+  const deleteSelected = useCallback(() => {
+    if (!analysis) return;
+    const remaining = analysis.products.filter(p => !p.selected);
+    const passed = remaining.filter(x => x.gateCount === 5).length;
+    const failed = remaining.filter(x => x.gateCount < 3).length;
+    setAnalysis({ ...analysis, products: remaining, uniqueProducts: remaining.length, passed, failed, warned: remaining.length - passed - failed });
+  }, [analysis]);
+
+  // Push selected or all passed to Shopify — one at a time
+  const pushToShopify = useCallback(async (selectedOnly = false) => {
+    if (!analysis) return;
+    const toPush = selectedOnly
+      ? analysis.products.filter(p => p.selected && p.gateCount === 5 && p.image && p.title)
+      : analysis.products.filter(p => p.gateCount === 5 && p.image && p.title && p.shopifyStatus !== 'pushed');
+    if (!toPush.length) return;
     setPushing(true);
-    setPushProgress({ done: 0, total: passed.length, pushed: 0, errors: 0, lastError: '' });
+    setPushProgress({ done: 0, total: toPush.length, pushed: 0, errors: 0, lastError: '' });
 
     let pushedCount = 0, errorCount = 0, lastErr = '';
+    const updated = [...analysis.products];
 
-    for (let i = 0; i < passed.length; i++) {
-      const p = passed[i];
+    for (let i = 0; i < toPush.length; i++) {
+      const p = toPush[i];
+      const globalIdx = updated.findIndex(u => u.asin === p.asin);
+
+      // Mark as pushing
+      if (globalIdx >= 0) updated[globalIdx] = { ...updated[globalIdx], shopifyStatus: 'pushing' };
+      setAnalysis(prev => prev ? { ...prev, products: [...updated] } : prev);
       setPushProgress(prev => ({ ...prev, done: i, lastError: `Pushing: ${p.title.substring(0, 40)}...` }));
 
       try {
@@ -401,15 +454,23 @@ export default function CommandCenter() {
           }),
         });
         const data = await res.json();
-        if (data.pushed) pushedCount++;
-        else { errorCount++; lastErr = data.error || 'Unknown error'; }
-      } catch (e) { errorCount++; lastErr = String(e); }
+        if (data.pushed) {
+          pushedCount++;
+          if (globalIdx >= 0) updated[globalIdx] = { ...updated[globalIdx], shopifyStatus: 'pushed', shopifyError: '' };
+        } else {
+          errorCount++; lastErr = data.error || 'Unknown error';
+          if (globalIdx >= 0) updated[globalIdx] = { ...updated[globalIdx], shopifyStatus: 'failed', shopifyError: lastErr };
+        }
+      } catch (e) {
+        errorCount++; lastErr = String(e);
+        if (globalIdx >= 0) updated[globalIdx] = { ...updated[globalIdx], shopifyStatus: 'failed', shopifyError: lastErr };
+      }
 
-      setPushProgress({ done: i + 1, total: passed.length, pushed: pushedCount, errors: errorCount, lastError: lastErr });
-
-      // Rate limit for Shopify
+      setPushProgress({ done: i + 1, total: toPush.length, pushed: pushedCount, errors: errorCount, lastError: lastErr });
       await new Promise(r => setTimeout(r, 600));
     }
+
+    setAnalysis(prev => prev ? { ...prev, products: [...updated] } : prev);
     setPushing(false);
   }, [analysis]);
 
@@ -633,9 +694,16 @@ export default function CommandCenter() {
               📥 Export Passed ({analysis.passed})
             </button>
             {analysis.passed > 0 && (
-              <button onClick={pushToShopify} disabled={pushing}
+              <button onClick={() => pushToShopify(selectedCount > 0)} disabled={pushing}
                 style={{ padding:'6px 14px', borderRadius:'6px', border:'none', background: pushing ? '#333' : '#f59e0b', color:'#000', fontSize:'10px', fontWeight:700, cursor: pushing ? 'wait' : 'pointer' }}>
-                {pushing ? '⏳ Pushing...' : `🛒 Push to Shopify (${Math.min(analysis.passed, 50)})`}
+                {pushing ? `⏳ ${pushProgress.done}/${pushProgress.total}` : selectedCount > 0 ? `🛒 Push Selected (${selectedCount})` : `🛒 Push All Passed (${analysis.passed})`}
+              </button>
+            )}
+            {/* Bulk actions */}
+            {selectedCount > 0 && (
+              <button onClick={deleteSelected}
+                style={{ padding:'6px 14px', borderRadius:'6px', border:'1px solid #ef4444', background:'transparent', color:'#ef4444', fontSize:'10px', fontWeight:600, cursor:'pointer' }}>
+                🗑️ Delete ({selectedCount})
               </button>
             )}
             <button onClick={() => exportAndDownload(analysis.products, `clean_all_${Date.now()}.xlsx`)}
@@ -1020,7 +1088,7 @@ export default function CommandCenter() {
               {filtered.length > 100 && <div style={{ gridColumn:'1/-1', textAlign:'center', padding:'20px', color:'#333', fontSize:'10px' }}>Showing 100 of {filtered.length}. Use filters or export to see all.</div>}
             </div>
           ) : viewMode === 'spreadsheet' ? (
-            <SpreadsheetView products={filtered} onUpdate={handleUpdate} perPage={perPage} />
+            <SpreadsheetView products={filtered} onUpdate={handleUpdate} perPage={perPage} onToggleSelect={toggleSelect} onSelectAll={selectAll} />
           ) : (
             <div style={{ background:'#111', borderRadius:'12px', border:'1px solid #1a1a2e', overflow:'hidden' }}>
               <div style={{ overflowX:'auto' }}>
@@ -1086,6 +1154,8 @@ export default function CommandCenter() {
                     <div style={{ position:'absolute', top:6, right:6, zIndex:2 }}>
                       <span style={{ padding:'2px 6px', borderRadius:'3px', fontSize:'7px', fontWeight:700,
                         background: p.gateCount===5?'rgba(22,163,74,0.9)':p.gateCount>=3?'rgba(245,158,11,0.9)':'rgba(239,68,68,0.9)', color:'#fff' }}>{p.gateCount}/5</span>
+                      {p.shopifyStatus === 'pushed' && <span style={{ padding:'2px 6px', borderRadius:'3px', fontSize:'7px', fontWeight:700, background:'rgba(22,163,74,0.9)', color:'#fff' }}>✅ Synced</span>}
+                      {p.shopifyStatus === 'failed' && <span style={{ padding:'2px 6px', borderRadius:'3px', fontSize:'7px', fontWeight:700, background:'rgba(239,68,68,0.9)', color:'#fff' }}>❌ Failed</span>}
                     </div>
                     {/* Image */}
                     <div style={{ height:160, background:'#0a0a0a', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden' }}>
