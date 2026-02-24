@@ -8,7 +8,7 @@ const getSupabase = () => createClient(
 
 // POST /api/backfill-images
 // Body: { images: { "B0XXXXXXXX": "https://cdn.shopify.com/..." } }
-// Updates products.main_image where asin matches and main_image is null
+// Fetches ALL products with null main_image, matches by asin/source_product_id
 export async function POST(request: NextRequest) {
   try {
     const { images } = await request.json();
@@ -17,46 +17,57 @@ export async function POST(request: NextRequest) {
     }
 
     const sb = getSupabase();
-    const asins = Object.keys(images);
     let updated = 0;
-    let skipped = 0;
     let errors = 0;
-    const BATCH = 50;
+    let notFound = 0;
+    const provided = Object.keys(images).length;
 
-    for (let i = 0; i < asins.length; i += BATCH) {
-      const batch = asins.slice(i, i + BATCH);
-      
-      // Get products with these ASINs that have no image
-      const { data: products, error } = await sb
+    // Fetch ALL products missing main_image (paginated)
+    let allProducts: { id: string; asin: string | null; source_product_id: string | null }[] = [];
+    let page = 0;
+    const PAGE_SIZE = 1000;
+    while (true) {
+      const { data, error } = await sb
         .from('products')
-        .select('id, asin, main_image')
-        .in('asin', batch);
-
-      if (error) { errors += batch.length; continue; }
-
-      for (const p of (products || [])) {
-        if (p.main_image) { skipped++; continue; }
-        const imgUrl = images[p.asin];
-        if (!imgUrl) { skipped++; continue; }
-
-        const { error: upErr } = await sb
-          .from('products')
-          .update({ main_image: imgUrl })
-          .eq('id', p.id);
-
-        if (upErr) errors++;
-        else updated++;
-      }
+        .select('id, asin, source_product_id')
+        .is('main_image', null)
+        .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+      if (error) { errors++; break; }
+      if (!data || data.length === 0) break;
+      allProducts = allProducts.concat(data);
+      if (data.length < PAGE_SIZE) break;
+      page++;
     }
 
-    return NextResponse.json({ updated, skipped, errors, total: asins.length });
+    // Match each product against the provided image map
+    for (const p of allProducts) {
+      const imgUrl = (p.asin && images[p.asin]) || 
+                     (p.source_product_id && images[p.source_product_id]) ||
+                     null;
+      if (!imgUrl) { notFound++; continue; }
+
+      const { error: upErr } = await sb
+        .from('products')
+        .update({ main_image: imgUrl })
+        .eq('id', p.id);
+
+      if (upErr) errors++;
+      else updated++;
+    }
+
+    return NextResponse.json({ 
+      updated, errors, notFound,
+      totalProvided: provided,
+      totalMissing: allProducts.length,
+      message: `Updated ${updated}. ${notFound} no matching ASIN. ${errors} errors.`
+    });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : 'Unknown error';
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
 
-// GET /api/backfill-images?check=true — shows how many products are missing images
+// GET /api/backfill-images — check status
 export async function GET() {
   try {
     const sb = getSupabase();
@@ -69,12 +80,14 @@ export async function GET() {
       .from('products')
       .select('id', { count: 'exact', head: true });
 
-    const { count: withImage } = await sb
+    // Sample 5 products without images
+    const { data: samples } = await sb
       .from('products')
-      .select('id', { count: 'exact', head: true })
-      .not('main_image', 'is', null);
+      .select('id, title, asin, source_product_id')
+      .is('main_image', null)
+      .limit(5);
 
-    return NextResponse.json({ total, withImage, missing });
+    return NextResponse.json({ total, missing, hasImage: (total || 0) - (missing || 0), samples });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : 'Unknown error';
     return NextResponse.json({ error: msg }, { status: 500 });
