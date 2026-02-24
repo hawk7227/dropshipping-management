@@ -165,7 +165,7 @@ function parseCSV(text:string):{title:string;asin:string;vendor:string;category:
 
   // Find ASIN column — by header name, then by cell scanning
   let asinCol=-1;
-  for(let ci=0;ci<hdr.length;ci++){if(['asin','amazon asin','asin number','product asin','source_product_id','amazon_id'].includes(hdr[ci])){asinCol=ci;break;}}
+  for(let ci=0;ci<hdr.length;ci++){if(['asin','amazon asin','asin number','product asin','source_product_id','amazon_id','variant sku','sku'].includes(hdr[ci])){asinCol=ci;break;}}
   if(asinCol===-1){const counts:number[]=new Array(hdr.length).fill(0);for(const row of data.slice(0,50)){for(let ci=0;ci<row.length;ci++){if(isAsin((row[ci]||'').trim().replace(/['"]/g,'').toUpperCase()))counts[ci]++;}}const best=counts.indexOf(Math.max(...counts));if(counts[best]>0)asinCol=best;}
   let tagsCol=-1;for(let ci=0;ci<hdr.length;ci++){if(['tags','product tags','labels'].includes(hdr[ci])){tagsCol=ci;break;}}
 
@@ -175,20 +175,24 @@ function parseCSV(text:string):{title:string;asin:string;vendor:string;category:
   const vendorIdx=findCol(['vendor','brand','manufacturer','supplier']);
   const priceIdx=findCol(['variant price','price','sale price','selling price','retail price']);
   const compareIdx=findCol(['variant compare at price','compare at price','compare_at_price','msrp','list price']);
-  const imgIdx=findCol(['image src','image','image url','image_url','main image','photo']);
+  const imgIdx=findCol(['image src','image_src','image url','image_url','main image','photo']);
   const handleIdx=findCol(['handle','slug']);
   const categoryIdx=findCol(['category','product type','product_type','type','department']);
-  const costIdx=findCol(['cost','cost price','cost_price','amazon price','wholesale','cogs']);
+  const costIdx=findCol(['cost','cost price','cost_price','amazon price','wholesale','cogs','variant cost']);
+  const topRowIdx=findCol(['top row']);
 
   const products:ReturnType<typeof parseCSV>=[];
   const seenAsins=new Set<string>();const seenHandles=new Set<string>();
 
   for(const row of data){
     if(row.every(c=>!c.trim()))continue;
+    // Shopify Matrixify/Excelify export: skip non-top rows (image/variant rows)
+    if(topRowIdx>=0){const tr=(row[topRowIdx]||'').trim().toLowerCase();if(tr&&tr!=='true'&&tr!=='1'&&tr!=='yes')continue;}
     let asin='';
     if(asinCol>=0){const v=(row[asinCol]||'').trim().replace(/['"]/g,'').toUpperCase();if(isAsin(v))asin=v;}
     if(!asin&&tagsCol>=0){const ts=row[tagsCol]||'';for(const tag of ts.split(',')){const t=tag.trim();if(t.toLowerCase().startsWith('asin-')){const c=t.replace(/^asin-/i,'').toUpperCase();if(isAsin(c)){asin=c;break;}}}if(!asin){const a=extractAsins(ts);if(a.length)asin=a[0];}}
-    if(!asin){for(const cell of row){const a=extractAsins(cell||'');if(a.length){asin=a[0];break;}}}
+    // Only scan limited columns for ASIN (skip body HTML to avoid false matches)
+    if(!asin){const scanCols=[asinCol,titleIdx,handleIdx,vendorIdx,tagsCol].filter(c=>c>=0);for(const ci of scanCols){const a=extractAsins(row[ci]||'');if(a.length){asin=a[0];break;}}}
     const title=titleIdx>=0?(row[titleIdx]||'').trim().replace(/^["']|["']$/g,''):'';
     if(!asin&&!title)continue;
     if(asin&&seenAsins.has(asin))continue;if(asin)seenAsins.add(asin);
