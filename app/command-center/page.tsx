@@ -493,22 +493,141 @@ export default function CommandCenter() {
       </div>
 
       <div style={{ padding:'20px 24px' }}>
-        {/* Drop Zone */}
+        {/* Drop Zone + Onboarding */}
         {!analysis && (
-          <div onDrop={onDrop} onDragOver={e => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)}
-            onClick={() => fileRef.current?.click()}
-            style={{ border:`2px dashed ${dragOver ? '#16a34a' : '#1a1a2e'}`, borderRadius:'16px', padding:'80px 40px', textAlign:'center', cursor:'pointer', transition:'all 0.2s', background: dragOver ? 'rgba(22,163,74,0.05)' : 'transparent' }}>
-            <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,.tsv" style={{ display:'none' }} onChange={e => { if (e.target.files?.[0]) handleFile(e.target.files[0]); }} />
-            {processing ? (
-              <div><div style={{ fontSize:'32px', marginBottom:'16px' }}>⏳</div><p style={{ color:'#888', fontSize:'13px' }}>Processing {fileName}...</p></div>
-            ) : (
-              <div>
-                <div style={{ fontSize:'48px', marginBottom:'16px' }}>📂</div>
-                <p style={{ color:'#fff', fontSize:'15px', fontWeight:600, margin:'0 0 8px' }}>Drop any product file</p>
-                <p style={{ color:'#555', fontSize:'11px', margin:0 }}>Shopify Matrixify · AutoDS · ASIN Lists · eBay · Generic CSV/XLSX</p>
-                <p style={{ color:'#333', fontSize:'10px', margin:'12px 0 0' }}>Auto-detects format · Strips junk · 5-gate validation · Inline editing · Export clean XLSX</p>
+          <div>
+            {/* Hero */}
+            <div style={{ marginBottom:'24px' }}>
+              <h2 style={{ fontSize:'14px', color:'#fff', fontWeight:700, margin:'0 0 6px' }}>Smart Product File Processor</h2>
+              <p style={{ fontSize:'11px', color:'#555', margin:0, lineHeight:'1.6' }}>
+                Upload any product file — this tool auto-detects the format, strips unnecessary data, validates every product against 5 listing requirements, 
+                and lets you enrich missing data via Keepa/Rainforest APIs. No configuration needed.
+              </p>
+            </div>
+
+            {/* Use Case Cards */}
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(280px, 1fr))', gap:'12px', marginBottom:'24px' }}>
+              {/* Use Case 1 */}
+              <div style={{ background:'#111', borderRadius:'10px', padding:'16px', border:'1px solid #1a1a2e' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'10px' }}>
+                  <span style={{ fontSize:'20px' }}>🧹</span>
+                  <div>
+                    <p style={{ fontSize:'11px', color:'#16a34a', fontWeight:700, margin:0 }}>USE CASE 1: Clean & Strip</p>
+                    <p style={{ fontSize:'9px', color:'#444', margin:'2px 0 0' }}>Shopify Matrixify / CSV exports</p>
+                  </div>
+                </div>
+                <p style={{ fontSize:'10px', color:'#777', margin:'0 0 8px', lineHeight:'1.5' }}>
+                  Got a 50MB Shopify export with 166 columns and 70K rows? Drop it here. 
+                  Strips to 11 essential columns, removes duplicate/variant rows, cleans HTML descriptions, 
+                  validates every product.
+                </p>
+                <div style={{ fontSize:'9px', color:'#333', display:'flex', flexWrap:'wrap', gap:'4px' }}>
+                  {['166 → 11 cols','70K → 2.5K rows','HTML cleanup','Dedup','5-gate check'].map(t => (
+                    <span key={t} style={{ padding:'2px 6px', borderRadius:'3px', background:'#16a34a15', color:'#16a34a', border:'1px solid #16a34a22' }}>{t}</span>
+                  ))}
+                </div>
               </div>
-            )}
+
+              {/* Use Case 2 */}
+              <div style={{ background:'#111', borderRadius:'10px', padding:'16px', border:'1px solid #1a1a2e' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'10px' }}>
+                  <span style={{ fontSize:'20px' }}>🔍</span>
+                  <div>
+                    <p style={{ fontSize:'11px', color:'#7c3aed', fontWeight:700, margin:0 }}>USE CASE 2: ASIN Enrichment</p>
+                    <p style={{ fontSize:'9px', color:'#444', margin:'2px 0 0' }}>ASIN lists / Amazon URL lists</p>
+                  </div>
+                </div>
+                <p style={{ fontSize:'10px', color:'#777', margin:'0 0 8px', lineHeight:'1.5' }}>
+                  Have a list of 15K ASINs? Drop it. Auto-extracts all ASINs, then hit &quot;Enrich via Keepa&quot; to pull 
+                  title, image, price, brand, category, BSR, rating, availability — with criteria-first filtering 
+                  to save API tokens.
+                </p>
+                <div style={{ fontSize:'9px', color:'#333', display:'flex', flexWrap:'wrap', gap:'4px' }}>
+                  {['Auto-extract ASINs','Keepa batch (100/req)','Criteria filter','Price/BSR/Rating','Profit calc'].map(t => (
+                    <span key={t} style={{ padding:'2px 6px', borderRadius:'3px', background:'#7c3aed15', color:'#7c3aed', border:'1px solid #7c3aed22' }}>{t}</span>
+                  ))}
+                </div>
+              </div>
+
+              {/* Use Case 3 */}
+              <div style={{ background:'#111', borderRadius:'10px', padding:'16px', border:'1px solid #1a1a2e' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'10px' }}>
+                  <span style={{ fontSize:'20px' }}>📤</span>
+                  <div>
+                    <p style={{ fontSize:'11px', color:'#f59e0b', fontWeight:700, margin:0 }}>USE CASE 3: Multi-Platform Export</p>
+                    <p style={{ fontSize:'9px', color:'#444', margin:'2px 0 0' }}>Coming soon</p>
+                  </div>
+                </div>
+                <p style={{ fontSize:'10px', color:'#777', margin:'0 0 8px', lineHeight:'1.5' }}>
+                  Once products pass 5-gate validation, export in the exact format each platform requires — 
+                  eBay File Exchange, TikTok Shop template, Walmart feed, Shopify CSV. Image compliance per platform.
+                </p>
+                <div style={{ fontSize:'9px', color:'#333', display:'flex', flexWrap:'wrap', gap:'4px' }}>
+                  {['eBay format','TikTok Shop','Walmart feed','Image validation','Title limits'].map(t => (
+                    <span key={t} style={{ padding:'2px 6px', borderRadius:'3px', background:'#f59e0b15', color:'#f59e0b', border:'1px solid #f59e0b22' }}>{t}</span>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* The 5 Gates */}
+            <div style={{ background:'#111', borderRadius:'10px', padding:'16px', border:'1px solid #1a1a2e', marginBottom:'24px' }}>
+              <p style={{ fontSize:'10px', color:'#fff', fontWeight:700, margin:'0 0 10px', textTransform:'uppercase', letterSpacing:'1px' }}>5-Gate Listing Requirements</p>
+              <p style={{ fontSize:'10px', color:'#555', margin:'0 0 12px' }}>Every product must pass all 5 gates before it can be listed on any platform. No exceptions.</p>
+              <div style={{ display:'flex', flexWrap:'wrap', gap:'10px' }}>
+                {[
+                  { icon:'✅', gate:'Title', desc:'Min 6 chars, no HTML, not generic', required:true },
+                  { icon:'✅', gate:'Image', desc:'Valid URL (http), eBay needs 1600×1600', required:true },
+                  { icon:'✅', gate:'Price', desc:'Greater than $0, within criteria range', required:true },
+                  { icon:'✅', gate:'ASIN/SKU', desc:'Valid Amazon ASIN (B0XXXXXXXXX format)', required:true },
+                  { icon:'✅', gate:'Description', desc:'Min 30 chars, cleaned of HTML/boilerplate', required:true },
+                ].map(g => (
+                  <div key={g.gate} style={{ flex:'1 1 160px', background:'#0a0a0a', borderRadius:'6px', padding:'10px', border:'1px solid #1a1a2e' }}>
+                    <p style={{ fontSize:'11px', color:'#16a34a', fontWeight:700, margin:'0 0 4px' }}>{g.icon} {g.gate}</p>
+                    <p style={{ fontSize:'9px', color:'#555', margin:0 }}>{g.desc}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Accepted File Types */}
+            <div style={{ background:'#111', borderRadius:'10px', padding:'16px', border:'1px solid #1a1a2e', marginBottom:'24px' }}>
+              <p style={{ fontSize:'10px', color:'#fff', fontWeight:700, margin:'0 0 10px', textTransform:'uppercase', letterSpacing:'1px' }}>Accepted File Types</p>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(200px, 1fr))', gap:'8px' }}>
+                {[
+                  { icon:'🟢', type:'Shopify Matrixify Export', ext:'.xlsx', auto:'Strips 155+ cols, dedup by Top Row' },
+                  { icon:'🟢', type:'Shopify CSV Export', ext:'.csv', auto:'Maps Handle/Title/Image columns' },
+                  { icon:'🔵', type:'ASIN List', ext:'.xlsx/.csv', auto:'Extracts ASINs from URLs or cells' },
+                  { icon:'🟡', type:'AutoDS Export', ext:'.csv/.xlsx', auto:'Maps source URL and pricing' },
+                  { icon:'🟠', type:'eBay File Exchange', ext:'.csv', auto:'Maps ItemID, Category, Action' },
+                  { icon:'⚪', type:'Generic CSV/XLSX', ext:'.csv/.xlsx', auto:'Best-effort column matching' },
+                ].map(f => (
+                  <div key={f.type} style={{ display:'flex', gap:'8px', alignItems:'flex-start', padding:'6px 0' }}>
+                    <span style={{ fontSize:'14px' }}>{f.icon}</span>
+                    <div>
+                      <p style={{ fontSize:'10px', color:'#ccc', fontWeight:600, margin:0 }}>{f.type} <span style={{ color:'#333' }}>{f.ext}</span></p>
+                      <p style={{ fontSize:'9px', color:'#444', margin:'1px 0 0' }}>{f.auto}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Drop Zone */}
+            <div onDrop={onDrop} onDragOver={e => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)}
+              onClick={() => fileRef.current?.click()}
+              style={{ border:`2px dashed ${dragOver ? '#16a34a' : '#1a1a2e'}`, borderRadius:'16px', padding:'48px 40px', textAlign:'center', cursor:'pointer', transition:'all 0.2s', background: dragOver ? 'rgba(22,163,74,0.05)' : 'transparent' }}>
+              <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,.tsv" style={{ display:'none' }} onChange={e => { if (e.target.files?.[0]) handleFile(e.target.files[0]); }} />
+              {processing ? (
+                <div><div style={{ fontSize:'32px', marginBottom:'12px' }}>⏳</div><p style={{ color:'#888', fontSize:'13px' }}>Processing {fileName}...</p></div>
+              ) : (
+                <div>
+                  <div style={{ fontSize:'36px', marginBottom:'12px' }}>📂</div>
+                  <p style={{ color:'#fff', fontSize:'14px', fontWeight:600, margin:'0 0 6px' }}>Drop your file here or click to browse</p>
+                  <p style={{ color:'#444', fontSize:'10px', margin:0 }}>.xlsx · .xls · .csv · .tsv — up to 50MB</p>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
