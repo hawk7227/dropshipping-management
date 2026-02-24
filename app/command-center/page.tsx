@@ -574,18 +574,15 @@ export default function CommandCenter() {
     try {
       const XLSX = await import('xlsx');
       const buf = await file.arrayBuffer();
-      const wb = XLSX.read(buf, { dense: true, cellStyles: false, cellNF: false, cellDates: false });
+      const wb = XLSX.read(buf, { cellStyles: false, cellNF: false, cellDates: false, cellHTML: false });
       const ws = wb.Sheets[wb.SheetNames[0]];
-
-      // Use sheet_to_json — handles newlines in cells correctly (unlike sheet_to_csv + split)
       const jsonRows = XLSX.utils.sheet_to_json<Record<string,unknown>>(ws, { defval: '' });
-      wb.Sheets = {}; wb.SheetNames = []; // free memory
+      wb.Sheets = {}; wb.SheetNames = [];
 
       if (!jsonRows.length) { setProcessing(false); return; }
       const headers = Object.keys(jsonRows[0]);
 
-      // Detect: ASIN list or structured file?
-      if (detectASINList(jsonRows)) {
+      if (detectASINList(jsonRows.slice(0, 30))) {
         setAnalysis(processASINList(jsonRows));
       } else {
         const fileType = detectFileType(headers);
