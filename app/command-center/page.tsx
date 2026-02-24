@@ -357,29 +357,44 @@ export default function CommandCenter() {
   const [criteria, setCriteria] = useState({ minPrice: 3, maxPrice: 25, minRating: 3.5, minReviews: 500, maxBSR: 100000, markup: 70, maxRetail: 40 });
   const [showCriteria, setShowCriteria] = useState(false);
   const [pushing, setPushing] = useState(false);
-  const [pushResult, setPushResult] = useState<{ saved: number; pushed: number; errors: string[] } | null>(null);
+  const [pushProgress, setPushProgress] = useState({ done: 0, total: 0, pushed: 0, errors: 0, lastError: '' });
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Push passed products to Shopify
+  // Push passed products to Shopify — one at a time to avoid timeout
   const pushToShopify = useCallback(async () => {
     if (!analysis) return;
     const passed = analysis.products.filter(p => p.gateCount === 5 && p.image && p.title);
     if (!passed.length) return;
-    setPushing(true); setPushResult(null);
-    try {
-      const payload = passed.slice(0, 50).map(p => ({
-        title: p.title, asin: p.asin, price: p.price, sellPrice: p.sellPrice, profit: p.profit,
-        image: p.image, description: p.description, vendor: p.vendor, category: p.category,
-        rating: p.rating, reviews: p.reviews, bsr: p.bsr, stockStatus: p.stockStatus,
-      }));
-      const res = await fetch('/api/command-center', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ products: payload, action: 'push' }),
-      });
-      const data = await res.json();
-      setPushResult({ saved: data.saved || 0, pushed: data.pushed || 0, errors: data.errors || [] });
-    } catch (e) {
-      setPushResult({ saved: 0, pushed: 0, errors: [String(e)] });
+    setPushing(true);
+    setPushProgress({ done: 0, total: passed.length, pushed: 0, errors: 0, lastError: '' });
+
+    let pushedCount = 0, errorCount = 0, lastErr = '';
+
+    for (let i = 0; i < passed.length; i++) {
+      const p = passed[i];
+      setPushProgress(prev => ({ ...prev, done: i, lastError: `Pushing: ${p.title.substring(0, 40)}...` }));
+
+      try {
+        const res = await fetch('/api/command-center', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            product: {
+              title: p.title, asin: p.asin, price: p.price, sellPrice: p.sellPrice, profit: p.profit,
+              image: p.image, description: p.description, vendor: p.vendor, category: p.category,
+              rating: p.rating, reviews: p.reviews, bsr: p.bsr, stockStatus: p.stockStatus,
+            },
+            action: 'push',
+          }),
+        });
+        const data = await res.json();
+        if (data.pushed) pushedCount++;
+        else { errorCount++; lastErr = data.error || 'Unknown error'; }
+      } catch (e) { errorCount++; lastErr = String(e); }
+
+      setPushProgress({ done: i + 1, total: passed.length, pushed: pushedCount, errors: errorCount, lastError: lastErr });
+
+      // Rate limit for Shopify
+      await new Promise(r => setTimeout(r, 600));
     }
     setPushing(false);
   }, [analysis]);
@@ -840,23 +855,21 @@ export default function CommandCenter() {
             </div>
           )}
 
-          {/* Push Result */}
-          {pushResult && (
-            <div style={{ background:'#111', borderRadius:'10px', padding:'12px 16px', border:`1px solid ${pushResult.errors.length ? '#f59e0b33' : '#16a34a33'}`, marginBottom:'12px' }}>
-              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                <span style={{ fontSize:'10px', color:'#16a34a', fontWeight:600 }}>
-                  🛒 {pushResult.pushed} pushed to Shopify · {pushResult.saved} saved to database
+          {/* Push Progress */}
+          {(pushing || pushProgress.done > 0) && (
+            <div style={{ background:'#111', borderRadius:'10px', padding:'12px 16px', border:`1px solid ${pushProgress.errors > 0 ? '#f59e0b33' : '#16a34a33'}`, marginBottom:'12px' }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'6px' }}>
+                <span style={{ fontSize:'10px', color: pushing ? '#f59e0b' : '#16a34a', fontWeight:600 }}>
+                  {pushing ? '🛒 Pushing to Shopify...' : '✅ Push Complete'}
                 </span>
-                <button onClick={() => setPushResult(null)} style={{ background:'none', border:'none', color:'#555', cursor:'pointer', fontSize:'10px' }}>✕</button>
+                <span style={{ fontSize:'9px', color:'#555' }}>
+                  {pushProgress.pushed} pushed · {pushProgress.errors} errors · {pushProgress.done}/{pushProgress.total}
+                </span>
               </div>
-              {pushResult.errors.length > 0 && (
-                <div style={{ marginTop:'6px', maxHeight:'80px', overflow:'auto' }}>
-                  {pushResult.errors.slice(0, 5).map((e, i) => (
-                    <p key={i} style={{ fontSize:'9px', color:'#f59e0b', margin:'2px 0' }}>⚠️ {e}</p>
-                  ))}
-                  {pushResult.errors.length > 5 && <p style={{ fontSize:'9px', color:'#555' }}>+{pushResult.errors.length - 5} more errors</p>}
-                </div>
-              )}
+              <div style={{ background:'#1a1a2e', borderRadius:'4px', height:'6px', overflow:'hidden' }}>
+                <div style={{ width:`${pushProgress.total > 0 ? (pushProgress.done/pushProgress.total)*100 : 0}%`, height:'100%', background: pushProgress.errors > 0 ? '#f59e0b' : '#16a34a', borderRadius:'4px', transition:'width 0.3s' }} />
+              </div>
+              <p style={{ fontSize:'9px', color:'#444', margin:'4px 0 0' }}>{pushProgress.lastError}</p>
             </div>
           )}
 
