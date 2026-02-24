@@ -484,40 +484,53 @@ export default function CommandCenter() {
 
     const allAsins = unenriched.map(p => p.asin);
     const maxAsins = testOnly ? allAsins.slice(0, 10) : allAsins;
-    const BATCH = 5; // Small batches to avoid Vercel 10s timeout
+    const BATCH = 5; // ASINs per API call (Vercel 10s timeout safe)
+    const CONCURRENT = 4; // Parallel API calls at once = 20 ASINs simultaneously
     const updated = [...analysis.products];
     let totalDone = 0;
 
+    // Build all batches upfront
+    const batches: string[][] = [];
     for (let i = 0; i < maxAsins.length; i += BATCH) {
-      const batch = maxAsins.slice(i, i + BATCH);
-      setEnrichProgress(prev => ({ ...prev, done: totalDone, currentBatch: `Batch ${Math.floor(i/BATCH)+1}: ${batch[0]}...${batch[batch.length-1]}`, error: '' }));
-      
-      try {
-        const res = await fetch('/api/enrich', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ asins: batch, criteria }),
-        });
-        const data = await res.json();
-        
-        if (data.error) {
-          setEnrichProgress(prev => ({ ...prev, error: `API Error: ${data.error}` }));
-          console.error('Enrich error:', data.error);
+      batches.push(maxAsins.slice(i, i + BATCH));
+    }
+
+    // Process CONCURRENT batches at a time
+    for (let wave = 0; wave < batches.length; wave += CONCURRENT) {
+      const waveBatches = batches.slice(wave, wave + CONCURRENT);
+      const waveNum = Math.floor(wave / CONCURRENT) + 1;
+      const totalWaves = Math.ceil(batches.length / CONCURRENT);
+      setEnrichProgress(prev => ({ ...prev, done: totalDone, currentBatch: `Wave ${waveNum}/${totalWaves} — ${waveBatches.length}×${BATCH} parallel (${totalDone}/${maxAsins.length})`, error: '' }));
+
+      // Fire all batches in this wave concurrently
+      const waveResults = await Promise.allSettled(
+        waveBatches.map(batch =>
+          fetch('/api/enrich', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ asins: batch, criteria }),
+          }).then(r => r.json())
+        )
+      );
+
+      let waveEnriched = 0, wavePassed = 0, waveErrors = 0;
+      for (const result of waveResults) {
+        if (result.status === 'rejected') {
+          waveErrors++;
+          console.error('Wave batch failed:', result.reason);
           if (testOnly) { setEnriching(false); return; }
           continue;
         }
-        
+        const data = result.value;
+        if (data.error) {
+          waveErrors++;
+          console.error('Enrich error:', data.error);
+          if (testOnly) { setEnrichProgress(prev => ({ ...prev, error: `API Error: ${data.error}` })); setEnriching(false); return; }
+          continue;
+        }
+
         const enriched = data.enriched || {};
-        const enrichedCount = Object.keys(enriched).length;
-        const errors = data.summary?.errors || [];
-        
-        // Debug: show what we got back
-        const sampleKey = Object.keys(enriched)[0];
-        const sample = sampleKey ? enriched[sampleKey] : null;
-        const debugInfo = sample 
-          ? `Sample: "${(sample.title||'no title').substring(0,40)}" $${sample.price} img:${sample.image ? 'YES' : 'NO'} desc:${sample.description ? 'YES' : 'NO'}`
-          : `No products returned. Errors: ${errors.length ? errors.slice(0,2).join('; ') : 'none'}`;
-        
-        setEnrichProgress(prev => ({ ...prev, tokensLeft: 0, currentBatch: `Batch ${Math.floor(i/BATCH)+1}: ${enrichedCount} returned, ${data.summary?.passed || 0} passed. ${debugInfo}` }));
+        waveEnriched += Object.keys(enriched).length;
+        wavePassed += data.summary?.passed || 0;
 
         // Merge enriched data into products
         for (let j = 0; j < updated.length; j++) {
@@ -548,17 +561,14 @@ export default function CommandCenter() {
           };
           updated[j] = runGates(merged);
         }
-        totalDone += batch.length;
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        setEnrichProgress(prev => ({ ...prev, error: `Fetch error: ${msg}` }));
-        console.error('Batch failed:', err);
-        if (testOnly) { setEnriching(false); return; }
       }
 
-      // Small delay between batches
-      if (i + BATCH < maxAsins.length) {
-        await new Promise(r => setTimeout(r, 200));
+      totalDone += waveBatches.reduce((sum, b) => sum + b.length, 0);
+      setEnrichProgress(prev => ({ ...prev, done: totalDone, currentBatch: `Wave ${waveNum} done: ${waveEnriched} enriched, ${wavePassed} passed${waveErrors ? `, ${waveErrors} errors` : ''}` }));
+
+      // Brief delay between waves to avoid rate limits
+      if (wave + CONCURRENT < batches.length) {
+        await new Promise(r => setTimeout(r, 100));
       }
     }
 
