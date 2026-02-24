@@ -474,6 +474,101 @@ export default function CommandCenter() {
     setPushing(false);
   }, [analysis]);
 
+  // ═══════════════════════════════════════════════════════════════
+  // BULK PUSH — parallel waves, 5 products per API call, 4 concurrent calls = 20 products/wave
+  // Shopify rate limit: 40 bucket / 2 per sec → 4 concurrent calls safe
+  // ═══════════════════════════════════════════════════════════════
+  const bulkPushToShopify = useCallback(async () => {
+    if (!analysis) return;
+    const toPush = analysis.products.filter(p => p.gateCount === 5 && p.image && p.title && p.shopifyStatus !== 'pushed');
+    if (!toPush.length) return;
+
+    setPushing(true);
+    setPushProgress({ done: 0, total: toPush.length, pushed: 0, errors: 0, lastError: '' });
+
+    const BATCH = 3; // products per API call
+    const CONCURRENT = 4; // parallel API calls per wave = 12 products/wave
+    const updated = [...analysis.products];
+    let totalDone = 0, pushedCount = 0, errorCount = 0;
+
+    // Build batches
+    const batches: typeof toPush[] = [];
+    for (let i = 0; i < toPush.length; i += BATCH) {
+      batches.push(toPush.slice(i, i + BATCH));
+    }
+
+    // Process in waves
+    for (let wave = 0; wave < batches.length; wave += CONCURRENT) {
+      const waveBatches = batches.slice(wave, wave + CONCURRENT);
+      const waveNum = Math.floor(wave / CONCURRENT) + 1;
+      const totalWaves = Math.ceil(batches.length / CONCURRENT);
+
+      setPushProgress(prev => ({ ...prev, done: totalDone, lastError: `Wave ${waveNum}/${totalWaves} — pushing ${waveBatches.length * BATCH} products...` }));
+
+      // Mark all in this wave as pushing
+      for (const batch of waveBatches) {
+        for (const p of batch) {
+          const idx = updated.findIndex(u => u.asin === p.asin);
+          if (idx >= 0) updated[idx] = { ...updated[idx], shopifyStatus: 'pushing' };
+        }
+      }
+      setAnalysis(prev => prev ? { ...prev, products: [...updated] } : prev);
+
+      // Fire all batches in wave concurrently
+      const waveResults = await Promise.allSettled(
+        waveBatches.map(batch =>
+          fetch('/api/bulk-push', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              products: batch.map(p => ({
+                title: p.title, asin: p.asin, price: p.price, sellPrice: p.sellPrice,
+                image: p.image, description: p.description, vendor: p.vendor, category: p.category,
+                rating: p.rating, reviews: p.reviews, bsr: p.bsr,
+              })),
+            }),
+          }).then(r => r.json())
+        )
+      );
+
+      // Process results
+      for (const result of waveResults) {
+        if (result.status === 'rejected') {
+          errorCount += BATCH;
+          continue;
+        }
+        const data = result.value;
+        if (data.error) {
+          errorCount += BATCH;
+          continue;
+        }
+        const results = data.results || [];
+        for (const r of results) {
+          const idx = updated.findIndex(u => u.asin === r.asin);
+          if (r.success) {
+            pushedCount++;
+            if (idx >= 0) updated[idx] = { ...updated[idx], shopifyStatus: 'pushed', shopifyError: '' };
+          } else {
+            errorCount++;
+            if (idx >= 0) updated[idx] = { ...updated[idx], shopifyStatus: 'failed', shopifyError: r.error || 'Unknown' };
+          }
+        }
+      }
+
+      totalDone += waveBatches.reduce((sum, b) => sum + b.length, 0);
+      setAnalysis(prev => prev ? { ...prev, products: [...updated] } : prev);
+      setPushProgress({ done: totalDone, total: toPush.length, pushed: pushedCount, errors: errorCount, lastError: `Wave ${waveNum} done: ${pushedCount} pushed, ${errorCount} errors` });
+
+      // Delay between waves to respect Shopify rate limits
+      if (wave + CONCURRENT < batches.length) {
+        await new Promise(r => setTimeout(r, 500));
+      }
+    }
+
+    setAnalysis(prev => prev ? { ...prev, products: [...updated] } : prev);
+    setPushing(false);
+  }, [analysis]);
+
   // Enrich ASINs via Keepa API in batches of 100
   const enrichProducts = useCallback(async (testOnly = false) => {
     if (!analysis) return;
@@ -704,6 +799,12 @@ export default function CommandCenter() {
               <button onClick={() => pushToShopify(selectedCount > 0)} disabled={pushing}
                 style={{ padding:'6px 14px', borderRadius:'6px', border:'none', background: pushing ? '#333' : '#f59e0b', color:'#000', fontSize:'10px', fontWeight:700, cursor: pushing ? 'wait' : 'pointer' }}>
                 {pushing ? `⏳ ${pushProgress.done}/${pushProgress.total}` : selectedCount > 0 ? `🛒 Push Selected (${selectedCount})` : `🛒 Push All Passed (${analysis.passed})`}
+              </button>
+            )}
+            {analysis.passed > 0 && !pushing && (
+              <button onClick={bulkPushToShopify}
+                style={{ padding:'6px 14px', borderRadius:'6px', border:'2px solid #f59e0b', background:'rgba(245,158,11,0.15)', color:'#f59e0b', fontSize:'10px', fontWeight:700, cursor:'pointer' }}>
+                🚀 Bulk Push All Passed ({analysis.products.filter(p => p.gateCount === 5 && p.image && p.title && p.shopifyStatus !== 'pushed').length})
               </button>
             )}
             {/* Bulk actions */}
