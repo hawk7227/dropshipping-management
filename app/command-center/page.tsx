@@ -484,6 +484,7 @@ export default function CommandCenter() {
     if (!toPush.length) return;
 
     setPushing(true);
+    (window as Record<string, number>).__pushStart = Date.now();
     setPushProgress({ done: 0, total: toPush.length, pushed: 0, errors: 0, lastError: '' });
 
     const BATCH = 3; // products per API call
@@ -1046,20 +1047,69 @@ export default function CommandCenter() {
           )}
 
           {/* Push Progress */}
-          {(pushing || pushProgress.done > 0) && (
-            <div style={{ background:'#111', borderRadius:'10px', padding:'12px 16px', border:`1px solid ${pushProgress.errors > 0 ? '#f59e0b33' : '#16a34a33'}`, marginBottom:'12px' }}>
-              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'6px' }}>
-                <span style={{ fontSize:'10px', color: pushing ? '#f59e0b' : '#16a34a', fontWeight:600 }}>
-                  {pushing ? '🛒 Pushing to Shopify...' : '✅ Push Complete'}
-                </span>
-                <span style={{ fontSize:'9px', color:'#555' }}>
-                  {pushProgress.pushed} pushed · {pushProgress.errors} errors · {pushProgress.done}/{pushProgress.total}
+          {(pushing || pushProgress.pushed > 0) && (
+            <div style={{ background:'linear-gradient(135deg, #0a0a1a, #111)', borderRadius:'12px', padding:'16px 20px', border:`1px solid ${pushing ? '#f59e0b44' : pushProgress.errors > 0 ? '#f59e0b33' : '#16a34a44'}`, marginBottom:'12px', boxShadow: pushing ? '0 0 20px rgba(245,158,11,0.1)' : 'none' }}>
+              {/* Header */}
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
+                  <span style={{ fontSize:'16px' }}>{pushing ? '🚀' : pushProgress.errors > 0 ? '⚠️' : '✅'}</span>
+                  <span style={{ fontSize:'13px', color: pushing ? '#f59e0b' : pushProgress.errors > 0 ? '#f59e0b' : '#16a34a', fontWeight:700 }}>
+                    {pushing ? 'Pushing to Shopify...' : 'Push Complete!'}
+                  </span>
+                </div>
+                <span style={{ fontSize:'11px', color:'#888', fontWeight:600 }}>
+                  {pushProgress.done} / {pushProgress.total}
                 </span>
               </div>
-              <div style={{ background:'#1a1a2e', borderRadius:'4px', height:'6px', overflow:'hidden' }}>
-                <div style={{ width:`${pushProgress.total > 0 ? (pushProgress.done/pushProgress.total)*100 : 0}%`, height:'100%', background: pushProgress.errors > 0 ? '#f59e0b' : '#16a34a', borderRadius:'4px', transition:'width 0.3s' }} />
+
+              {/* Progress bar */}
+              <div style={{ background:'#1a1a2e', borderRadius:'8px', height:'14px', overflow:'hidden', position:'relative' }}>
+                <div style={{
+                  width: `${pushProgress.total > 0 ? (pushProgress.done / pushProgress.total) * 100 : 0}%`,
+                  height: '100%',
+                  background: pushing ? 'linear-gradient(90deg, #f59e0b, #f97316)' : pushProgress.errors > 0 ? 'linear-gradient(90deg, #f59e0b, #eab308)' : 'linear-gradient(90deg, #16a34a, #22c55e)',
+                  borderRadius: '8px',
+                  transition: 'width 0.3s ease',
+                  boxShadow: pushing ? '0 0 10px rgba(245,158,11,0.4)' : 'none',
+                }} />
+                <span style={{
+                  position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+                  fontSize: '9px', fontWeight: 800, color: '#fff', textShadow: '0 1px 2px rgba(0,0,0,0.8)',
+                }}>
+                  {pushProgress.total > 0 ? `${((pushProgress.done / pushProgress.total) * 100).toFixed(1)}%` : '0%'}
+                </span>
               </div>
-              <p style={{ fontSize:'9px', color:'#444', margin:'4px 0 0' }}>{pushProgress.lastError}</p>
+
+              {/* Stats row */}
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:'10px', gap:'12px' }}>
+                <div style={{ display:'flex', gap:'16px' }}>
+                  <span style={{ fontSize:'10px', color:'#16a34a', fontWeight:600 }}>✅ {pushProgress.pushed} pushed</span>
+                  {pushProgress.errors > 0 && <span style={{ fontSize:'10px', color:'#ef4444', fontWeight:600 }}>❌ {pushProgress.errors} failed</span>}
+                  <span style={{ fontSize:'10px', color:'#666' }}>{pushProgress.total - pushProgress.done} remaining</span>
+                </div>
+                {pushing && pushProgress.done > 0 && (
+                  <span style={{ fontSize:'9px', color:'#555' }}>
+                    ~{Math.ceil((pushProgress.total - pushProgress.done) / Math.max(1, pushProgress.done / ((Date.now() - (window as Record<string, number>).__pushStart || Date.now()) / 60000)))} min left
+                  </span>
+                )}
+              </div>
+
+              {/* Status message */}
+              {pushProgress.lastError && (
+                <p style={{ fontSize:'9px', color:'#555', margin:'8px 0 0', fontStyle:'italic' }}>{pushProgress.lastError}</p>
+              )}
+
+              {/* Completion message */}
+              {!pushing && pushProgress.pushed > 0 && (
+                <div style={{ marginTop:'10px', padding:'8px 12px', background:'rgba(22,163,74,0.1)', border:'1px solid rgba(22,163,74,0.2)', borderRadius:'8px' }}>
+                  <p style={{ fontSize:'11px', color:'#16a34a', fontWeight:600, margin:0 }}>
+                    🎉 {pushProgress.pushed} products are now live on your Shopify store!
+                  </p>
+                  <p style={{ fontSize:'9px', color:'#555', margin:'4px 0 0' }}>
+                    Go to Shopify Admin → Products to see them. All products tagged with &quot;command-center&quot; + &quot;bulk-push&quot;.
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
