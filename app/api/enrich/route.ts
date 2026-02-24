@@ -3,12 +3,48 @@ import { NextRequest, NextResponse } from 'next/server';
 const RAINFOREST_KEY = process.env.RAINFOREST_API_KEY || '';
 const RAINFOREST_BASE = 'https://api.rainforestapi.com/request';
 
-// GET /api/enrich — check API config
-export async function GET() {
+// GET /api/enrich — check config, or test with ?asin=B09NW9P3TW
+export async function GET(request: NextRequest) {
   if (!RAINFOREST_KEY || RAINFOREST_KEY === 'your_rainforest_api_key') {
     return NextResponse.json({ error: 'RAINFOREST_API_KEY not set', configured: false }, { status: 500 });
   }
-  return NextResponse.json({ configured: true, api: 'rainforest', note: 'Ready. ~$0.02 per product lookup.' });
+  
+  const testAsin = request.nextUrl.searchParams.get('asin');
+  if (testAsin) {
+    try {
+      const params = new URLSearchParams({
+        api_key: RAINFOREST_KEY,
+        type: 'product',
+        amazon_domain: 'amazon.com',
+        asin: testAsin,
+        include_a_plus_body: 'false',
+      });
+      const res = await fetch(`${RAINFOREST_BASE}?${params.toString()}`);
+      const data = await res.json();
+      const p = data.product || {};
+      return NextResponse.json({
+        raw_status: res.status,
+        has_product: !!data.product,
+        title: p.title,
+        price: p.buybox_winner?.price?.value || p.price?.value,
+        image: p.main_image?.link,
+        brand: p.brand,
+        rating: p.rating,
+        reviews: p.ratings_total,
+        bsr: p.bestsellers_rank?.[0]?.rank,
+        category: p.bestsellers_rank?.[0]?.category,
+        available: p.buybox_winner?.availability?.type,
+        prime: p.buybox_winner?.is_prime,
+        features_count: p.feature_bullets?.length || 0,
+        request_info: data.request_info,
+        error_if_any: data.error || null,
+      });
+    } catch (e) {
+      return NextResponse.json({ error: String(e) }, { status: 500 });
+    }
+  }
+  
+  return NextResponse.json({ configured: true, api: 'rainforest', note: 'Ready. Add ?asin=B09NW9P3TW to test.' });
 }
 
 // POST /api/enrich — enrich ASINs via Rainforest (one at a time, but no token limits)

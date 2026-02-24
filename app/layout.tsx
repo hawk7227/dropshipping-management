@@ -4,13 +4,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import { Navigation } from '@/components/navigation/Navigation';
-import dynamic from 'next/dynamic';
-
-// Dynamic import for HealthMonitor (client component)
-const HealthMonitor = dynamic(
-  () => import('@/components/health-monitor/HealthMonitor'),
-  { ssr: false }
-);
 
 export const metadata: Metadata = {
   title: 'Dropshipping Platform',
@@ -33,8 +26,6 @@ export default function RootLayout({
           Skip to main content
         </a>
         <Navigation>{children}</Navigation>
-        {/* Health Monitor Widget - Floating overlay */}
-        <HealthMonitor />
       </body>
     </html>
   );
