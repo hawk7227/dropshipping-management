@@ -186,8 +186,8 @@ function parseCSV(text:string):{title:string;asin:string;vendor:string;category:
 
   for(const row of data){
     if(row.every(c=>!c.trim()))continue;
-    // Shopify Matrixify/Excelify export: skip non-top rows (image/variant rows)
-    if(topRowIdx>=0){const tr=(row[topRowIdx]||'').trim().toLowerCase();if(tr&&tr!=='true'&&tr!=='1'&&tr!=='yes')continue;}
+    // Shopify Matrixify/Excelify export: only process Top Row = true (skip image/variant rows)
+    if(topRowIdx>=0){const tr=(row[topRowIdx]||'').trim().toLowerCase();if(tr!=='true'&&tr!=='1'&&tr!=='yes')continue;}
     let asin='';
     if(asinCol>=0){const v=(row[asinCol]||'').trim().replace(/['"]/g,'').toUpperCase();if(isAsin(v))asin=v;}
     if(!asin&&tagsCol>=0){const ts=row[tagsCol]||'';for(const tag of ts.split(',')){const t=tag.trim();if(t.toLowerCase().startsWith('asin-')){const c=t.replace(/^asin-/i,'').toUpperCase();if(isAsin(c)){asin=c;break;}}}if(!asin){const a=extractAsins(ts);if(a.length)asin=a[0];}}
@@ -1143,6 +1143,10 @@ export default function SourcingEngine(){
                 {/* Export Flagged */}
                 <button onClick={bulkExportFlagged} disabled={!latestBulkJob||latestBulkJob.flagged===0} className="px-4 py-2 rounded-lg text-[11px] font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-all hover:scale-[1.02] gl text-amber-400 border border-amber-500/30 hover:bg-amber-500/10">
                   📥 Export Flagged to Spreadsheet{latestBulkJob&&latestBulkJob.flagged>0?` (${latestBulkJob.flagged})`:''}
+                </button>
+                {/* Clear / Delete All Import Results */}
+                <button onClick={()=>{if(confirm('Clear all import results? This cannot be undone.')){setBulkJobs([]);}}} disabled={bulkJobs.length===0} className="px-4 py-2 rounded-lg text-[11px] font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-all hover:scale-[1.02] gl text-red-400 border border-red-500/30 hover:bg-red-500/10">
+                  🗑️ Clear Import{latestBulkJob?` (${latestBulkJob.products.length})`:''}
                 </button>
               </div>
               {latestBulkJob&&(<p className="text-[9px] text-zinc-500 mt-2">Push sends passed + image-flagged products to Shopify (retries image fetch at push time, skips products where images still can&apos;t be found) · Export creates a CSV of flagged products</p>)}
