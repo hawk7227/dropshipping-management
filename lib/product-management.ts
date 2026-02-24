@@ -549,6 +549,15 @@ export async function createProduct(data: any): Promise<Product> {
     // ✅ FIX: Strict validation to explain errors
     if (!data.title) throw new Error("Title is required");
 
+    // Resolve main_image from various sources
+    const mainImage = data.main_image || data.image_url || 
+      (Array.isArray(data.images) && data.images.length > 0 
+        ? (typeof data.images[0] === 'string' ? data.images[0] : data.images[0]?.src) 
+        : null);
+
+    // Block products without images
+    if (!mainImage) throw new Error("Image is required — products without images are not allowed");
+
     // 1. Insert Product
     const { data: product, error } = await getSupabaseClient().from('products').insert({
         id: crypto.randomUUID(),
@@ -560,6 +569,7 @@ export async function createProduct(data: any): Promise<Product> {
         product_type: data.product_type || '',
         tags: data.tags || [],
         status: data.status || 'draft',
+        main_image: mainImage,
         images: data.images || [],
         variants: [], 
         price_synced_at: null,

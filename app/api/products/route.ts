@@ -948,6 +948,22 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: true, data: duplicate });
       }
 
+      case 'delete-no-images': {
+        const sbDel = getSupabaseClient();
+        const { count: beforeCount } = await sbDel.from('products').select('id', { count: 'exact', head: true }).is('main_image', null);
+        const { error: delErr } = await sbDel.from('products').delete().is('main_image', null);
+        if (delErr) return NextResponse.json({ success: false, error: delErr.message }, { status: 500 });
+        return NextResponse.json({ success: true, deleted: beforeCount || 0, message: `Deleted ${beforeCount || 0} products without images` });
+      }
+
+      case 'delete-all': {
+        const sbDelAll = getSupabaseClient();
+        const { count: totalCount } = await sbDelAll.from('products').select('id', { count: 'exact', head: true });
+        const { error: delAllErr } = await sbDelAll.from('products').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        if (delAllErr) return NextResponse.json({ success: false, error: delAllErr.message }, { status: 500 });
+        return NextResponse.json({ success: true, deleted: totalCount || 0, message: `Deleted all ${totalCount || 0} products` });
+      }
+
       default:
         return NextResponse.json(
           { success: false, error: `Unknown action: ${action}` },
