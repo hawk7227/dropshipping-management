@@ -330,7 +330,7 @@ export default function CommandCenter() {
     const unenriched = analysis.products.filter(p => p.asin && /^B[0-9A-Z]{9}$/.test(p.asin) && (p.gateCount < 5 || !p.title));
     if (!unenriched.length) return;
     setEnriching(true);
-    setEnrichProgress({ done: 0, total: testOnly ? Math.min(100, unenriched.length) : unenriched.length, tokensLeft: 0, currentBatch: 'Starting...', error: '' });
+    setEnrichProgress({ done: 0, total: testOnly ? Math.min(50, unenriched.length) : unenriched.length, tokensLeft: 0, currentBatch: 'Starting...', error: '' });
 
     const allAsins = unenriched.map(p => p.asin);
     const maxAsins = testOnly ? allAsins.slice(0, 50) : allAsins;
@@ -358,7 +358,16 @@ export default function CommandCenter() {
         
         const enriched = data.enriched || {};
         const enrichedCount = Object.keys(enriched).length;
-        setEnrichProgress(prev => ({ ...prev, tokensLeft: 0, currentBatch: `Batch ${Math.floor(i/BATCH)+1}: ${enrichedCount} products returned, ${data.summary?.passed || 0} passed criteria` }));
+        const errors = data.summary?.errors || [];
+        
+        // Debug: show what we got back
+        const sampleKey = Object.keys(enriched)[0];
+        const sample = sampleKey ? enriched[sampleKey] : null;
+        const debugInfo = sample 
+          ? `Sample: "${(sample.title||'no title').substring(0,40)}" $${sample.price} img:${sample.image ? 'YES' : 'NO'} desc:${sample.description ? 'YES' : 'NO'}`
+          : `No products returned. Errors: ${errors.length ? errors.slice(0,2).join('; ') : 'none'}`;
+        
+        setEnrichProgress(prev => ({ ...prev, tokensLeft: 0, currentBatch: `Batch ${Math.floor(i/BATCH)+1}: ${enrichedCount} returned, ${data.summary?.passed || 0} passed. ${debugInfo}` }));
 
         // Merge enriched data into products
         for (let j = 0; j < updated.length; j++) {
