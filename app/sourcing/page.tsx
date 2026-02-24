@@ -716,6 +716,7 @@ export default function SourcingEngine(){
       const asinCount=parsed.filter(p=>p.origHasAsin).length;
       setBulkJobs(prev=>prev.map(j=>j.id===jobId?{...j,totalRows:totalLines,uniqueProducts:uniqueCount,stage:`Found ${asinCount} ASINs — fetching images & data from Amazon...`,progress:15,status:'enriching'}:j));
       const enriched:BulkProduct[]=[];
+      const CHUNK=50;
       for(let i=0;i<parsed.length;i++){
         const pct=Math.round(15+((i/parsed.length)*65));
         const statusMsg=`[${i+1}/${parsed.length}] Enriching "${parsed[i].title.slice(0,45)}"${parsed[i].asin?` (${parsed[i].asin})`:''}...`;
@@ -723,6 +724,8 @@ export default function SourcingEngine(){
         setGStatus({msg:statusMsg,progress:pct,type:'working'});
         const product=await enrichProduct(parsed[i],i);
         enriched.push(product);
+        // Yield to main thread every CHUNK items to prevent Chrome OOM
+        if(i%CHUNK===0) await new Promise(r=>setTimeout(r,0));
       }
       const passedCount=enriched.filter(p=>p.status==='passed').length;
       const flaggedCount=enriched.filter(p=>p.status==='flagged').length;
@@ -736,15 +739,17 @@ export default function SourcingEngine(){
     };
 
     if(isXlsx){
-      // XLSX binary — use SheetJS
+      // XLSX binary — use SheetJS with dense mode for lower memory
       const reader=new FileReader();
       reader.onload=async(evt)=>{
         try{
           const data=new Uint8Array(evt.target?.result as ArrayBuffer);
-          const wb=XLSX.read(data,{type:'array'});
+          const wb=XLSX.read(data,{type:'array',dense:true});
           const ws=wb.Sheets[wb.SheetNames[0]];
           // Convert to CSV text and reuse our universal parser
           const csvText=XLSX.utils.sheet_to_csv(ws,{FS:',',RS:'\n'});
+          // Free workbook memory before processing
+          (wb as Record<string,unknown>).Sheets={};(wb as Record<string,unknown>).SheetNames=[];
           await processText(csvText);
         }catch(err:unknown){
           const msg=err instanceof Error?err.message:'Unknown error';
