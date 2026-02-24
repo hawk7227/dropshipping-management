@@ -110,6 +110,8 @@ function extractASIN(val: string): string {
   return m ? m[1].toUpperCase() : '';
 }
 
+const MARKUP = 1.70; // 70% markup
+
 function runGates(p: CleanProduct): CleanProduct {
   const g = { title:'fail' as GateStatus, image:'fail' as GateStatus, price:'fail' as GateStatus, asin:'fail' as GateStatus, description:'fail' as GateStatus };
   if (p.title && p.title.length > 5 && !p.title.includes('<') && p.title.toLowerCase() !== 'unknown product') g.title = 'pass';
@@ -118,7 +120,18 @@ function runGates(p: CleanProduct): CleanProduct {
   if (p.price > 0) g.price = 'pass'; else if (p.compareAt > 0) g.price = 'warn';
   if (p.asin && /^B[0-9A-Z]{9}$/.test(p.asin)) g.asin = 'pass';
   if (p.description?.length > 30) g.description = 'pass'; else if (p.description?.length > 0) g.description = 'warn';
-  return { ...p, gates: g, gateCount: Object.values(g).filter(v => v === 'pass').length };
+
+  // Auto-calculate sell price and profit if not already set
+  let { sellPrice, profit, profitPct, stockStatus } = p;
+  if (p.price > 0 && !sellPrice) {
+    sellPrice = +(p.price * MARKUP).toFixed(2);
+    profit = +(sellPrice - p.price).toFixed(2);
+    profitPct = +((profit / p.price) * 100).toFixed(1);
+  }
+  // Default stock status
+  if (stockStatus === 'Unknown' && p.price > 0 && p.title) stockStatus = 'In Stock';
+
+  return { ...p, sellPrice, profit, profitPct, stockStatus, gates: g, gateCount: Object.values(g).filter(v => v === 'pass').length };
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -226,9 +239,9 @@ const COLS = ['title','asin','price','sellPrice','profit','profitPct','stockStat
 const COL_LABELS = ['Title','ASIN/SKU','Cost','Sell Price','Profit $','Profit %','Stock','Image URL','Rating','Reviews','BSR','Vendor','Category','Description','Checked','Status'];
 const COL_WIDTHS = [280,120,70,80,70,70,85,200,60,80,80,120,140,300,90,70];
 
-function SpreadsheetView({ products, onUpdate }: { products: CleanProduct[]; onUpdate: (idx: number, field: string, val: string) => void }) {
+function SpreadsheetView({ products, onUpdate, perPage = 50 }: { products: CleanProduct[]; onUpdate: (idx: number, field: string, val: string) => void; perPage?: number }) {
   const [page, setPage] = useState(0);
-  const PAGE = 50;
+  const PAGE = perPage;
   const total = products.length;
   const pages = Math.ceil(total / PAGE);
   const slice = products.slice(page * PAGE, (page + 1) * PAGE);
@@ -352,6 +365,7 @@ export default function CommandCenter() {
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState<'default'|'profit'|'price'|'rating'|'bsr'|'reviews'>('default');
   const [sortDir, setSortDir] = useState<'asc'|'desc'>('desc');
+  const [perPage, setPerPage] = useState(50);
   const [enriching, setEnriching] = useState(false);
   const [enrichProgress, setEnrichProgress] = useState({ done: 0, total: 0, tokensLeft: 0, currentBatch: '', error: '' });
   const [criteria, setCriteria] = useState({ minPrice: 3, maxPrice: 25, minRating: 3.5, minReviews: 500, maxBSR: 100000, markup: 70, maxRetail: 40 });
@@ -925,6 +939,14 @@ export default function CommandCenter() {
                 style={{ padding:'5px 8px', borderRadius:'4px', border:'1px solid #222', background:'#0a0a0a', color:'#888', fontSize:'10px', cursor:'pointer' }}>
                 {sortDir === 'desc' ? '↓' : '↑'}
               </button>
+              {/* Per page */}
+              <select value={perPage} onChange={e => setPerPage(Number(e.target.value))}
+                style={{ padding:'5px 8px', borderRadius:'4px', border:'1px solid #222', background:'#0a0a0a', color:'#ccc', fontSize:'10px', fontFamily:'inherit' }}>
+                <option value={25}>25/page</option>
+                <option value={50}>50/page</option>
+                <option value={100}>100/page</option>
+                <option value={200}>200/page</option>
+              </select>
               <span style={{ fontSize:'9px', color:'#555' }}>{filtered.length} results</span>
             </div>
           </div>
@@ -998,7 +1020,7 @@ export default function CommandCenter() {
               {filtered.length > 100 && <div style={{ gridColumn:'1/-1', textAlign:'center', padding:'20px', color:'#333', fontSize:'10px' }}>Showing 100 of {filtered.length}. Use filters or export to see all.</div>}
             </div>
           ) : viewMode === 'spreadsheet' ? (
-            <SpreadsheetView products={filtered} onUpdate={handleUpdate} />
+            <SpreadsheetView products={filtered} onUpdate={handleUpdate} perPage={perPage} />
           ) : (
             <div style={{ background:'#111', borderRadius:'12px', border:'1px solid #1a1a2e', overflow:'hidden' }}>
               <div style={{ overflowX:'auto' }}>
@@ -1043,6 +1065,68 @@ export default function CommandCenter() {
               </div>
             </div>
           )}
+
+          {/* Product Cards — always shown below spreadsheet/table */}
+          {viewMode !== 'cards' && filtered.some(p => p.image) && (
+            <div style={{ marginTop:'16px' }}>
+              <h3 style={{ fontSize:'10px', color:'#555', textTransform:'uppercase', letterSpacing:'1px', margin:'0 0 10px' }}>
+                Product Preview ({Math.min(filtered.filter(p => p.image).length, perPage)} of {filtered.filter(p => p.image).length} with images)
+              </h3>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(240px, 1fr))', gap:'10px' }}>
+                {filtered.filter(p => p.image).slice(0, perPage).map((p, i) => (
+                  <div key={i} style={{ background:'#111', borderRadius:'10px', border:'1px solid #1a1a2e', overflow:'hidden', position:'relative' }}>
+                    {/* Badges */}
+                    <div style={{ position:'absolute', top:6, left:6, zIndex:2, display:'flex', gap:'4px' }}>
+                      <span style={{ padding:'2px 6px', borderRadius:'3px', fontSize:'7px', fontWeight:700, textTransform:'uppercase',
+                        background: p.stockStatus === 'In Stock' ? 'rgba(22,163,74,0.9)' : p.stockStatus === 'Out of Stock' ? 'rgba(239,68,68,0.9)' : 'rgba(85,85,85,0.9)', color:'#fff' }}>
+                        {p.stockStatus === 'In Stock' ? 'In Stock' : p.stockStatus === 'Out of Stock' ? 'OOS' : '?'}
+                      </span>
+                      {p.rating > 0 && <span style={{ padding:'2px 6px', borderRadius:'3px', fontSize:'7px', fontWeight:700, background:'rgba(245,158,11,0.9)', color:'#000' }}>★{p.rating}</span>}
+                    </div>
+                    <div style={{ position:'absolute', top:6, right:6, zIndex:2 }}>
+                      <span style={{ padding:'2px 6px', borderRadius:'3px', fontSize:'7px', fontWeight:700,
+                        background: p.gateCount===5?'rgba(22,163,74,0.9)':p.gateCount>=3?'rgba(245,158,11,0.9)':'rgba(239,68,68,0.9)', color:'#fff' }}>{p.gateCount}/5</span>
+                    </div>
+                    {/* Image */}
+                    <div style={{ height:160, background:'#0a0a0a', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden' }}>
+                      <img src={p.image} alt="" style={{ maxHeight:'100%', maxWidth:'100%', objectFit:'contain' }}
+                        onError={e => { (e.target as HTMLImageElement).style.display='none'; }} />
+                    </div>
+                    {/* Info */}
+                    <div style={{ padding:'10px' }}>
+                      <p style={{ fontSize:'10px', color:'#fff', fontWeight:600, margin:'0 0 3px', lineHeight:'1.3',
+                        overflow:'hidden', textOverflow:'ellipsis', display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical' as const }}>{p.title || 'Untitled'}</p>
+                      <p style={{ fontSize:'8px', color:'#06b6d4', margin:'0 0 6px', fontFamily:'monospace' }}>{p.asin} · {p.vendor}</p>
+                      {/* Pricing row */}
+                      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline' }}>
+                        <div>
+                          <p style={{ fontSize:'7px', color:'#555', margin:0, textTransform:'uppercase' }}>Cost</p>
+                          <p style={{ fontSize:'13px', color:'#ccc', fontWeight:700, margin:0 }}>${p.price.toFixed(2)}</p>
+                        </div>
+                        <div style={{ textAlign:'center' }}>
+                          <p style={{ fontSize:'7px', color:'#555', margin:0, textTransform:'uppercase' }}>Sell</p>
+                          <p style={{ fontSize:'13px', color:'#06b6d4', fontWeight:700, margin:0 }}>${p.sellPrice.toFixed(2)}</p>
+                        </div>
+                        <div style={{ textAlign:'right' }}>
+                          <p style={{ fontSize:'7px', color:'#555', margin:0, textTransform:'uppercase' }}>Profit</p>
+                          <p style={{ fontSize:'13px', color:'#16a34a', fontWeight:700, margin:0 }}>{p.profitPct.toFixed(0)}%</p>
+                        </div>
+                      </div>
+                      {/* Tags */}
+                      {p.bsr > 0 && (
+                        <div style={{ marginTop:'6px', display:'flex', gap:'4px', flexWrap:'wrap' }}>
+                          <span style={{ padding:'1px 5px', borderRadius:'3px', background:'#8b5cf615', color:'#8b5cf6', fontSize:'7px' }}>BSR {p.bsr.toLocaleString()}</span>
+                          {p.reviews > 0 && <span style={{ padding:'1px 5px', borderRadius:'3px', background:'#33333333', color:'#888', fontSize:'7px' }}>{p.reviews.toLocaleString()} reviews</span>}
+                          {p.dateChecked && <span style={{ padding:'1px 5px', borderRadius:'3px', background:'#33333333', color:'#555', fontSize:'7px' }}>📅 {p.dateChecked}</span>}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
         </div>)}
       </div>
     </div>
