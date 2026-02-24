@@ -6,7 +6,7 @@ import { useState, useCallback, useRef } from 'react';
 // ═══════════════════════════════════════════════════════════
 type FileType = 'shopify-matrixify' | 'shopify-csv' | 'autods' | 'asin-list' | 'ebay-file-exchange' | 'generic-csv' | 'unknown';
 type GateStatus = 'pass' | 'fail' | 'warn';
-type ViewMode = 'table' | 'spreadsheet';
+type ViewMode = 'table' | 'spreadsheet' | 'cards';
 
 interface CleanProduct {
   title: string; asin: string; price: number; compareAt: number; image: string;
@@ -343,6 +343,15 @@ export default function CommandCenter() {
   const [fileName, setFileName] = useState('');
   const [filter, setFilter] = useState<'all'|'passed'|'failed'|'warned'>('all');
   const [viewMode, setViewMode] = useState<ViewMode>('spreadsheet');
+  const [stockFilter, setStockFilter] = useState<'all'|'instock'|'oos'>('all');
+  const [priceMin, setPriceMin] = useState('');
+  const [priceMax, setPriceMax] = useState('');
+  const [profitMin, setProfitMin] = useState('');
+  const [ratingMin, setRatingMin] = useState('');
+  const [bsrMax, setBsrMax] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [sortBy, setSortBy] = useState<'default'|'profit'|'price'|'rating'|'bsr'|'reviews'>('default');
+  const [sortDir, setSortDir] = useState<'asc'|'desc'>('desc');
   const [enriching, setEnriching] = useState(false);
   const [enrichProgress, setEnrichProgress] = useState({ done: 0, total: 0, tokensLeft: 0, currentBatch: '', error: '' });
   const [criteria, setCriteria] = useState({ minPrice: 3, maxPrice: 25, minRating: 3.5, minReviews: 500, maxBSR: 100000, markup: 70, maxRetail: 40 });
@@ -491,12 +500,35 @@ export default function CommandCenter() {
     setAnalysis({ ...analysis, products: updated, passed, failed, warned: updated.length - passed - failed });
   }, [analysis]);
 
-  const filtered = analysis?.products?.filter(p => {
-    if (filter === 'passed') return p.gateCount === 5;
-    if (filter === 'failed') return p.gateCount < 3;
-    if (filter === 'warned') return p.gateCount >= 3 && p.gateCount < 5;
+  const filtered = (analysis?.products || []).filter(p => {
+    // Gate filter
+    if (filter === 'passed' && p.gateCount !== 5) return false;
+    if (filter === 'failed' && p.gateCount >= 3) return false;
+    if (filter === 'warned' && (p.gateCount < 3 || p.gateCount >= 5)) return false;
+    // Stock filter
+    if (stockFilter === 'instock' && p.stockStatus !== 'In Stock') return false;
+    if (stockFilter === 'oos' && p.stockStatus !== 'Out of Stock') return false;
+    // Price range
+    if (priceMin && p.price < parseFloat(priceMin)) return false;
+    if (priceMax && p.price > parseFloat(priceMax)) return false;
+    // Profit min
+    if (profitMin && p.profitPct < parseFloat(profitMin)) return false;
+    // Rating min
+    if (ratingMin && p.rating > 0 && p.rating < parseFloat(ratingMin)) return false;
+    // BSR max
+    if (bsrMax && p.bsr > 0 && p.bsr > parseFloat(bsrMax)) return false;
+    // Search
+    if (searchTerm) {
+      const s = searchTerm.toLowerCase();
+      if (!p.title.toLowerCase().includes(s) && !p.asin.toLowerCase().includes(s) && !p.vendor.toLowerCase().includes(s) && !p.category.toLowerCase().includes(s)) return false;
+    }
     return true;
-  }) || [];
+  }).sort((a, b) => {
+    if (sortBy === 'default') return 0;
+    const aVal = sortBy === 'profit' ? a.profitPct : sortBy === 'price' ? a.price : sortBy === 'rating' ? a.rating : sortBy === 'bsr' ? a.bsr : a.reviews;
+    const bVal = sortBy === 'profit' ? b.profitPct : sortBy === 'price' ? b.price : sortBy === 'rating' ? b.rating : sortBy === 'bsr' ? b.bsr : b.reviews;
+    return sortDir === 'desc' ? bVal - aVal : aVal - bVal;
+  });
 
   const gateIcon = (s: GateStatus) => s === 'pass' ? '✅' : s === 'warn' ? '⚠️' : '❌';
   const typeLabel: Record<FileType, string> = {
@@ -517,11 +549,11 @@ export default function CommandCenter() {
           <div style={{ display:'flex', gap:'6px', alignItems:'center' }}>
             {/* View toggle */}
             <div style={{ display:'flex', border:'1px solid #222', borderRadius:'6px', overflow:'hidden', marginRight:'8px' }}>
-              {(['spreadsheet','table'] as const).map(m => (
+              {(['spreadsheet','cards','table'] as const).map(m => (
                 <button key={m} onClick={() => setViewMode(m)} style={{
                   padding:'5px 12px', fontSize:'9px', fontWeight:600, border:'none', cursor:'pointer', textTransform:'uppercase', letterSpacing:'0.5px',
                   background: viewMode===m ? '#1a1a2e' : 'transparent', color: viewMode===m ? '#fff' : '#444',
-                }}>{m === 'spreadsheet' ? '📊 Sheet' : '📋 Table'}</button>
+                }}>{m === 'spreadsheet' ? '📊 Sheet' : m === 'cards' ? '🃏 Cards' : '📋 Table'}</button>
               ))}
             </div>
             {/* Enrich button for ASIN lists or products missing data */}
@@ -776,20 +808,131 @@ export default function CommandCenter() {
             </div>
           )}
 
-          {/* Filters */}
-          <div style={{ display:'flex', gap:'4px', marginBottom:'12px' }}>
-            {(['all','passed','failed','warned'] as const).map(f => {
-              const count = f==='all'?analysis.uniqueProducts:f==='passed'?analysis.passed:f==='failed'?analysis.failed:analysis.warned;
-              return <button key={f} onClick={() => setFilter(f)} style={{
-                padding:'5px 12px', borderRadius:'5px', border: filter===f ? '1px solid #333' : '1px solid transparent',
-                background: filter===f ? '#1a1a2e' : 'transparent', color: filter===f ? '#fff' : '#444',
-                fontSize:'9px', fontWeight:600, cursor:'pointer', textTransform:'uppercase', letterSpacing:'0.5px',
-              }}>{f} ({count})</button>;
-            })}
+          {/* Enterprise Filter Bar */}
+          <div style={{ background:'#111', borderRadius:'10px', padding:'10px 14px', border:'1px solid #1a1a2e', marginBottom:'12px' }}>
+            <div style={{ display:'flex', flexWrap:'wrap', gap:'6px', alignItems:'center' }}>
+              {/* Gate filter */}
+              <select value={filter} onChange={e => setFilter(e.target.value as typeof filter)}
+                style={{ padding:'5px 8px', borderRadius:'4px', border:'1px solid #222', background:'#0a0a0a', color:'#ccc', fontSize:'10px', fontFamily:'inherit' }}>
+                <option value="all">All ({analysis.uniqueProducts})</option>
+                <option value="passed">✅ Passed ({analysis.passed})</option>
+                <option value="warned">⚠️ Warned ({analysis.warned})</option>
+                <option value="failed">❌ Failed ({analysis.failed})</option>
+              </select>
+              {/* Stock */}
+              <select value={stockFilter} onChange={e => setStockFilter(e.target.value as typeof stockFilter)}
+                style={{ padding:'5px 8px', borderRadius:'4px', border:'1px solid #222', background:'#0a0a0a', color:'#ccc', fontSize:'10px', fontFamily:'inherit' }}>
+                <option value="all">All Stock</option>
+                <option value="instock">✅ In Stock</option>
+                <option value="oos">❌ Out of Stock</option>
+              </select>
+              {/* Price range */}
+              <div style={{ display:'flex', alignItems:'center', gap:'2px' }}>
+                <input placeholder="Min $" value={priceMin} onChange={e => setPriceMin(e.target.value)}
+                  style={{ width:'55px', padding:'5px 6px', borderRadius:'4px', border:'1px solid #222', background:'#0a0a0a', color:'#ccc', fontSize:'10px', fontFamily:'inherit' }} />
+                <span style={{ color:'#333', fontSize:'10px' }}>–</span>
+                <input placeholder="Max $" value={priceMax} onChange={e => setPriceMax(e.target.value)}
+                  style={{ width:'55px', padding:'5px 6px', borderRadius:'4px', border:'1px solid #222', background:'#0a0a0a', color:'#ccc', fontSize:'10px', fontFamily:'inherit' }} />
+              </div>
+              {/* Profit min */}
+              <input placeholder="Min Profit %" value={profitMin} onChange={e => setProfitMin(e.target.value)}
+                style={{ width:'75px', padding:'5px 6px', borderRadius:'4px', border:'1px solid #222', background:'#0a0a0a', color:'#ccc', fontSize:'10px', fontFamily:'inherit' }} />
+              {/* Rating min */}
+              <input placeholder="Min ★" value={ratingMin} onChange={e => setRatingMin(e.target.value)}
+                style={{ width:'50px', padding:'5px 6px', borderRadius:'4px', border:'1px solid #222', background:'#0a0a0a', color:'#ccc', fontSize:'10px', fontFamily:'inherit' }} />
+              {/* BSR max */}
+              <input placeholder="Max BSR" value={bsrMax} onChange={e => setBsrMax(e.target.value)}
+                style={{ width:'70px', padding:'5px 6px', borderRadius:'4px', border:'1px solid #222', background:'#0a0a0a', color:'#ccc', fontSize:'10px', fontFamily:'inherit' }} />
+              {/* Search */}
+              <input placeholder="🔍 Search title, ASIN, brand..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
+                style={{ flex:'1', minWidth:'150px', padding:'5px 8px', borderRadius:'4px', border:'1px solid #222', background:'#0a0a0a', color:'#ccc', fontSize:'10px', fontFamily:'inherit' }} />
+              {/* Sort */}
+              <select value={sortBy} onChange={e => setSortBy(e.target.value as typeof sortBy)}
+                style={{ padding:'5px 8px', borderRadius:'4px', border:'1px solid #222', background:'#0a0a0a', color:'#ccc', fontSize:'10px', fontFamily:'inherit' }}>
+                <option value="default">Sort by</option>
+                <option value="profit">Profit %</option>
+                <option value="price">Price</option>
+                <option value="rating">Rating</option>
+                <option value="bsr">BSR</option>
+                <option value="reviews">Reviews</option>
+              </select>
+              <button onClick={() => setSortDir(d => d === 'desc' ? 'asc' : 'desc')}
+                style={{ padding:'5px 8px', borderRadius:'4px', border:'1px solid #222', background:'#0a0a0a', color:'#888', fontSize:'10px', cursor:'pointer' }}>
+                {sortDir === 'desc' ? '↓' : '↑'}
+              </button>
+              <span style={{ fontSize:'9px', color:'#555' }}>{filtered.length} results</span>
+            </div>
           </div>
 
-          {/* Spreadsheet or Table view */}
-          {viewMode === 'spreadsheet' ? (
+          {/* Views */}
+          {viewMode === 'cards' ? (
+            /* Product Card Grid */
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(260px, 1fr))', gap:'12px' }}>
+              {filtered.slice(0, 100).map((p, i) => (
+                <div key={i} style={{ background:'#111', borderRadius:'12px', border:'1px solid #1a1a2e', overflow:'hidden', position:'relative' }}>
+                  {/* Stock badge */}
+                  <div style={{ position:'absolute', top:8, left:8, zIndex:2 }}>
+                    <span style={{ padding:'2px 8px', borderRadius:'4px', fontSize:'8px', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.5px',
+                      background: p.stockStatus === 'In Stock' ? 'rgba(22,163,74,0.9)' : p.stockStatus === 'Out of Stock' ? 'rgba(239,68,68,0.9)' : 'rgba(85,85,85,0.9)',
+                      color:'#fff' }}>
+                      {p.stockStatus === 'In Stock' ? 'In Stock' : p.stockStatus === 'Out of Stock' ? 'OOS' : 'Unknown'}
+                    </span>
+                  </div>
+                  {/* Gate badge */}
+                  <div style={{ position:'absolute', top:8, right:8, zIndex:2 }}>
+                    <span style={{ padding:'2px 8px', borderRadius:'4px', fontSize:'8px', fontWeight:700,
+                      background: p.gateCount===5?'rgba(22,163,74,0.9)':p.gateCount>=3?'rgba(245,158,11,0.9)':'rgba(239,68,68,0.9)',
+                      color:'#fff' }}>{p.gateCount}/5</span>
+                  </div>
+                  {/* Image */}
+                  <div style={{ height:180, background:'#0a0a0a', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden' }}>
+                    {p.image ? (
+                      <img src={p.image} alt={p.title} style={{ maxHeight:'100%', maxWidth:'100%', objectFit:'contain' }}
+                        onError={e => { (e.target as HTMLImageElement).style.display='none'; }} />
+                    ) : (
+                      <span style={{ color:'#222', fontSize:'36px' }}>📦</span>
+                    )}
+                  </div>
+                  {/* Info */}
+                  <div style={{ padding:'12px' }}>
+                    <p style={{ fontSize:'11px', color:'#fff', fontWeight:600, margin:'0 0 4px', lineHeight:'1.3',
+                      overflow:'hidden', textOverflow:'ellipsis', display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical' as const }}>{p.title || 'Untitled'}</p>
+                    <p style={{ fontSize:'9px', color:'#06b6d4', margin:'0 0 8px', fontFamily:'monospace' }}>{p.asin}</p>
+                    {/* Rating */}
+                    {p.rating > 0 && (
+                      <div style={{ display:'flex', alignItems:'center', gap:'4px', marginBottom:'8px' }}>
+                        <span style={{ color:'#f59e0b', fontSize:'10px' }}>{'★'.repeat(Math.round(p.rating))}{'☆'.repeat(5-Math.round(p.rating))}</span>
+                        <span style={{ color:'#555', fontSize:'9px' }}>{p.rating} ({p.reviews.toLocaleString()})</span>
+                      </div>
+                    )}
+                    {/* Pricing */}
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:'6px' }}>
+                      <div>
+                        <span style={{ fontSize:'8px', color:'#555', textTransform:'uppercase', letterSpacing:'0.5px' }}>Cost</span>
+                        <p style={{ fontSize:'14px', color:'#ccc', fontWeight:700, margin:0 }}>{p.price > 0 ? `$${p.price.toFixed(2)}` : '—'}</p>
+                      </div>
+                      <div style={{ textAlign:'center' }}>
+                        <span style={{ fontSize:'8px', color:'#555', textTransform:'uppercase', letterSpacing:'0.5px' }}>Sell</span>
+                        <p style={{ fontSize:'14px', color:'#06b6d4', fontWeight:700, margin:0 }}>{p.sellPrice > 0 ? `$${p.sellPrice.toFixed(2)}` : '—'}</p>
+                      </div>
+                      <div style={{ textAlign:'right' }}>
+                        <span style={{ fontSize:'8px', color:'#555', textTransform:'uppercase', letterSpacing:'0.5px' }}>Profit</span>
+                        <p style={{ fontSize:'14px', color:'#16a34a', fontWeight:700, margin:0 }}>{p.profitPct > 0 ? `${p.profitPct.toFixed(0)}%` : '—'}</p>
+                      </div>
+                    </div>
+                    {/* Meta row */}
+                    <div style={{ display:'flex', gap:'6px', flexWrap:'wrap' }}>
+                      {p.bsr > 0 && <span style={{ padding:'2px 6px', borderRadius:'3px', background:'#8b5cf615', color:'#8b5cf6', fontSize:'8px', border:'1px solid #8b5cf622' }}>BSR {p.bsr.toLocaleString()}</span>}
+                      {p.vendor && p.vendor !== 'Unknown' && <span style={{ padding:'2px 6px', borderRadius:'3px', background:'#06b6d415', color:'#06b6d4', fontSize:'8px', border:'1px solid #06b6d422' }}>{p.vendor}</span>}
+                      {p.category && p.category !== 'General' && <span style={{ padding:'2px 6px', borderRadius:'3px', background:'#33333333', color:'#888', fontSize:'8px', border:'1px solid #33333355' }}>{p.category.substring(0,25)}</span>}
+                      {p.dateChecked && <span style={{ padding:'2px 6px', borderRadius:'3px', background:'#33333333', color:'#555', fontSize:'8px' }}>📅 {p.dateChecked}</span>}
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {filtered.length > 100 && <div style={{ gridColumn:'1/-1', textAlign:'center', padding:'20px', color:'#333', fontSize:'10px' }}>Showing 100 of {filtered.length}. Use filters or export to see all.</div>}
+            </div>
+          ) : viewMode === 'spreadsheet' ? (
             <SpreadsheetView products={filtered} onUpdate={handleUpdate} />
           ) : (
             <div style={{ background:'#111', borderRadius:'12px', border:'1px solid #1a1a2e', overflow:'hidden' }}>
