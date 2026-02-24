@@ -319,34 +319,46 @@ export default function CommandCenter() {
   const [filter, setFilter] = useState<'all'|'passed'|'failed'|'warned'>('all');
   const [viewMode, setViewMode] = useState<ViewMode>('spreadsheet');
   const [enriching, setEnriching] = useState(false);
-  const [enrichProgress, setEnrichProgress] = useState({ done: 0, total: 0, tokensLeft: 0, currentBatch: '' });
+  const [enrichProgress, setEnrichProgress] = useState({ done: 0, total: 0, tokensLeft: 0, currentBatch: '', error: '' });
   const [criteria, setCriteria] = useState({ minPrice: 3, maxPrice: 25, minRating: 3.5, minReviews: 500, maxBSR: 100000, markup: 70, maxRetail: 40 });
   const [showCriteria, setShowCriteria] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Enrich ASINs via Keepa API in batches of 100
-  const enrichProducts = useCallback(async () => {
+  const enrichProducts = useCallback(async (testOnly = false) => {
     if (!analysis) return;
-    const unenriched = analysis.products.filter(p => p.gateCount < 5 && p.asin && /^B[0-9A-Z]{9}$/.test(p.asin));
+    const unenriched = analysis.products.filter(p => p.asin && /^B[0-9A-Z]{9}$/.test(p.asin) && (p.gateCount < 5 || !p.title));
     if (!unenriched.length) return;
     setEnriching(true);
+    setEnrichProgress({ done: 0, total: testOnly ? Math.min(100, unenriched.length) : unenriched.length, tokensLeft: 0, currentBatch: 'Starting...', error: '' });
+
     const allAsins = unenriched.map(p => p.asin);
+    const maxAsins = testOnly ? allAsins.slice(0, 100) : allAsins;
     const BATCH = 100;
     const updated = [...analysis.products];
     let totalDone = 0;
 
-    for (let i = 0; i < allAsins.length; i += BATCH) {
-      const batch = allAsins.slice(i, i + BATCH);
-      setEnrichProgress({ done: totalDone, total: allAsins.length, tokensLeft: 0, currentBatch: `${batch[0]}...${batch[batch.length-1]}` });
+    for (let i = 0; i < maxAsins.length; i += BATCH) {
+      const batch = maxAsins.slice(i, i + BATCH);
+      setEnrichProgress(prev => ({ ...prev, done: totalDone, currentBatch: `Batch ${Math.floor(i/BATCH)+1}: ${batch[0]}...${batch[batch.length-1]}`, error: '' }));
+      
       try {
         const res = await fetch('/api/enrich', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ asins: batch, criteria }),
         });
         const data = await res.json();
-        if (data.error) { console.error('Enrich error:', data.error); continue; }
+        
+        if (data.error) {
+          setEnrichProgress(prev => ({ ...prev, error: `API Error: ${data.error}` }));
+          console.error('Enrich error:', data.error);
+          if (testOnly) { setEnriching(false); return; }
+          continue;
+        }
+        
         const enriched = data.enriched || {};
-        setEnrichProgress(prev => ({ ...prev, tokensLeft: data.summary?.tokensLeft || 0 }));
+        const enrichedCount = Object.keys(enriched).length;
+        setEnrichProgress(prev => ({ ...prev, tokensLeft: data.summary?.tokensLeft || 0, currentBatch: `Batch ${Math.floor(i/BATCH)+1}: ${enrichedCount} products returned, ${data.summary?.passed || 0} passed criteria` }));
 
         // Merge enriched data into products
         for (let j = 0; j < updated.length; j++) {
@@ -370,18 +382,23 @@ export default function CommandCenter() {
           updated[j] = runGates(merged);
         }
         totalDone += batch.length;
-      } catch (err) { console.error('Batch failed:', err); }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setEnrichProgress(prev => ({ ...prev, error: `Fetch error: ${msg}` }));
+        console.error('Batch failed:', err);
+        if (testOnly) { setEnriching(false); return; }
+      }
 
       // Rate limit: wait 1s between batches
-      if (i + BATCH < allAsins.length) await new Promise(r => setTimeout(r, 1000));
+      if (i + BATCH < maxAsins.length) await new Promise(r => setTimeout(r, 1000));
     }
 
     const passed = updated.filter(x => x.gateCount === 5).length;
     const failed = updated.filter(x => x.gateCount < 3).length;
     setAnalysis({ ...analysis, products: updated, passed, failed, warned: updated.length - passed - failed });
-    setEnrichProgress({ done: allAsins.length, total: allAsins.length, tokensLeft: enrichProgress.tokensLeft, currentBatch: 'Done!' });
+    setEnrichProgress(prev => ({ ...prev, done: maxAsins.length, currentBatch: `Done! ${passed} passed all 5 gates.` }));
     setEnriching(false);
-  }, [analysis, criteria, enrichProgress.tokensLeft]);
+  }, [analysis, criteria]);
 
   const handleFile = useCallback(async (file: File) => {
     setProcessing(true); setFileName(file.name); setAnalysis(null);
@@ -470,9 +487,13 @@ export default function CommandCenter() {
                   style={{ padding:'6px 14px', borderRadius:'6px', border:'1px solid #06b6d4', background:'transparent', color:'#06b6d4', fontSize:'10px', fontWeight:600, cursor:'pointer' }}>
                   ⚙️ Criteria
                 </button>
-                <button onClick={enrichProducts} disabled={enriching}
+                <button onClick={() => enrichProducts(true)} disabled={enriching}
+                  style={{ padding:'6px 14px', borderRadius:'6px', border:'1px solid #7c3aed', background:'transparent', color:'#7c3aed', fontSize:'10px', fontWeight:600, cursor: enriching ? 'wait' : 'pointer' }}>
+                  🧪 Test First 100
+                </button>
+                <button onClick={() => enrichProducts(false)} disabled={enriching}
                   style={{ padding:'6px 14px', borderRadius:'6px', border:'none', background: enriching ? '#333' : '#7c3aed', color:'#fff', fontSize:'10px', fontWeight:600, cursor: enriching ? 'wait' : 'pointer' }}>
-                  {enriching ? `⏳ ${enrichProgress.done}/${enrichProgress.total}` : `🔍 Enrich via Keepa (${analysis.products.filter(p=>p.gateCount<5&&p.asin).length})`}
+                  {enriching ? `⏳ ${enrichProgress.done}/${enrichProgress.total}` : `🔍 Enrich All (${analysis.products.filter(p=>p.asin&&/^B[0-9A-Z]{9}$/.test(p.asin)).length})`}
                 </button>
               </>
             )}
@@ -692,16 +713,22 @@ export default function CommandCenter() {
           )}
 
           {/* Enrichment Progress */}
-          {enriching && (
-            <div style={{ background:'#111', borderRadius:'10px', padding:'12px 16px', border:'1px solid #7c3aed33', marginBottom:'12px' }}>
+          {(enriching || enrichProgress.error || enrichProgress.done > 0) && (
+            <div style={{ background:'#111', borderRadius:'10px', padding:'12px 16px', border:`1px solid ${enrichProgress.error ? '#ef444433' : '#7c3aed33'}`, marginBottom:'12px' }}>
               <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'6px' }}>
-                <span style={{ fontSize:'10px', color:'#7c3aed', fontWeight:600 }}>🔍 Enriching via Keepa API...</span>
-                <span style={{ fontSize:'9px', color:'#555' }}>Tokens left: {enrichProgress.tokensLeft.toLocaleString()}</span>
+                <span style={{ fontSize:'10px', color: enrichProgress.error ? '#ef4444' : '#7c3aed', fontWeight:600 }}>
+                  {enrichProgress.error ? '❌ Enrichment Error' : enriching ? '🔍 Enriching via Keepa API...' : '✅ Enrichment Complete'}
+                </span>
+                <span style={{ fontSize:'9px', color:'#555' }}>
+                  {enrichProgress.tokensLeft > 0 ? `Tokens left: ${enrichProgress.tokensLeft.toLocaleString()}` : ''}
+                </span>
               </div>
               <div style={{ background:'#1a1a2e', borderRadius:'4px', height:'6px', overflow:'hidden' }}>
-                <div style={{ width:`${enrichProgress.total > 0 ? (enrichProgress.done/enrichProgress.total)*100 : 0}%`, height:'100%', background:'#7c3aed', borderRadius:'4px', transition:'width 0.3s' }} />
+                <div style={{ width:`${enrichProgress.total > 0 ? (enrichProgress.done/enrichProgress.total)*100 : 0}%`, height:'100%', background: enrichProgress.error ? '#ef4444' : '#7c3aed', borderRadius:'4px', transition:'width 0.3s' }} />
               </div>
-              <p style={{ fontSize:'9px', color:'#444', margin:'4px 0 0' }}>{enrichProgress.done}/{enrichProgress.total} ASINs · {enrichProgress.currentBatch}</p>
+              <p style={{ fontSize:'9px', color: enrichProgress.error ? '#ef4444' : '#444', margin:'4px 0 0' }}>
+                {enrichProgress.error || `${enrichProgress.done}/${enrichProgress.total} ASINs · ${enrichProgress.currentBatch}`}
+              </p>
             </div>
           )}
 
