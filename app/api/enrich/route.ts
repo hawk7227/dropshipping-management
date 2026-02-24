@@ -61,9 +61,10 @@ export async function POST(request: NextRequest) {
 
     if (!asins.length) return NextResponse.json({ error: 'No ASINs provided' }, { status: 400 });
 
-    // Process up to 10 at a time (parallel) to stay fast but not overwhelm
+    // Keep batch small to avoid Vercel timeout (10s on hobby plan)
+    // 5 parallel × 1 round = 5 ASINs in ~2-3s
     const PARALLEL = 5;
-    const batch = asins.slice(0, Math.min(asins.length, 50));
+    const batch = asins.slice(0, Math.min(asins.length, 5));
     const markup = criteria.markup || 70;
 
     interface EnrichedProduct {

@@ -333,8 +333,8 @@ export default function CommandCenter() {
     setEnrichProgress({ done: 0, total: testOnly ? Math.min(50, unenriched.length) : unenriched.length, tokensLeft: 0, currentBatch: 'Starting...', error: '' });
 
     const allAsins = unenriched.map(p => p.asin);
-    const maxAsins = testOnly ? allAsins.slice(0, 50) : allAsins;
-    const BATCH = 50;
+    const maxAsins = testOnly ? allAsins.slice(0, 10) : allAsins;
+    const BATCH = 5; // Small batches to avoid Vercel 10s timeout
     const updated = [...analysis.products];
     let totalDone = 0;
 
@@ -398,10 +398,9 @@ export default function CommandCenter() {
         if (testOnly) { setEnriching(false); return; }
       }
 
-      // Rate limit: 200ms between parallel chunks (Rainforest has no token limit)
+      // Small delay between batches
       if (i + BATCH < maxAsins.length) {
-        setEnrichProgress(prev => ({ ...prev, currentBatch: `Processing next batch...` }));
-        await new Promise(r => setTimeout(r, 500));
+        await new Promise(r => setTimeout(r, 200));
       }
     }
 
