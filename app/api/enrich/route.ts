@@ -22,12 +22,31 @@ export async function GET(request: NextRequest) {
       const res = await fetch(`${RAINFOREST_BASE}?${params.toString()}`);
       const data = await res.json();
       const p = data.product || {};
+
+      // Extract ALL images for test response
+      const allImages: string[] = [];
+      if (p.main_image?.link) allImages.push(p.main_image.link);
+      if (Array.isArray(p.images)) {
+        for (const img of p.images) {
+          const link = img?.link || img?.src || (typeof img === 'string' ? img : '');
+          if (link && link.startsWith('http') && !allImages.includes(link)) allImages.push(link);
+        }
+      }
+      // Also check variant images
+      if (Array.isArray(p.variants)) {
+        for (const v of p.variants) {
+          if (v?.main_image?.link && !allImages.includes(v.main_image.link)) allImages.push(v.main_image.link);
+        }
+      }
+
       return NextResponse.json({
         raw_status: res.status,
         has_product: !!data.product,
         title: p.title,
         price: p.buybox_winner?.price?.value || p.price?.value,
-        image: p.main_image?.link,
+        image: allImages[0] || '',
+        images: allImages,
+        images_count: allImages.length,
         brand: p.brand,
         rating: p.rating,
         reviews: p.ratings_total,
@@ -68,7 +87,7 @@ export async function POST(request: NextRequest) {
     const markup = criteria.markup || 70;
 
     interface EnrichedProduct {
-      title: string; asin: string; price: number; image: string; description: string;
+      title: string; asin: string; price: number; image: string; images: string[]; description: string;
       vendor: string; category: string; rating: number; reviews: number; bsr: number;
       isPrime: boolean; isAvailable: boolean; monthlySold: number;
       sellPrice: number; profit: number; profitPct: number;
@@ -115,7 +134,6 @@ export async function POST(request: NextRequest) {
         // Extract data
         const title = product.title || '';
         const bestPrice = product.buybox_winner?.price?.value || product.price?.value || 0;
-        const mainImage = product.main_image?.link || (product.images?.length > 0 ? product.images[0]?.link : '') || '';
         const brand = product.brand || product.manufacturer || '';
         const rating = product.rating || 0;
         const reviews = product.ratings_total || 0;
@@ -123,6 +141,40 @@ export async function POST(request: NextRequest) {
         const category = product.bestsellers_rank?.[0]?.category || product.categories_flat || '';
         const isAvailable = product.buybox_winner?.availability?.type === 'in_stock' || bestPrice > 0;
         const isPrime = product.buybox_winner?.is_prime || false;
+
+        // ═══════════════════════════════════════════════════════════
+        // EXTRACT ALL IMAGES — main image + product.images array + variant images
+        // Rainforest returns: main_image.link, images[].link, variants[].main_image.link
+        // ═══════════════════════════════════════════════════════════
+        const allImages: string[] = [];
+
+        // 1. Main image first (highest quality, used as hero)
+        if (product.main_image?.link) {
+          allImages.push(product.main_image.link);
+        }
+
+        // 2. All images from the images array
+        if (Array.isArray(product.images)) {
+          for (const img of product.images) {
+            const link = img?.link || img?.src || (typeof img === 'string' ? img : '');
+            if (link && link.startsWith('http') && !allImages.includes(link)) {
+              allImages.push(link);
+            }
+          }
+        }
+
+        // 3. Variant images (different colors/sizes often have unique images)
+        if (Array.isArray(product.variants)) {
+          for (const variant of product.variants) {
+            const vImg = variant?.main_image?.link || variant?.image?.link || '';
+            if (vImg && vImg.startsWith('http') && !allImages.includes(vImg)) {
+              allImages.push(vImg);
+            }
+          }
+        }
+
+        // Fallback: if no images found at all
+        const mainImage = allImages[0] || '';
 
         // Description from feature bullets
         const features = product.feature_bullets || [];
@@ -151,7 +203,7 @@ export async function POST(request: NextRequest) {
         if (pass) passed++; else { rejected++; rejectReasons[reason] = (rejectReasons[reason] || 0) + 1; }
 
         enriched[asin] = {
-          title, asin, price: bestPrice, image: mainImage, description,
+          title, asin, price: bestPrice, image: mainImage, images: allImages, description,
           vendor: brand, category, rating, reviews, bsr,
           isPrime, isAvailable, monthlySold: 0,
           sellPrice, profit, profitPct,
