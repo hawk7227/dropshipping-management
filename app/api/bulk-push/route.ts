@@ -46,7 +46,7 @@ async function shopifyREST(endpoint: string, method = 'GET', body?: unknown) {
 // ============================================================================
 function buildProduct(p: {
   title: string; asin: string; price: number; sellPrice: number;
-  image: string; description: string; vendor: string; category: string;
+  image: string; images: string[]; description: string; vendor: string; category: string;
   rating: number; reviews: number; bsr: number;
 }) {
   const tags: string[] = ['command-center', 'bulk-push'];
@@ -73,7 +73,9 @@ function buildProduct(p: {
         requires_shipping: true,
         taxable: true,
       }],
-      images: p.image ? [{ src: p.image, alt: p.title }] : [],
+      images: p.image
+        ? [{ src: p.image, alt: p.title }, ...(p.images || []).filter((img: string) => img !== p.image).map((img: string) => ({ src: img, alt: p.title }))]
+        : (p.images || []).map((img: string) => ({ src: img, alt: p.title })),
       metafields: [
         { namespace: 'command_center', key: 'asin', value: p.asin || '', type: 'single_line_text_field' },
         { namespace: 'command_center', key: 'source_cost', value: p.price > 0 ? p.price.toFixed(2) : '0', type: 'number_decimal' },
