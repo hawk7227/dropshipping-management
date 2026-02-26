@@ -10,6 +10,7 @@ type ViewMode = 'table' | 'spreadsheet' | 'cards';
 
 interface CleanProduct {
   title: string; asin: string; price: number; compareAt: number; image: string;
+  images: string[];
   description: string; vendor: string; category: string; tags: string; status: string; quantity: number;
   profit: number; profitPct: number; sellPrice: number;
   stockStatus: 'In Stock' | 'Out of Stock' | 'Unknown';
@@ -185,6 +186,7 @@ function processRows(jsonRows: Record<string,unknown>[], headers: string[], file
       price: parseFloat(rawPrice.replace(/[^0-9.]/g,'')) || 0,
       compareAt: parseFloat(rawCompare.replace(/[^0-9.]/g,'')) || 0,
       image: rawImage.startsWith('http') ? rawImage : '',
+      images: rawImage.startsWith('http') ? [rawImage] : [],
       description: cleanHTML(get(colMap.description)),
       vendor: (get(colMap.vendor) || 'Unknown').substring(0, 30),
       category: (get(colMap.category) || 'General').substring(0, 40),
@@ -222,7 +224,7 @@ function processASINList(jsonRows: Record<string,unknown>[]): FileAnalysis {
     }
   }
   const products: CleanProduct[] = [...asins].map(asin => runGates({
-    title:'', asin, price:0, compareAt:0, image:'', description:'',
+    title:'', asin, price:0, compareAt:0, image:'', images:[], description:'',
     vendor:'', category:'', tags:'', status:'Draft', quantity:999,
     profit:0, profitPct:0, sellPrice:0,
     stockStatus:'Unknown' as const, dateChecked:'',
@@ -355,12 +357,15 @@ async function exportAndDownload(products: CleanProduct[], filename: string) {
   const data = products.map(p => ({
     'Title': p.title, 'ASIN/SKU': p.asin, 'Cost': p.price || '', 'Sell Price': p.sellPrice || '',
     'Profit $': p.profit || '', 'Profit %': p.profitPct ? `${p.profitPct}%` : '',
-    'Stock': p.stockStatus, 'Image URL': p.image, 'Rating': p.rating || '', 'Reviews': p.reviews || '',
+    'Stock': p.stockStatus, 'Image URL': p.image,
+    'All Images': (p.images || []).join(' | '),
+    'Image Count': (p.images || []).length,
+    'Rating': p.rating || '', 'Reviews': p.reviews || '',
     'BSR': p.bsr || '', 'Vendor': p.vendor, 'Category': p.category,
     'Description': p.description, 'Date Checked': p.dateChecked, 'Status': p.status, 'Gates': `${p.gateCount}/5`,
   }));
   const ws = utils.json_to_sheet(data);
-  ws['!cols'] = [55,14,10,12,10,10,12,60,8,10,10,20,25,80,12,10,8].map(w => ({ wch: w }));
+  ws['!cols'] = [55,14,10,12,10,10,12,60,80,8,8,10,10,20,25,80,12,10,8].map(w => ({ wch: w }));
   const wb = utils.book_new();
   utils.book_append_sheet(wb, ws, 'Products');
   writeFile(wb, filename);
@@ -447,7 +452,7 @@ export default function CommandCenter() {
           body: JSON.stringify({
             product: {
               title: p.title, asin: p.asin, price: p.price, sellPrice: p.sellPrice, profit: p.profit,
-              image: p.image, description: p.description, vendor: p.vendor, category: p.category,
+              image: p.image, images: p.images || [], description: p.description, vendor: p.vendor, category: p.category,
               rating: p.rating, reviews: p.reviews, bsr: p.bsr, stockStatus: p.stockStatus,
             },
             action: 'push',
@@ -524,7 +529,7 @@ export default function CommandCenter() {
             body: JSON.stringify({
               products: batch.map(p => ({
                 title: p.title, asin: p.asin, price: p.price, sellPrice: p.sellPrice,
-                image: p.image, description: p.description, vendor: p.vendor, category: p.category,
+                image: p.image, images: p.images || [], description: p.description, vendor: p.vendor, category: p.category,
                 rating: p.rating, reviews: p.reviews, bsr: p.bsr,
               })),
             }),
@@ -638,6 +643,7 @@ export default function CommandCenter() {
             title: e.title || p.title,
             price: e.price || p.price,
             image: e.image || p.image,
+            images: (e.images && e.images.length > 0) ? e.images : (p.images || []),
             description: e.description || p.description,
             vendor: e.vendor || p.vendor,
             category: e.category || p.category,
@@ -1190,8 +1196,13 @@ export default function CommandCenter() {
                       {p.stockStatus === 'In Stock' ? 'In Stock' : p.stockStatus === 'Out of Stock' ? 'OOS' : 'Unknown'}
                     </span>
                   </div>
-                  {/* Gate badge */}
-                  <div style={{ position:'absolute', top:8, right:8, zIndex:2 }}>
+                  {/* Gate badge + image count */}
+                  <div style={{ position:'absolute', top:8, right:8, zIndex:2, display:'flex', gap:'4px' }}>
+                    {(p.images || []).length > 1 && (
+                      <span style={{ padding:'2px 8px', borderRadius:'4px', fontSize:'8px', fontWeight:700, background:'rgba(6,182,212,0.9)', color:'#fff' }}>
+                        📷 {p.images.length}
+                      </span>
+                    )}
                     <span style={{ padding:'2px 8px', borderRadius:'4px', fontSize:'8px', fontWeight:700,
                       background: p.gateCount===5?'rgba(22,163,74,0.9)':p.gateCount>=3?'rgba(245,158,11,0.9)':'rgba(239,68,68,0.9)',
                       color:'#fff' }}>{p.gateCount}/5</span>
@@ -1308,7 +1319,10 @@ export default function CommandCenter() {
                       </span>
                       {p.rating > 0 && <span style={{ padding:'2px 6px', borderRadius:'3px', fontSize:'7px', fontWeight:700, background:'rgba(245,158,11,0.9)', color:'#000' }}>★{p.rating}</span>}
                     </div>
-                    <div style={{ position:'absolute', top:6, right:6, zIndex:2 }}>
+                    <div style={{ position:'absolute', top:6, right:6, zIndex:2, display:'flex', gap:'4px' }}>
+                      {(p.images || []).length > 1 && (
+                        <span style={{ padding:'2px 6px', borderRadius:'3px', fontSize:'7px', fontWeight:700, background:'rgba(6,182,212,0.9)', color:'#fff' }}>📷 {p.images.length}</span>
+                      )}
                       <span style={{ padding:'2px 6px', borderRadius:'3px', fontSize:'7px', fontWeight:700,
                         background: p.gateCount===5?'rgba(22,163,74,0.9)':p.gateCount>=3?'rgba(245,158,11,0.9)':'rgba(239,68,68,0.9)', color:'#fff' }}>{p.gateCount}/5</span>
                       {p.shopifyStatus === 'pushed' && <span style={{ padding:'2px 6px', borderRadius:'3px', fontSize:'7px', fontWeight:700, background:'rgba(22,163,74,0.9)', color:'#fff' }}>✅ Synced</span>}
