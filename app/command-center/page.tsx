@@ -120,7 +120,7 @@ function runGates(p: CleanProduct): CleanProduct {
   const g = { title:'fail' as GateStatus, image:'fail' as GateStatus, price:'fail' as GateStatus, asin:'fail' as GateStatus, description:'fail' as GateStatus };
   if (p.title && p.title.length > 5 && !p.title.includes('<') && p.title.toLowerCase() !== 'unknown product') g.title = 'pass';
   else if (p.title?.length > 0) g.title = 'warn';
-  if (p.image?.startsWith('http')) g.image = 'pass';
+  if ((p.images?.length || 0) >= 3) g.image = 'pass'; else if (p.image?.startsWith('http')) g.image = 'warn';
   if (p.price > 0) g.price = 'pass'; else if (p.compareAt > 0) g.price = 'warn';
   if (p.asin && /^B[0-9A-Z]{9}$/.test(p.asin)) g.asin = 'pass';
   if (p.description?.length > 30) g.description = 'pass'; else if (p.description?.length > 0) g.description = 'warn';
@@ -917,7 +917,7 @@ export default function CommandCenter() {
               <div style={{ display:'flex', flexWrap:'wrap', gap:'10px' }}>
                 {[
                   { icon:'✅', gate:'Title', desc:'Min 6 chars, no HTML, not generic', required:true },
-                  { icon:'✅', gate:'Image', desc:'Valid URL (http), eBay needs 1600×1600', required:true },
+                  { icon:'✅', gate:'Image', desc:'Minimum 3 images (1-2 = warning, 0 = fail)', required:true },
                   { icon:'✅', gate:'Price', desc:'Greater than $0, within criteria range', required:true },
                   { icon:'✅', gate:'ASIN/SKU', desc:'Valid Amazon ASIN (B0XXXXXXXXX format)', required:true },
                   { icon:'✅', gate:'Description', desc:'Min 30 chars, cleaned of HTML/boilerplate', required:true },
