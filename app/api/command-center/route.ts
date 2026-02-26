@@ -51,6 +51,7 @@ function buildShopifyProduct(product: {
   sellPrice: number;
   profit: number;
   image: string;
+  images: string[];
   description: string;
   vendor: string;
   category: string;
@@ -107,7 +108,9 @@ function buildShopifyProduct(product: {
           weight_unit: 'lb',
         },
       ],
-      images: image ? [{ src: image, alt: title }] : [],
+      images: image
+        ? [{ src: image, alt: title }, ...(product.images || []).filter((img: string) => img !== image).map((img: string) => ({ src: img, alt: title }))]
+        : (product.images || []).map((img: string) => ({ src: img, alt: title })),
       metafields: [
         { namespace: 'command_center', key: 'asin', value: asin || '', type: 'single_line_text_field' },
         { namespace: 'command_center', key: 'source_cost', value: price > 0 ? price.toFixed(2) : '0', type: 'number_decimal' },
