@@ -578,7 +578,7 @@ export default function CommandCenter() {
   // Enrich ASINs via Keepa API in batches of 100
   const enrichProducts = useCallback(async (testOnly = false) => {
     if (!analysis) return;
-    const unenriched = analysis.products.filter(p => p.asin && /^B[0-9A-Z]{9}$/.test(p.asin) && ((p.images?.length || 0) < 3 || p.gateCount < 5 || !p.title));
+    const unenriched = analysis.products.filter(p => p.asin && /^B[0-9A-Z]{9}$/.test(p.asin));
     if (!unenriched.length) return;
     setEnriching(true);
     setEnrichProgress({ done: 0, total: testOnly ? Math.min(50, unenriched.length) : unenriched.length, tokensLeft: 0, currentBatch: 'Starting...', error: '' });
@@ -782,7 +782,7 @@ export default function CommandCenter() {
               ))}
             </div>
             {/* Enrich button for ASIN lists or products missing data */}
-            {analysis.products.some(p => p.asin && /^B[0-9A-Z]{9}$/.test(p.asin) && ((p.images?.length || 0) < 3 || p.gateCount < 5)) && (
+            {analysis.products.some(p => p.asin && /^B[0-9A-Z]{9}$/.test(p.asin)) && (
               <>
                 <button onClick={() => setShowCriteria(!showCriteria)}
                   style={{ padding:'6px 14px', borderRadius:'6px', border:'1px solid #06b6d4', background:'transparent', color:'#06b6d4', fontSize:'10px', fontWeight:600, cursor:'pointer' }}>
@@ -794,7 +794,7 @@ export default function CommandCenter() {
                 </button>
                 <button onClick={() => enrichProducts(false)} disabled={enriching}
                   style={{ padding:'6px 14px', borderRadius:'6px', border:'none', background: enriching ? '#333' : '#7c3aed', color:'#fff', fontSize:'10px', fontWeight:600, cursor: enriching ? 'wait' : 'pointer' }}>
-                  {enriching ? `⏳ ${enrichProgress.done}/${enrichProgress.total}` : `🔍 Enrich All (${analysis.products.filter(p=>p.asin&&/^B[0-9A-Z]{9}$/.test(p.asin)&&((p.images?.length||0)<3||p.gateCount<5)).length})`}
+                  {enriching ? `⏳ ${enrichProgress.done}/${enrichProgress.total}` : `🔍 Enrich All (${analysis.products.filter(p=>p.asin&&/^B[0-9A-Z]{9}$/.test(p.asin)).length})`}
                 </button>
               </>
             )}
