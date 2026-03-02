@@ -119,6 +119,12 @@ function buildShopifyProduct(product: {
         { namespace: 'command_center', key: 'rating', value: rating > 0 ? rating.toFixed(1) : '0', type: 'number_decimal' },
         { namespace: 'command_center', key: 'reviews', value: String(reviews || 0), type: 'number_integer' },
         { namespace: 'command_center', key: 'pushed_at', value: new Date().toISOString(), type: 'single_line_text_field' },
+        ...(product.competitorPrices ? [
+          { namespace: 'compare_prices', key: 'amazon_price', value: String(product.competitorPrices.amazon || 0), type: 'number_decimal' },
+          { namespace: 'compare_prices', key: 'costco_price', value: String(product.competitorPrices.costco || 0), type: 'number_decimal' },
+          { namespace: 'compare_prices', key: 'ebay_price', value: String(product.competitorPrices.ebay || 0), type: 'number_decimal' },
+          { namespace: 'compare_prices', key: 'sams_price', value: String(product.competitorPrices.sams || 0), type: 'number_decimal' },
+        ] : []),
       ],
     },
   };
