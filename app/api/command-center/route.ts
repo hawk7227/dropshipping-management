@@ -59,6 +59,7 @@ function buildShopifyProduct(product: {
   reviews: number;
   bsr: number;
   stockStatus: string;
+  competitorPrices?: { amazon: number; costco: number; ebay: number; sams: number };
 }) {
   const {
     title, asin, price, sellPrice, profit, image,
@@ -120,10 +121,10 @@ function buildShopifyProduct(product: {
         { namespace: 'command_center', key: 'reviews', value: String(reviews || 0), type: 'number_integer' },
         { namespace: 'command_center', key: 'pushed_at', value: new Date().toISOString(), type: 'single_line_text_field' },
         ...(product.competitorPrices ? [
-          { namespace: 'compare_prices', key: 'amazon_price', value: String(product.competitorPrices.amazon || 0), type: 'number_decimal' },
-          { namespace: 'compare_prices', key: 'costco_price', value: String(product.competitorPrices.costco || 0), type: 'number_decimal' },
-          { namespace: 'compare_prices', key: 'ebay_price', value: String(product.competitorPrices.ebay || 0), type: 'number_decimal' },
-          { namespace: 'compare_prices', key: 'sams_price', value: String(product.competitorPrices.sams || 0), type: 'number_decimal' },
+          { namespace: 'comparisons', key: 'price_amazon', value: String(product.competitorPrices.amazon || 0), type: 'number_decimal' },
+          { namespace: 'comparisons', key: 'price_costco', value: String(product.competitorPrices.costco || 0), type: 'number_decimal' },
+          { namespace: 'comparisons', key: 'price_ebay', value: String(product.competitorPrices.ebay || 0), type: 'number_decimal' },
+          { namespace: 'comparisons', key: 'price_samsclub', value: String(product.competitorPrices.sams || 0), type: 'number_decimal' },
         ] : []),
       ],
     },
