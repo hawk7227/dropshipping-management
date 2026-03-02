@@ -33,7 +33,9 @@ interface CleanProduct {
   images: string[];
   description: string; vendor: string; category: string; tags: string; status: string; quantity: number;
   profit: number; profitPct: number; sellPrice: number;
+  marketPrice: number;
   competitorPrices: CompetitorPrices;
+  lowMargin: boolean;
   stockStatus: 'In Stock' | 'Out of Stock' | 'Unknown';
   dateChecked: string;
   rating: number; reviews: number; bsr: number;
@@ -158,7 +160,9 @@ function runGates(p: CleanProduct): CleanProduct {
   if (stockStatus === 'Unknown' && p.price > 0 && p.title) stockStatus = 'In Stock';
 
   return { ...p, sellPrice, profit, profitPct, stockStatus,
+    marketPrice: p.marketPrice || 0,
     competitorPrices: (p.competitorPrices?.amazon > 0) ? p.competitorPrices : calcCompetitorPrices(sellPrice || p.sellPrice),
+    lowMargin: (profitPct > 0 && profitPct < 30) ? true : (p.lowMargin || false),
     shopifyStatus: p.shopifyStatus || 'not_pushed', shopifyError: p.shopifyError || '', selected: p.selected || false,
     gates: g, gateCount: Object.values(g).filter(v => v === 'pass').length };
 }
@@ -232,7 +236,9 @@ function processRows(jsonRows: Record<string,unknown>[], headers: string[], file
       status: get(colMap.status) || 'Active',
       quantity: parseInt(get(colMap.quantity)) || 999,
       profit: 0, profitPct: 0, sellPrice: 0,
+      marketPrice: 0,
       competitorPrices: { amazon: 0, costco: 0, ebay: 0, sams: 0 },
+      lowMargin: false,
       stockStatus: 'Unknown', dateChecked: '',
       rating: 0, reviews: 0, bsr: 0,
       shopifyStatus: 'not_pushed', shopifyError: '', selected: false,
@@ -266,7 +272,9 @@ function processASINList(jsonRows: Record<string,unknown>[]): FileAnalysis {
     title:'', asin, price:0, compareAt:0, image:'', images:[], description:'',
     vendor:'', category:'', tags:'', status:'Draft', quantity:999,
     profit:0, profitPct:0, sellPrice:0,
+    marketPrice:0,
     competitorPrices:{ amazon:0, costco:0, ebay:0, sams:0 },
+    lowMargin:false,
     stockStatus:'Unknown' as const, dateChecked:'',
     rating:0, reviews:0, bsr:0,
     shopifyStatus:'not_pushed' as const, shopifyError:'', selected:false,
@@ -284,9 +292,9 @@ function processASINList(jsonRows: Record<string,unknown>[]): FileAnalysis {
 // ═══════════════════════════════════════════════════════════
 // SPREADSHEET VIEWER/EDITOR
 // ═══════════════════════════════════════════════════════════
-const COLS = ['title','asin','price','sellPrice','profit','profitPct','amazonPrice','costcoPrice','ebayPrice','samsPrice','stockStatus','image','rating','reviews','bsr','vendor','category','description','dateChecked','status'] as const;
-const COL_LABELS = ['Title','ASIN/SKU','Cost','Sell Price','Profit $','Profit %','Amazon $','Costco $','eBay $','Sam\'s $','Stock','Image URL','Rating','Reviews','BSR','Vendor','Category','Description','Checked','Status'];
-const COL_WIDTHS = [280,120,70,80,70,70,80,80,80,80,85,200,60,80,80,120,140,300,90,70];
+const COLS = ['title','asin','price','sellPrice','profit','profitPct','marketPrice','amazonPrice','costcoPrice','ebayPrice','samsPrice','stockStatus','image','rating','reviews','bsr','vendor','category','description','dateChecked','status'] as const;
+const COL_LABELS = ['Title','ASIN/SKU','Cost','Sell Price','Profit $','Profit %','Market $','Amazon $','Costco $','eBay $','Sam\'s $','Stock','Image URL','Rating','Reviews','BSR','Vendor','Category','Description','Checked','Status'];
+const COL_WIDTHS = [280,120,70,80,70,70,80,80,80,80,80,85,200,60,80,80,120,140,300,90,70];
 
 function SpreadsheetView({ products, onUpdate, perPage = 50, onToggleSelect, onSelectAll, onProductClick }: { products: CleanProduct[]; onUpdate: (idx: number, field: string, val: string) => void; perPage?: number; onToggleSelect?: (idx: number) => void; onSelectAll?: (val: boolean) => void; onProductClick?: (p: CleanProduct) => void }) {
   const [page, setPage] = useState(0);
@@ -328,7 +336,7 @@ function SpreadsheetView({ products, onUpdate, perPage = 50, onToggleSelect, onS
             {slice.map((p, ri) => {
               const globalIdx = page * PAGE + ri;
               return (
-                <tr key={globalIdx} style={{ borderBottom:'1px solid #0a0a0a', background: p.selected ? '#1a1a2e22' : 'transparent' }}>
+                <tr key={globalIdx} style={{ borderBottom:'1px solid #0a0a0a', background: p.selected ? '#1a1a2e22' : p.lowMargin ? '#f59e0b08' : 'transparent' }}>
                   <td style={{ padding:'4px 4px', textAlign:'center' }}>
                     <input type="checkbox" checked={p.selected || false} onChange={() => onToggleSelect?.(globalIdx)} style={{ cursor:'pointer' }} />
                   </td>
@@ -347,7 +355,8 @@ function SpreadsheetView({ products, onUpdate, perPage = 50, onToggleSelect, onS
                     }} title={p.shopifyError}>{p.shopifyStatus==='pushed'?'✅ Synced':p.shopifyStatus==='pushing'?'⏳':p.shopifyStatus==='failed'?'❌ Failed':'—'}</span>
                   </td>
                   {COLS.map((col, ci) => {
-                    const val = col === 'amazonPrice' ? String(p.competitorPrices?.amazon || '')
+                    const val = col === 'marketPrice' ? String(p.marketPrice || '')
+                      : col === 'amazonPrice' ? String(p.competitorPrices?.amazon || '')
                       : col === 'costcoPrice' ? String(p.competitorPrices?.costco || '')
                       : col === 'ebayPrice' ? String(p.competitorPrices?.ebay || '')
                       : col === 'samsPrice' ? String(p.competitorPrices?.sams || '')
@@ -359,7 +368,7 @@ function SpreadsheetView({ products, onUpdate, perPage = 50, onToggleSelect, onS
                       <td key={ci} style={{ padding:0, borderLeft:'1px solid #111', position:'relative' }}>
                         <input
                           defaultValue={
-                            ['price','sellPrice','profit','compareAt','amazonPrice','costcoPrice','ebayPrice','samsPrice'].includes(col) ? (Number(val) > 0 ? `$${Number(val).toFixed(2)}` : '') :
+                            ['price','sellPrice','profit','compareAt','marketPrice','amazonPrice','costcoPrice','ebayPrice','samsPrice'].includes(col) ? (Number(val) > 0 ? `$${Number(val).toFixed(2)}` : '') :
                             col === 'profitPct' ? (Number(val) > 0 ? `${Number(val).toFixed(0)}%` : '') :
                             col === 'bsr' ? (Number(val) > 0 ? Number(val).toLocaleString() : '') :
                             col === 'reviews' ? (Number(val) > 0 ? Number(val).toLocaleString() : '') :
@@ -370,10 +379,11 @@ function SpreadsheetView({ products, onUpdate, perPage = 50, onToggleSelect, onS
                           onBlur={e => onUpdate(globalIdx, col, e.target.value)}
                           style={{
                             width:'100%', padding:'6px 8px', background:'transparent', border:'none', outline:'none',
-                            color: col === 'profit' || col === 'profitPct' ? (Number(val) > 0 ? '#16a34a' : '#ef4444') :
+                            color: col === 'profit' || col === 'profitPct' ? (Number(val) > 0 ? (p.lowMargin ? '#f59e0b' : '#16a34a') : '#ef4444') :
                               col === 'stockStatus' ? (val === 'In Stock' ? '#16a34a' : val === 'Out of Stock' ? '#ef4444' : '#555') :
                               col === 'rating' ? (Number(val) >= 4 ? '#16a34a' : Number(val) >= 3 ? '#f59e0b' : '#ef4444') :
                               col === 'sellPrice' ? '#06b6d4' :
+                              col === 'marketPrice' ? '#06b6d4' :
                               ['amazonPrice','costcoPrice','ebayPrice','samsPrice'].includes(col) ? '#f59e0b' :
                               col === 'bsr' ? '#8b5cf6' :
                               gateStatus === 'fail' ? '#ef4444' : gateStatus === 'warn' ? '#f59e0b' : '#ccc',
@@ -403,8 +413,10 @@ async function exportAndDownload(products: CleanProduct[], filename: string) {
   const data = products.map(p => ({
     'Title': p.title, 'ASIN/SKU': p.asin, 'Cost': p.price || '', 'Sell Price': p.sellPrice || '',
     'Profit $': p.profit || '', 'Profit %': p.profitPct ? `${p.profitPct}%` : '',
+    'Market $': p.marketPrice || '',
     'Amazon $': p.competitorPrices?.amazon || '', 'Costco $': p.competitorPrices?.costco || '',
     'eBay $': p.competitorPrices?.ebay || '', 'Sam\'s $': p.competitorPrices?.sams || '',
+    'Low Margin': p.lowMargin ? '⚠️ <30%' : '',
     'Stock': p.stockStatus, 'Image URL': (p.images && p.images.length > 0) ? p.images.join(' | ') : (p.image || ''),
     'Image Count': (p.images || []).length,
     'Rating': p.rating || '', 'Reviews': p.reviews || '',
@@ -412,7 +424,7 @@ async function exportAndDownload(products: CleanProduct[], filename: string) {
     'Description': p.description, 'Date Checked': p.dateChecked, 'Status': p.status, 'Gates': `${p.gateCount}/5`,
   }));
   const ws = utils.json_to_sheet(data);
-  ws['!cols'] = [55,14,10,12,10,10,10,10,10,10,12,80,8,8,10,10,20,25,80,12,10,8].map(w => ({ wch: w }));
+  ws['!cols'] = [55,14,10,12,10,10,10,10,10,10,10,10,12,80,8,8,10,10,20,25,80,12,10,8].map(w => ({ wch: w }));
   const wb = utils.book_new();
   utils.book_append_sheet(wb, ws, 'Products');
   writeFile(wb, filename);
@@ -440,7 +452,7 @@ export default function CommandCenter() {
   const [perPage, setPerPage] = useState(50);
   const [enriching, setEnriching] = useState(false);
   const [pricing, setPricing] = useState(false);
-  const [pricingProgress, setPricingProgress] = useState({ done: 0, total: 0, currentBatch: '' });
+  const [pricingProgress, setPricingProgress] = useState({ done: 0, total: 0, currentBatch: '', priced: 0, lowMarginCount: 0, avgProfit: 0, lastAsin: '', lastPrice: 0, lastProfit: 0, lastProfitPct: 0, lastMarket: 0, tokensLeft: 0 });
   const [enrichProgress, setEnrichProgress] = useState({ done: 0, total: 0, tokensLeft: 0, currentBatch: '', error: '' });
   const [criteria, setCriteria] = useState({ minPrice: 3, maxPrice: 25, minRating: 3.5, minReviews: 500, maxBSR: 100000, markup: 70, maxRetail: 40 });
   const [showCriteria, setShowCriteria] = useState(false);
@@ -738,19 +750,24 @@ export default function CommandCenter() {
   // ═══════════════════════════════════════════════════════════════════════
   const researchPrices = useCallback(async () => {
     if (!analysis) return;
-    // Only research products that have been enriched (have price + title)
     const eligible = analysis.products.filter(p => p.price > 0 && p.title && p.asin);
     if (!eligible.length) return;
 
     setPricing(true);
-    setPricingProgress({ done: 0, total: eligible.length, currentBatch: 'Starting market price research...' });
+    setPricingProgress({ done: 0, total: eligible.length, currentBatch: 'Starting market price research...', priced: 0, lowMarginCount: 0, avgProfit: 0, lastAsin: '', lastPrice: 0, lastProfit: 0, lastProfitPct: 0, lastMarket: 0, tokensLeft: 0 });
 
-    const BATCH = 50; // Keepa handles 100/call, 50 safe for Vercel timeout
+    const BATCH = 50;
     const updated = [...analysis.products];
+    let totalPriced = 0;
+    let totalLowMargin = 0;
+    let profitSum = 0;
+    let lastTokens = 0;
 
     for (let i = 0; i < eligible.length; i += BATCH) {
       const batch = eligible.slice(i, i + BATCH);
-      setPricingProgress(prev => ({ ...prev, currentBatch: `Researching batch ${Math.floor(i/BATCH)+1}... (${batch.map(p=>p.asin).join(', ')})` }));
+      const batchNum = Math.floor(i / BATCH) + 1;
+      const totalBatches = Math.ceil(eligible.length / BATCH);
+      setPricingProgress(prev => ({ ...prev, currentBatch: `Batch ${batchNum}/${totalBatches} — fetching Keepa data for ${batch.length} ASINs...` }));
 
       try {
         const res = await fetch('/api/market-price', {
@@ -761,35 +778,77 @@ export default function CommandCenter() {
           }),
         });
         const data = await res.json();
+        if (data.tokensLeft) lastTokens = data.tokensLeft;
 
         if (data.results) {
+          // Process each result and update live
           for (let j = 0; j < updated.length; j++) {
             const p = updated[j];
             const r = data.results[p.asin];
             if (!r) continue;
 
+            const newSell = r.adjustedSellPrice || p.sellPrice;
+            const newProfit = +(newSell - p.price).toFixed(2);
+            const newProfitPct = p.price > 0 ? +((newSell - p.price) / p.price * 100).toFixed(1) : 0;
+            const newMarket = r.averageMarketPrice || 0;
+            const isLowMargin = newProfitPct < 30;
+
+            totalPriced++;
+            profitSum += newProfit;
+            if (isLowMargin) totalLowMargin++;
+
             const merged: CleanProduct = {
               ...p,
-              sellPrice: r.adjustedSellPrice,
-              profit: +(r.adjustedSellPrice - p.price).toFixed(2),
-              profitPct: p.price > 0 ? +((r.adjustedSellPrice - p.price) / p.price * 100).toFixed(1) : 0,
+              sellPrice: newSell,
+              profit: newProfit,
+              profitPct: newProfitPct,
+              marketPrice: newMarket,
+              lowMargin: isLowMargin,
               competitorPrices: r.competitorPrices || { amazon: 0, costco: 0, ebay: 0, sams: 0 },
               compareAt: Math.max(r.competitorPrices?.amazon || 0, r.competitorPrices?.costco || 0, r.competitorPrices?.ebay || 0, r.competitorPrices?.sams || 0),
             };
             updated[j] = runGates(merged);
+
+            // Live update progress with last product details
+            setPricingProgress(prev => ({
+              ...prev,
+              done: Math.min(i + totalPriced - (i > 0 ? eligible.slice(0, i).length : 0), eligible.length),
+              priced: totalPriced,
+              lowMarginCount: totalLowMargin,
+              avgProfit: totalPriced > 0 ? +(profitSum / totalPriced).toFixed(2) : 0,
+              lastAsin: p.asin,
+              lastPrice: newSell,
+              lastProfit: newProfit,
+              lastProfitPct: newProfitPct,
+              lastMarket: newMarket,
+              tokensLeft: lastTokens,
+            }));
           }
+
+          // Live update products in UI after each batch
+          const passed = updated.filter(x => x.gateCount === 5).length;
+          const failed = updated.filter(x => x.gateCount < 3).length;
+          setAnalysis(prev => prev ? { ...prev, products: [...updated], passed, failed, warned: updated.length - passed - failed } : null);
         }
       } catch (err) {
-        setPricingProgress(prev => ({ ...prev, currentBatch: `Error: ${String(err).substring(0, 80)}` }));
+        setPricingProgress(prev => ({ ...prev, currentBatch: `Error on batch ${batchNum}: ${String(err).substring(0, 80)}` }));
       }
 
       setPricingProgress(prev => ({ ...prev, done: Math.min(i + BATCH, eligible.length) }));
-      // Rate limit: small pause between batches
       if (i + BATCH < eligible.length) await new Promise(r => setTimeout(r, 500));
     }
 
-    setAnalysis(prev => prev ? { ...prev, products: updated } : null);
-    setPricingProgress(prev => ({ ...prev, done: eligible.length, currentBatch: `Done! Priced ${eligible.length} products with market data.` }));
+    // Final pass: flag all low margin products
+    for (let j = 0; j < updated.length; j++) {
+      if (updated[j].profitPct > 0 && updated[j].profitPct < 30) {
+        updated[j] = { ...updated[j], lowMargin: true };
+      }
+    }
+
+    const passed = updated.filter(x => x.gateCount === 5).length;
+    const failed = updated.filter(x => x.gateCount < 3).length;
+    setAnalysis(prev => prev ? { ...prev, products: updated, passed, failed, warned: updated.length - passed - failed } : null);
+    setPricingProgress(prev => ({ ...prev, done: eligible.length, priced: totalPriced, lowMarginCount: totalLowMargin, currentBatch: `Done! ${totalPriced} priced · ${totalLowMargin} low margin (<30%)` }));
     setPricing(false);
   }, [analysis]);
 
@@ -1167,16 +1226,51 @@ export default function CommandCenter() {
 
           {/* Pricing Progress */}
           {(pricing || pricingProgress.done > 0) && (
-            <div style={{ background:'#111', borderRadius:'10px', padding:'12px 16px', border:`1px solid #f59e0b33`, marginBottom:'12px' }}>
+            <div style={{ background:'#111', borderRadius:'10px', padding:'12px 16px', border:`1px solid ${pricing ? '#f59e0b33' : pricingProgress.lowMarginCount > 0 ? '#f59e0b33' : '#16a34a33'}`, marginBottom:'12px' }}>
               <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'6px' }}>
-                <span style={{ fontSize:'10px', color:'#f59e0b', fontWeight:600 }}>
-                  {pricing ? '💰 Researching market prices...' : '✅ Price Research Complete'}
+                <span style={{ fontSize:'10px', color: pricing ? '#f59e0b' : '#16a34a', fontWeight:600 }}>
+                  {pricing ? '💰 Dynamic Pricing Engine Running...' : `✅ Price Research Complete — ${pricingProgress.priced} products priced`}
+                </span>
+                <span style={{ fontSize:'9px', color:'#555' }}>
+                  {pricingProgress.tokensLeft > 0 ? `Keepa tokens: ${pricingProgress.tokensLeft.toLocaleString()}` : ''}
                 </span>
               </div>
-              <div style={{ height:4, background:'#1a1a2e', borderRadius:'4px', overflow:'hidden' }}>
-                <div style={{ width:`${pricingProgress.total > 0 ? (pricingProgress.done/pricingProgress.total)*100 : 0}%`, height:'100%', background:'#f59e0b', borderRadius:'4px', transition:'width 0.3s' }} />
+              <div style={{ height:4, background:'#1a1a2e', borderRadius:'4px', overflow:'hidden', marginBottom:'8px' }}>
+                <div style={{ width:`${pricingProgress.total > 0 ? (pricingProgress.done/pricingProgress.total)*100 : 0}%`, height:'100%', background: pricing ? '#f59e0b' : '#16a34a', borderRadius:'4px', transition:'width 0.3s' }} />
               </div>
-              <p style={{ fontSize:'9px', color:'#444', margin:'4px 0 0' }}>
+              {/* Live stats row */}
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(5, 1fr)', gap:'6px', marginBottom:'6px' }}>
+                <div style={{ background:'#0a0a0f', borderRadius:'6px', padding:'6px 8px', textAlign:'center' }}>
+                  <p style={{ fontSize:'14px', fontWeight:800, color:'#f59e0b', margin:0 }}>{pricingProgress.priced}</p>
+                  <p style={{ fontSize:'7px', color:'#555', margin:'2px 0 0', textTransform:'uppercase', letterSpacing:'0.5px' }}>Priced</p>
+                </div>
+                <div style={{ background:'#0a0a0f', borderRadius:'6px', padding:'6px 8px', textAlign:'center' }}>
+                  <p style={{ fontSize:'14px', fontWeight:800, color:'#16a34a', margin:0 }}>${pricingProgress.avgProfit.toFixed(2)}</p>
+                  <p style={{ fontSize:'7px', color:'#555', margin:'2px 0 0', textTransform:'uppercase', letterSpacing:'0.5px' }}>Avg Profit</p>
+                </div>
+                <div style={{ background:'#0a0a0f', borderRadius:'6px', padding:'6px 8px', textAlign:'center' }}>
+                  <p style={{ fontSize:'14px', fontWeight:800, color: pricingProgress.lowMarginCount > 0 ? '#f59e0b' : '#16a34a', margin:0 }}>{pricingProgress.lowMarginCount}</p>
+                  <p style={{ fontSize:'7px', color:'#555', margin:'2px 0 0', textTransform:'uppercase', letterSpacing:'0.5px' }}>Low Margin</p>
+                </div>
+                <div style={{ background:'#0a0a0f', borderRadius:'6px', padding:'6px 8px', textAlign:'center' }}>
+                  <p style={{ fontSize:'14px', fontWeight:800, color:'#06b6d4', margin:0 }}>${pricingProgress.lastMarket > 0 ? pricingProgress.lastMarket.toFixed(2) : '—'}</p>
+                  <p style={{ fontSize:'7px', color:'#555', margin:'2px 0 0', textTransform:'uppercase', letterSpacing:'0.5px' }}>Last Mkt Price</p>
+                </div>
+                <div style={{ background:'#0a0a0f', borderRadius:'6px', padding:'6px 8px', textAlign:'center' }}>
+                  <p style={{ fontSize:'14px', fontWeight:800, color: pricingProgress.lastProfitPct >= 30 ? '#16a34a' : '#f59e0b', margin:0 }}>{pricingProgress.lastProfitPct > 0 ? `${pricingProgress.lastProfitPct}%` : '—'}</p>
+                  <p style={{ fontSize:'7px', color:'#555', margin:'2px 0 0', textTransform:'uppercase', letterSpacing:'0.5px' }}>Last Margin</p>
+                </div>
+              </div>
+              {/* Last processed ASIN */}
+              {pricing && pricingProgress.lastAsin && (
+                <div style={{ background:'#0a0a0f', borderRadius:'6px', padding:'6px 10px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                  <span style={{ fontSize:'9px', color:'#7c3aed', fontFamily:'monospace' }}>{pricingProgress.lastAsin}</span>
+                  <span style={{ fontSize:'9px', color:'#555' }}>
+                    Cost: ${pricingProgress.lastPrice > 0 ? (pricingProgress.lastPrice - pricingProgress.lastProfit).toFixed(2) : '—'} → Sell: <span style={{ color:'#06b6d4' }}>${pricingProgress.lastPrice.toFixed(2)}</span> → Profit: <span style={{ color: pricingProgress.lastProfitPct >= 30 ? '#16a34a' : '#f59e0b' }}>${pricingProgress.lastProfit.toFixed(2)} ({pricingProgress.lastProfitPct}%)</span>
+                  </span>
+                </div>
+              )}
+              <p style={{ fontSize:'9px', color:'#444', margin:'6px 0 0' }}>
                 {`${pricingProgress.done}/${pricingProgress.total} products · ${pricingProgress.currentBatch}`}
               </p>
             </div>
@@ -1621,9 +1715,14 @@ export default function CommandCenter() {
                   </div>
 
                   {/* Pricing box */}
-                  <div style={{ background:'#0a0a0a', borderRadius:'12px', padding:'14px', border:'1px solid #1a1a2e', marginBottom:'16px' }}>
-                    <p style={{ fontSize:'8px', color:'#555', textTransform:'uppercase', letterSpacing:'1px', margin:'0 0 10px' }}>Pricing</p>
-                    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px' }}>
+                  <div style={{ background:'#0a0a0a', borderRadius:'12px', padding:'14px', border: selectedProduct.lowMargin ? '1px solid #f59e0b33' : '1px solid #1a1a2e', marginBottom:'16px' }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px' }}>
+                      <p style={{ fontSize:'8px', color:'#555', textTransform:'uppercase', letterSpacing:'1px', margin:0 }}>Pricing</p>
+                      {selectedProduct.lowMargin && (
+                        <span style={{ fontSize:'8px', color:'#f59e0b', background:'#f59e0b15', padding:'2px 8px', borderRadius:999, fontWeight:700, border:'1px solid #f59e0b33' }}>⚠️ LOW MARGIN &lt;30%</span>
+                      )}
+                    </div>
+                    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'10px' }}>
                       <div>
                         <p style={{ fontSize:'8px', color:'#555', margin:'0 0 2px' }}>Amazon Cost</p>
                         <p style={{ fontSize:'16px', color:'#ccc', fontWeight:700, margin:0 }}>{selectedProduct.price > 0 ? `$${selectedProduct.price.toFixed(2)}` : '—'}</p>
@@ -1633,16 +1732,24 @@ export default function CommandCenter() {
                         <p style={{ fontSize:'16px', color:'#06b6d4', fontWeight:700, margin:0 }}>{selectedProduct.sellPrice > 0 ? `$${selectedProduct.sellPrice.toFixed(2)}` : '—'}</p>
                       </div>
                       <div>
-                        <p style={{ fontSize:'8px', color:'#555', margin:'0 0 2px' }}>Profit Margin</p>
-                        <p style={{ fontSize:'16px', color: selectedProduct.profitPct > 0 ? '#16a34a' : '#ef4444', fontWeight:700, margin:0 }}>
-                          {selectedProduct.profitPct > 0 ? `${selectedProduct.profitPct.toFixed(0)}%` : 'Unknown'}
-                        </p>
+                        <p style={{ fontSize:'8px', color:'#555', margin:'0 0 2px' }}>Market Price</p>
+                        <p style={{ fontSize:'16px', color:'#06b6d4', fontWeight:700, margin:0 }}>{selectedProduct.marketPrice > 0 ? `$${selectedProduct.marketPrice.toFixed(2)}` : '—'}</p>
                       </div>
                       <div>
                         <p style={{ fontSize:'8px', color:'#555', margin:'0 0 2px' }}>Profit $</p>
-                        <p style={{ fontSize:'16px', color: selectedProduct.profit > 0 ? '#16a34a' : '#ef4444', fontWeight:700, margin:0 }}>
+                        <p style={{ fontSize:'16px', color: selectedProduct.profit > 0 ? (selectedProduct.lowMargin ? '#f59e0b' : '#16a34a') : '#ef4444', fontWeight:700, margin:0 }}>
                           {selectedProduct.profit > 0 ? `$${selectedProduct.profit.toFixed(2)}` : '—'}
                         </p>
+                      </div>
+                      <div>
+                        <p style={{ fontSize:'8px', color:'#555', margin:'0 0 2px' }}>Profit %</p>
+                        <p style={{ fontSize:'16px', color: selectedProduct.profitPct > 0 ? (selectedProduct.lowMargin ? '#f59e0b' : '#16a34a') : '#ef4444', fontWeight:700, margin:0 }}>
+                          {selectedProduct.profitPct > 0 ? `${selectedProduct.profitPct.toFixed(1)}%` : '—'}
+                        </p>
+                      </div>
+                      <div>
+                        <p style={{ fontSize:'8px', color:'#555', margin:'0 0 2px' }}>Compare At</p>
+                        <p style={{ fontSize:'16px', color:'#888', fontWeight:700, margin:0 }}>{selectedProduct.compareAt > 0 ? `$${selectedProduct.compareAt.toFixed(2)}` : '—'}</p>
                       </div>
                     </div>
                   </div>
