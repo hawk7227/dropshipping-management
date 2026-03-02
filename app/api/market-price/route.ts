@@ -19,6 +19,8 @@ const BASE_MARKUP = 1.70;
 const OVERAGE_THRESHOLD = 0.05;  // 5% — only adjust if sell price is 5%+ above average
 const OVERAGE_HALVING = 0.5;     // Take half the overage percentage
 const UNDERCUT_BUFFER = 0.05;    // If below average, raise to 5% below average
+const MIN_MARGIN_FLOOR = 1.30;   // Never sell below cost × 1.30 (30% min margin)
+const MAX_REDUCTION = 0.25;      // Cap price reduction at 25% max
 
 // ============================================================================
 // TYPES
@@ -68,6 +70,7 @@ function calculateDynamicPrice(amazonCost: number, averageMarketPrice: number): 
   adjustmentReason: string;
 } {
   const initialSellPrice = +(amazonCost * BASE_MARKUP).toFixed(2);
+  const profitFloor = +(amazonCost * MIN_MARGIN_FLOOR).toFixed(2); // Never sell below this
 
   if (!amazonCost || amazonCost <= 0) {
     return { adjustedSellPrice: 0, priceAdjustmentPct: 0, adjustmentReason: 'No cost data — cannot calculate sell price' };
@@ -77,16 +80,41 @@ function calculateDynamicPrice(amazonCost: number, averageMarketPrice: number): 
     return { adjustedSellPrice: initialSellPrice, priceAdjustmentPct: 0, adjustmentReason: 'No market data — using base 1.70x markup' };
   }
 
+  // CASE 0: Cost >= market average — no room to reduce, keep full markup
+  // This product isn't profitable at market rates; markup is our only margin
+  if (amazonCost >= averageMarketPrice) {
+    return {
+      adjustedSellPrice: initialSellPrice,
+      priceAdjustmentPct: 0,
+      adjustmentReason: `Cost $${amazonCost.toFixed(2)} >= avg $${averageMarketPrice.toFixed(2)} — keeping 1.70x markup`,
+    };
+  }
+
   const overagePct = (initialSellPrice - averageMarketPrice) / averageMarketPrice;
 
-  // CASE 1: Sell price >5% above market average → lower by half the overage
+  // CASE 1: Sell price >5% above market average → lower, but with safeguards
   if (overagePct > OVERAGE_THRESHOLD) {
-    const reductionPct = overagePct * OVERAGE_HALVING;
-    const adjustedSellPrice = +(initialSellPrice * (1 - reductionPct)).toFixed(2);
+    let reductionPct = overagePct * OVERAGE_HALVING;
+    // Cap reduction at MAX_REDUCTION (25%)
+    if (reductionPct > MAX_REDUCTION) reductionPct = MAX_REDUCTION;
+
+    let adjustedSellPrice = +(initialSellPrice * (1 - reductionPct)).toFixed(2);
+
+    // Enforce profit floor — never sell below cost × 1.30
+    if (adjustedSellPrice < profitFloor) {
+      adjustedSellPrice = profitFloor;
+      const floorPct = +((1 - profitFloor / initialSellPrice) * 100).toFixed(1);
+      return {
+        adjustedSellPrice,
+        priceAdjustmentPct: -floorPct,
+        adjustmentReason: `$${initialSellPrice} is ${(overagePct * 100).toFixed(0)}% above avg $${averageMarketPrice.toFixed(2)} — floor enforced at cost×${MIN_MARGIN_FLOOR} = $${profitFloor}`,
+      };
+    }
+
     return {
       adjustedSellPrice,
       priceAdjustmentPct: +(reductionPct * -100).toFixed(1),
-      adjustmentReason: `$${initialSellPrice} is ${(overagePct * 100).toFixed(0)}% above avg $${averageMarketPrice.toFixed(2)} -> lowered ${(reductionPct * 100).toFixed(0)}%`,
+      adjustmentReason: `$${initialSellPrice} is ${(overagePct * 100).toFixed(0)}% above avg $${averageMarketPrice.toFixed(2)} -> lowered ${(reductionPct * 100).toFixed(0)}% (capped at ${MAX_REDUCTION * 100}%)`,
     };
   }
 
