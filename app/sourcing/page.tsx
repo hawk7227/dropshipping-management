@@ -787,9 +787,10 @@ export default function CommandCenter() {
             const r = data.results[p.asin];
             if (!r) continue;
 
+            const newCost = r.amazonCost || p.price; // Keepa's real price, Rainforest fallback
             const newSell = r.adjustedSellPrice || p.sellPrice;
-            const newProfit = +(newSell - p.price).toFixed(2);
-            const newProfitPct = p.price > 0 ? +((newSell - p.price) / p.price * 100).toFixed(1) : 0;
+            const newProfit = +(newSell - newCost).toFixed(2);
+            const newProfitPct = newCost > 0 ? +((newSell - newCost) / newCost * 100).toFixed(1) : 0;
             const newMarket = r.averageMarketPrice || 0;
             const isLowMargin = newProfitPct < 30;
 
@@ -799,6 +800,7 @@ export default function CommandCenter() {
 
             const merged: CleanProduct = {
               ...p,
+              price: newCost, // Update Amazon cost with Keepa's accurate price
               sellPrice: newSell,
               profit: newProfit,
               profitPct: newProfitPct,
