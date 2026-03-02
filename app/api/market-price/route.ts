@@ -168,13 +168,15 @@ function processKeepaProduct(
   if (currentAmazon > 0) pts.push(currentAmazon);
   if (currentNew > 0) pts.push(currentNew);
   if (currentBuyBox > 0) pts.push(currentBuyBox);
-  if (input.price > 0) pts.push(input.price);
+  // NOTE: input.price (from Rainforest) intentionally excluded — can be inflated list price
 
   const averageMarketPrice = pts.length > 0
     ? +(pts.reduce((s, p) => s + p, 0) / pts.length).toFixed(2)
     : 0;
 
-  const amazonCost = input.price || currentAmazon || currentBuyBox;
+  // Use Keepa's current price as source of truth — it's real-time and accurate
+  // Rainforest's buybox price can be inflated (list price vs actual selling price)
+  const amazonCost = currentBuyBox || currentAmazon || currentNew || input.price;
   const { adjustedSellPrice, priceAdjustmentPct, adjustmentReason } = calculateDynamicPrice(amazonCost, averageMarketPrice);
   const competitorPrices = calculateCompetitorPrices(adjustedSellPrice, averageMarketPrice);
 
