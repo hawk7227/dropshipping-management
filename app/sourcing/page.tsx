@@ -62,8 +62,11 @@ function detectFileType(headers: string[]): FileType {
   if (h.includes('handle') && h.includes('title') && joined.includes('image')) return 'shopify-csv';
   if (joined.includes('autods') || (h.includes('source url') && h.includes('source price'))) return 'autods';
   if (h.includes('action') && (h.includes('itemid') || h.includes('category'))) return 'ebay-file-exchange';
-  if (h.some(x => ['title','name','product'].includes(x)) && h.some(x => ['price','cost','sku'].includes(x))) return 'generic-csv';
-  return 'unknown';
+  // Broad generic detection: any file with recognizable product-related columns
+  if (h.some(x => ['title','name','product','product title','product name','item name'].includes(x))) return 'generic-csv';
+  if (h.some(x => ['price','cost','sku','asin','variant price','sell price'].includes(x))) return 'generic-csv';
+  // If we can't identify the format, still treat it as generic so processRows runs
+  return 'generic-csv';
 }
 
 function detectASINList(rows: Record<string,unknown>[]): boolean {
@@ -79,6 +82,29 @@ function detectASINList(rows: Record<string,unknown>[]): boolean {
     }
   }
   return asinCount > 10;
+}
+
+// ═══════════════════════════════════════════════════════════
+// ASIN AUTO-DETECT: Scans cell values to find which column contains ASINs
+// Used as fallback when mapColumns can't find ASIN by header name
+// ═══════════════════════════════════════════════════════════
+function autoDetectASINColumn(headers: string[], rows: Record<string, unknown>[]): string | null {
+  const sample = rows.slice(0, 20);
+  let bestCol: string | null = null;
+  let bestScore = 0;
+
+  for (const col of headers) {
+    let asinHits = 0;
+    for (const row of sample) {
+      const val = String(row[col] ?? '').trim().replace(/['"]/g, '').toUpperCase();
+      if (/^B[0-9A-Z]{9}$/.test(val)) asinHits++;
+      else if (/\/dp\/([A-Z0-9]{10})/i.test(val)) asinHits++;
+    }
+    if (asinHits > bestScore) { bestScore = asinHits; bestCol = col; }
+  }
+
+  // Need at least 30% of sampled rows to have ASINs to be confident
+  return (bestScore >= Math.max(3, sample.length * 0.3)) ? bestCol : null;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -100,20 +126,33 @@ function mapColumns(headers: string[]): Record<string, string | null> {
     return null;
   };
 
-  map.title = find(['title', 'product title', 'product name', 'item name', 'item title', 'name'], ['option', 'meta', 'alt']);
-  map.asin = find(['variant sku', 'sku', 'asin', 'amazon asin', 'source_product_id', 'item number']);
-  map.price = find(['variant price', 'price', 'sale price', 'selling price'], ['compare', 'cost']);
-  map.compareAt = find(['variant compare at price', 'compare at price', 'compare_at_price', 'msrp', 'list price']);
-  map.image = find(['image src', 'image_src', 'image url', 'image_url', 'main image'], ['type', 'command', 'position', 'width', 'height', 'alt', 'all']);
-  map.allImages = find(['all images', 'all_images', 'additional images', 'image gallery'], []);
-  map.description = find(['body (html)', 'body html', 'body_html', 'description', 'product description']);
-  map.vendor = find(['vendor', 'brand', 'manufacturer', 'supplier']);
-  map.category = find(['product type', 'product_type', 'type', 'category', 'department'], ['image', 'variant', 'meta']);
-  map.tags = find(['tags', 'keywords']);
-  map.status = find(['status'], ['inventory']);
-  map.quantity = find(['variant inventory qty', 'inventory', 'quantity', 'stock', 'total inventory qty']);
-  map.handle = find(['handle', 'slug']);
+  map.title = find(['title', 'product title', 'product name', 'item name', 'item title', 'name', 'listing title', 'product'], ['option', 'meta', 'alt', 'type', 'id', 'code', 'sku']);
+  map.asin = find(['variant sku', 'sku', 'asin', 'amazon asin', 'source_product_id', 'item number', 'product id', 'amazon id', 'item asin', 'item sku', 'product sku', 'source sku', 'fnsku', 'product code', 'id', 'upc', 'ean', 'item id', 'listing id'], ['image', 'order', 'tracking']);
+  map.cost = find(['cost', 'source cost', 'source_cost', 'amazon cost', 'item cost', 'unit cost', 'buy cost', 'purchase price', 'wholesale', 'supplier price', 'source price'], ['costco']);
+  map.sellPrice = find(['sell price', 'sell_price', 'selling price', 'our price', 'your price', 'retail price', 'listed price'], []);
+  map.price = find(['variant price', 'price', 'sale price'], ['compare', 'cost', 'sell', 'source', 'buy', 'wholesale', 'supplier', 'amazon', 'costco', 'ebay', 'sam', 'market', 'retail', 'listed']);
+  map.compareAt = find(['variant compare at price', 'compare at price', 'compare_at_price', 'msrp', 'list price', 'compare at', 'rrp', 'retail price']);
+  map.amazonPrice = find(['amazon $', 'amazon price', 'price_amazon'], ['cost', 'source']);
+  map.costcoPrice = find(['costco $', 'costco price', 'price_costco'], []);
+  map.ebayPrice = find(['ebay $', 'ebay price', 'price_ebay'], []);
+  map.samsPrice = find(["sam's $", 'sams $', 'sams price', 'sam\'s club price', 'price_samsclub', "sam's club $"], []);
+  map.marketPrice = find(['market $', 'market price', 'market_price', 'avg market', 'market avg'], []);
+  map.profitCol = find(['profit $', 'profit_dollar', 'profit'], ['%', 'pct', 'percent', 'margin']);
+  map.profitPctCol = find(['profit %', 'profit_pct', 'profit_percent', 'margin %', 'margin', 'profit margin'], []);
+  map.image = find(['image src', 'image_src', 'image url', 'image_url', 'main image', 'image link', 'photo', 'thumbnail', 'picture', 'img'], ['type', 'command', 'position', 'width', 'height', 'alt', 'all', 'count']);
+  map.allImages = find(['all images', 'all_images', 'additional images', 'image gallery', 'extra images', 'gallery'], []);
+  map.description = find(['body (html)', 'body html', 'body_html', 'description', 'product description', 'details', 'item description', 'long description']);
+  map.vendor = find(['vendor', 'brand', 'manufacturer', 'supplier', 'maker', 'brand name', 'sold by']);
+  map.category = find(['product type', 'product_type', 'type', 'category', 'department', 'product category'], ['image', 'variant', 'meta']);
+  map.tags = find(['tags', 'keywords', 'labels']);
+  map.status = find(['status', 'listing status', 'product status'], ['inventory', 'stock', 'order']);
+  map.quantity = find(['variant inventory qty', 'inventory', 'quantity', 'stock', 'total inventory qty', 'qty', 'available', 'stock qty', 'in stock'], ['status', 'out']);
+  map.handle = find(['handle', 'slug', 'url handle']);
   map.topRow = find(['top row']);
+  map.rating = find(['rating', 'star rating', 'stars', 'avg rating'], []);
+  map.reviews = find(['reviews', 'review count', 'number of reviews', 'ratings count'], []);
+  map.bsr = find(['bsr', 'best seller rank', 'sales rank', 'best sellers rank', 'rank'], ['date', 'page']);
+  map.stockStatus = find(['stock', 'stock status', 'availability', 'in stock'], ['qty', 'quantity', 'inventory']);
   return map;
 }
 
@@ -173,6 +212,14 @@ function runGates(p: CleanProduct): CleanProduct {
 function processRows(jsonRows: Record<string,unknown>[], headers: string[], fileType: FileType): FileAnalysis {
   const start = performance.now();
   const colMap = mapColumns(headers);
+
+  // ASIN auto-detect fallback: if mapColumns didn't find an ASIN column by name,
+  // scan actual cell values to find which column contains B0XXXXXXXXX patterns
+  if (!colMap.asin) {
+    const detected = autoDetectASINColumn(headers, jsonRows);
+    if (detected) colMap.asin = detected;
+  }
+
   const features: string[] = [];
   if (colMap.topRow) features.push('Top Row dedup');
   if (colMap.handle) features.push('Handle dedup');
@@ -205,8 +252,29 @@ function processRows(jsonRows: Record<string,unknown>[], headers: string[], file
 
     const rawImage = get(colMap.image);
     const rawAllImages = get(colMap.allImages);
+    // Priority: cost column > price column (cost is the Amazon source cost)
+    const rawCost = get(colMap.cost) || '';
     const rawPrice = get(colMap.price) || '0';
+    const rawSellPrice = get(colMap.sellPrice) || '';
     const rawCompare = get(colMap.compareAt) || '0';
+
+    // If file has a "Cost" column, use it as p.price (Amazon cost)
+    // If file only has "Price" or "Variant Price", use that as p.price
+    // If file has "Sell Price", preserve it as p.sellPrice
+    const costVal = rawCost ? parseFloat(rawCost.replace(/[^0-9.]/g,'')) || 0 : 0;
+    const priceVal = parseFloat(rawPrice.replace(/[^0-9.]/g,'')) || 0;
+    const sellVal = rawSellPrice ? parseFloat(rawSellPrice.replace(/[^0-9.]/g,'')) || 0 : 0;
+    const importedCost = costVal > 0 ? costVal : priceVal;
+    const importedSell = sellVal > 0 ? sellVal : 0;
+
+    // Read competitor prices from file if present
+    const rawAmazon = parseFloat(get(colMap.amazonPrice) || '0') || 0;
+    const rawCostco = parseFloat(get(colMap.costcoPrice) || '0') || 0;
+    const rawEbay = parseFloat(get(colMap.ebayPrice) || '0') || 0;
+    const rawSams = parseFloat(get(colMap.samsPrice) || '0') || 0;
+    const rawMarket = parseFloat(get(colMap.marketPrice) || '0') || 0;
+    const rawProfitVal = parseFloat(get(colMap.profitCol) || '0') || 0;
+    const rawProfitPct = parseFloat((get(colMap.profitPctCol) || '0').replace('%','')) || 0;
 
     // Build full images array: main image + all images column (pipe-separated)
     // Handles both old exports (separate columns) and new exports (single pipe-separated column)
@@ -225,7 +293,7 @@ function processRows(jsonRows: Record<string,unknown>[], headers: string[], file
     const product: CleanProduct = {
       title: title || (asin ? `Amazon Product ${asin}` : 'Unknown Product'),
       asin,
-      price: parseFloat(rawPrice.replace(/[^0-9.]/g,'')) || 0,
+      price: importedCost,
       compareAt: parseFloat(rawCompare.replace(/[^0-9.]/g,'')) || 0,
       image: allImgs[0] || '',
       images: allImgs,
@@ -235,12 +303,19 @@ function processRows(jsonRows: Record<string,unknown>[], headers: string[], file
       tags: get(colMap.tags),
       status: get(colMap.status) || 'Active',
       quantity: parseInt(get(colMap.quantity)) || 999,
-      profit: 0, profitPct: 0, sellPrice: 0,
-      marketPrice: 0,
-      competitorPrices: { amazon: 0, costco: 0, ebay: 0, sams: 0 },
+      profit: rawProfitVal, profitPct: rawProfitPct, sellPrice: importedSell,
+      marketPrice: rawMarket,
+      competitorPrices: (rawAmazon > 0 || rawCostco > 0 || rawEbay > 0 || rawSams > 0)
+        ? { amazon: rawAmazon, costco: rawCostco, ebay: rawEbay, sams: rawSams }
+        : { amazon: 0, costco: 0, ebay: 0, sams: 0 },
       lowMargin: false,
-      stockStatus: 'Unknown', dateChecked: '',
-      rating: 0, reviews: 0, bsr: 0,
+      stockStatus: (get(colMap.stockStatus) || '').toLowerCase().includes('in stock') ? 'In Stock' as const
+        : (get(colMap.stockStatus) || '').toLowerCase().includes('out') ? 'Out of Stock' as const
+        : 'Unknown' as const,
+      dateChecked: '',
+      rating: parseFloat(get(colMap.rating)) || 0,
+      reviews: parseInt(get(colMap.reviews)) || 0,
+      bsr: parseInt(String(get(colMap.bsr)).replace(/[^0-9]/g, '')) || 0,
       shopifyStatus: 'not_pushed', shopifyError: '', selected: false,
       gates: { title:'fail', image:'fail', price:'fail', asin:'fail', description:'fail' }, gateCount: 0,
     };
