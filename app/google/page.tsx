@@ -9,7 +9,8 @@ const supabase = createClientComponentClient();
 interface FeedProduct {
   id: string; title: string; image_url: string | null; retail_price: number | null;
   description: string | null; status: string; shopify_product_id: string | null;
-  category: string | null; asin: string | null;
+  category: string | null; asin: string | null; vendor: string | null;
+  tags: string | null; barcode: string | null;
 }
 interface SearchQuery {
   id: string; query: string; page_url: string; clicks: number;
@@ -24,7 +25,7 @@ interface CronLog {
   id: string; job_name: string; status: string; message: string;
   duration_seconds: number; created_at: string;
 }
-type TabKey = 'shopping' | 'search' | 'seo' | 'sitemap' | 'schema' | 'setup' | 'bot';
+type TabKey = 'shopping' | 'search' | 'seo' | 'sitemap' | 'schema' | 'setup' | 'bot' | 'ops';
 
 export default function GoogleSEOPage() {
   const [activeTab, setActiveTab] = useState<TabKey>('shopping');
@@ -34,22 +35,25 @@ export default function GoogleSEOPage() {
   const [searchQueries, setSearchQueries] = useState<SearchQuery[]>([]);
   const [seoPages, setSeoPages] = useState<SEOPage[]>([]);
   const [cronLogs, setCronLogs] = useState<CronLog[]>([]);
+  const [allCronLogs, setAllCronLogs] = useState<CronLog[]>([]);
   const [botOpen, setBotOpen] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [prodRes, queryRes, pagesRes, logsRes] = await Promise.all([
-        supabase.from('products').select('id, title, image_url, retail_price, description, status, shopify_product_id, category, asin').order('created_at', { ascending: false }).limit(500),
+      const [prodRes, queryRes, pagesRes, logsRes, allLogsRes] = await Promise.all([
+        supabase.from('products').select('id, title, image_url, retail_price, description, status, shopify_product_id, category, asin, vendor, tags, barcode').order('created_at', { ascending: false }).limit(500),
         supabase.from('search_performance').select('*').order('impressions', { ascending: false }).limit(50),
         supabase.from('seo_metadata').select('*').order('created_at', { ascending: false }).limit(50),
         supabase.from('cron_job_logs').select('*').in('job_name', ['google-shopping', 'omnipresence', 'daily-learning']).order('created_at', { ascending: false }).limit(30),
+        supabase.from('cron_job_logs').select('*').order('created_at', { ascending: false }).limit(100),
       ]);
       setProducts(prodRes.data || []);
       setSearchQueries(queryRes.data || []);
       setSeoPages(pagesRes.data || []);
       setCronLogs(logsRes.data || []);
+      setAllCronLogs(allLogsRes.data || []);
     } catch (err) {
       console.error('[Google] Fetch error:', err);
       setError(err instanceof Error ? err.message : 'Failed to load');
@@ -78,9 +82,10 @@ export default function GoogleSEOPage() {
     { key: 'schema', label: 'Schema' },
     { key: 'setup', label: 'Setup' },
     { key: 'bot', label: 'AI Feed Bot' },
+    { key: 'ops', label: 'Operations' },
   ];
 
-  const tabIcons: Record<TabKey, string> = { shopping: '\u{1F6D2}', search: '\u{1F50D}', seo: '\u{1F4C4}', sitemap: '\u{1F5FA}', schema: '\u{1F4CB}', setup: '\u{2699}', bot: '\u{1F916}' };
+  const tabIcons: Record<TabKey, string> = { shopping: '\u{1F6D2}', search: '\u{1F50D}', seo: '\u{1F4C4}', sitemap: '\u{1F5FA}', schema: '\u{1F4CB}', setup: '\u{2699}', bot: '\u{1F916}', ops: '\u{1F4CA}' };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -140,6 +145,7 @@ export default function GoogleSEOPage() {
               <FeedBotPanel />
             </div>
           )}
+          {activeTab === 'ops' && <OperationsTab logs={allCronLogs} products={products} seoPages={seoPages} />}
         </>}
       </div>
       {/* Feed Bot slide-out — accessible from any tab via button */}
@@ -723,4 +729,227 @@ function Skeleton() {
 
 function ErrCard({ error, retry }: { error: string; retry: () => void }) {
   return <div className="bg-red-50 border border-red-200 rounded-xl p-8 text-center"><div className="text-red-500 text-lg mb-2">Something went wrong</div><div className="text-sm text-red-400 mb-4">{error}</div><button onClick={retry} className="px-4 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700">Retry</button></div>;
+}
+
+// ═══════════════════════════════════════════════════════════
+// OPERATIONS TAB — What ran, what changed, what broke
+// ═══════════════════════════════════════════════════════════
+
+const CRON_CONFIG: { job: string; icon: string; label: string; schedule: string; desc: string; writes: string }[] = [
+  { job: 'google-shopping', icon: '🛒', label: 'Google Shopping Optimizer', schedule: 'Daily 5 AM', desc: 'Optimizes titles for buyer keywords, generates custom labels, updates Shopify metafields', writes: 'Shopify metafields, cron_job_logs' },
+  { job: 'omnipresence', icon: '🌐', label: 'SEO Landing Page Generator', schedule: 'Daily 6 AM', desc: 'Generates keyword-clustered Shopify pages ("best X under $Y"), FAQ schemas, internal links', writes: 'seo_metadata, social_posts, Shopify Pages API' },
+  { job: 'daily-learning', icon: '📊', label: 'Search Console Analyzer', schedule: 'Daily 11 PM', desc: 'Pulls GSC data (impressions, clicks, CTR, position), discovers winning patterns, generates improvement plan', writes: 'search_performance, learning_history' },
+  { job: 'ai-optimize', icon: '🤖', label: 'AI Product Optimizer', schedule: 'Daily 4 AM', desc: 'Batch optimizes product titles, descriptions, SEO metadata, and pricing using AI', writes: 'products (title, description), optimization_logs' },
+  { job: 'product-discovery', icon: '🔍', label: 'Product Discovery', schedule: 'Daily 4 AM', desc: 'Discovers new products from Keepa bestsellers, applies criteria filters, saves to database', writes: 'products, discovery_runs' },
+  { job: 'price-sync', icon: '💰', label: 'Price Sync (Hourly)', schedule: 'Every hour', desc: 'Updates Amazon prices, recalculates margins, flags products below 30% profit', writes: 'products (retail_price), price_history' },
+  { job: 'full-price-sync', icon: '💵', label: 'Full Price Refresh', schedule: 'Daily 3 AM', desc: 'Full catalog price refresh from Keepa for ALL products', writes: 'products, price_snapshots' },
+  { job: 'shopify-sync', icon: '🔄', label: 'Shopify Sync', schedule: 'Every 6 hrs', desc: 'Syncs product data with Shopify (titles, prices, images, inventory)', writes: 'products (sync status)' },
+  { job: 'order-sync', icon: '📦', label: 'Order Sync', schedule: 'Every 15 min', desc: 'Pulls Shopify orders to local database for analytics', writes: 'orders' },
+  { job: 'daily-stats', icon: '📈', label: 'Daily Stats', schedule: 'Midnight', desc: 'Generates daily summary: revenue, orders, new products, feed health', writes: 'daily_stats' },
+  { job: 'ai-scoring', icon: '⚡', label: 'AI Scoring', schedule: 'Daily 2 AM', desc: 'AI scoring of all products for demand prediction and ranking', writes: 'ai_scores' },
+];
+
+function OperationsTab({ logs, products, seoPages }: { logs: CronLog[]; products: FeedProduct[]; seoPages: SEOPage[] }) {
+  // Group logs by job name
+  const logsByJob = new Map<string, CronLog[]>();
+  for (const log of logs) {
+    const list = logsByJob.get(log.job_name) || [];
+    list.push(log);
+    logsByJob.set(log.job_name, list);
+  }
+
+  // Summary stats
+  const last24h = logs.filter(l => new Date(l.created_at) > new Date(Date.now() - 86400000));
+  const successes = last24h.filter(l => l.status === 'success').length;
+  const failures = last24h.filter(l => l.status === 'error' || l.status === 'failed').length;
+  const totalRuns = last24h.length;
+
+  // Product health (quick calc from available data)
+  const activeProducts = products.filter(p => p.status === 'active');
+  const withImage = activeProducts.filter(p => p.image_url).length;
+  const withPrice = activeProducts.filter(p => (p.retail_price || 0) > 0).length;
+  const withDesc = activeProducts.filter(p => p.description && p.description.length > 30).length;
+
+  return (
+    <div className="space-y-4">
+      {/* ── HEADER ── */}
+      <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">📊 Operations Dashboard</h2>
+            <p className="text-xs text-gray-400 mt-0.5">What ran, what changed, what broke, what improved</p>
+          </div>
+          <div className="text-xs text-gray-400">Last 24 hours</div>
+        </div>
+
+        {/* Summary Cards */}
+        <div className="grid grid-cols-5 gap-3">
+          {[
+            { label: 'Total Runs', value: totalRuns, icon: '⏱️', color: 'text-gray-700' },
+            { label: 'Succeeded', value: successes, icon: '✅', color: 'text-green-600' },
+            { label: 'Failed', value: failures, icon: '❌', color: failures > 0 ? 'text-red-600' : 'text-gray-300' },
+            { label: 'Active Products', value: activeProducts.length, icon: '📦', color: 'text-blue-600' },
+            { label: 'Landing Pages', value: seoPages.length, icon: '🌐', color: 'text-indigo-600' },
+          ].map(s => (
+            <div key={s.label} className="bg-gray-50 rounded-lg p-3 text-center">
+              <div className="text-lg">{s.icon}</div>
+              <div className={`text-xl font-bold ${s.color}`}>{s.value}</div>
+              <div className="text-[10px] text-gray-400 mt-0.5">{s.label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── PRODUCT HEALTH SNAPSHOT ── */}
+      <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+        <h3 className="text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">🏥 Product Health Snapshot <span className="text-xs font-normal text-gray-400">({activeProducts.length} active products)</span></h3>
+        <div className="grid grid-cols-4 gap-3">
+          {[
+            { label: 'Has Image', value: withImage, total: activeProducts.length, color: '#16a34a' },
+            { label: 'Has Price', value: withPrice, total: activeProducts.length, color: '#3b82f6' },
+            { label: 'Has Description', value: withDesc, total: activeProducts.length, color: '#8b5cf6' },
+            { label: 'Has Category', value: activeProducts.filter(p => p.category).length, total: activeProducts.length, color: '#f59e0b' },
+          ].map(s => {
+            const pct = s.total > 0 ? Math.round((s.value / s.total) * 100) : 0;
+            return (
+              <div key={s.label} className="bg-gray-50 rounded-lg p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-medium text-gray-600">{s.label}</span>
+                  <span className="text-xs font-bold" style={{ color: pct >= 90 ? '#16a34a' : pct >= 50 ? '#f59e0b' : '#ef4444' }}>{pct}%</span>
+                </div>
+                <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+                  <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: s.color }} />
+                </div>
+                <div className="text-[10px] text-gray-400 mt-1">{s.value.toLocaleString()} / {s.total.toLocaleString()}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── CRON JOB STATUS CARDS ── */}
+      <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+        <h3 className="text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">⏰ Automated Jobs <span className="text-xs font-normal text-gray-400">(11 scheduled crons)</span></h3>
+        <div className="grid grid-cols-1 gap-2">
+          {CRON_CONFIG.map(cron => {
+            const jobLogs = logsByJob.get(cron.job) || [];
+            const lastRun = jobLogs[0];
+            const lastSuccess = jobLogs.find(l => l.status === 'success');
+            const recentFailures = jobLogs.filter(l => l.status === 'error' || l.status === 'failed').length;
+            const isHealthy = lastRun?.status === 'success';
+            const neverRan = !lastRun;
+
+            return (
+              <div key={cron.job} className={`border rounded-lg p-3 flex items-start gap-3 ${neverRan ? 'border-gray-200 bg-gray-50' : isHealthy ? 'border-green-200 bg-green-50/30' : 'border-red-200 bg-red-50/30'}`}>
+                {/* Status dot */}
+                <div className="mt-0.5">
+                  <span className="text-xl">{cron.icon}</span>
+                </div>
+
+                {/* Info */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold text-gray-900">{cron.label}</span>
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${neverRan ? 'bg-gray-200 text-gray-500' : isHealthy ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                      {neverRan ? 'NEVER RAN' : isHealthy ? 'HEALTHY' : 'FAILED'}
+                    </span>
+                    {recentFailures > 0 && <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-100 text-red-600 font-semibold">{recentFailures} failures</span>}
+                  </div>
+                  <p className="text-[11px] text-gray-500 mt-0.5">{cron.desc}</p>
+                  <div className="flex items-center gap-4 mt-1.5">
+                    <span className="text-[10px] text-gray-400">🕐 {cron.schedule}</span>
+                    <span className="text-[10px] text-gray-400">📝 Writes to: {cron.writes}</span>
+                  </div>
+                </div>
+
+                {/* Last run info */}
+                <div className="text-right flex-shrink-0">
+                  {lastRun ? (
+                    <>
+                      <div className="text-[10px] text-gray-500">{new Date(lastRun.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} {new Date(lastRun.created_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</div>
+                      {lastRun.duration_seconds > 0 && <div className="text-[10px] text-gray-400">{lastRun.duration_seconds}s</div>}
+                      {lastRun.message && <div className="text-[10px] text-gray-400 max-w-[200px] truncate mt-0.5" title={lastRun.message}>{lastRun.message}</div>}
+                    </>
+                  ) : (
+                    <div className="text-[10px] text-gray-300">No runs recorded</div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── RECENT ACTIVITY LOG ── */}
+      <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+        <h3 className="text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">📋 Recent Activity <span className="text-xs font-normal text-gray-400">(last 50 runs)</span></h3>
+        {logs.length === 0 ? (
+          <Empty icon="📋" title="No activity recorded" desc="Cron jobs will appear here after they run. Check that CRON_SECRET is set in Vercel env vars." />
+        ) : (
+          <div className="overflow-hidden rounded-lg border border-gray-100">
+            <table className="w-full text-xs">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="text-left py-2 px-3 font-medium text-gray-500">Status</th>
+                  <th className="text-left py-2 px-3 font-medium text-gray-500">Job</th>
+                  <th className="text-left py-2 px-3 font-medium text-gray-500">Message</th>
+                  <th className="text-right py-2 px-3 font-medium text-gray-500">Duration</th>
+                  <th className="text-right py-2 px-3 font-medium text-gray-500">Time</th>
+                </tr>
+              </thead>
+              <tbody>
+                {logs.slice(0, 50).map((log, i) => {
+                  const isError = log.status === 'error' || log.status === 'failed';
+                  const cronMeta = CRON_CONFIG.find(c => c.job === log.job_name);
+                  return (
+                    <tr key={log.id || i} className={`border-t border-gray-50 ${isError ? 'bg-red-50/50' : ''}`}>
+                      <td className="py-2 px-3">
+                        <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded ${isError ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
+                          {isError ? '❌' : '✅'} {log.status}
+                        </span>
+                      </td>
+                      <td className="py-2 px-3">
+                        <div className="flex items-center gap-1.5">
+                          <span>{cronMeta?.icon || '⚙️'}</span>
+                          <span className="font-medium text-gray-700">{cronMeta?.label || log.job_name}</span>
+                        </div>
+                      </td>
+                      <td className="py-2 px-3 text-gray-500 max-w-[300px] truncate" title={log.message}>{log.message || '—'}</td>
+                      <td className="py-2 px-3 text-right text-gray-400">{log.duration_seconds > 0 ? `${log.duration_seconds}s` : '—'}</td>
+                      <td className="py-2 px-3 text-right text-gray-400 whitespace-nowrap">{new Date(log.created_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} {new Date(log.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* ── WHAT EACH SYSTEM DOES (Reference) ── */}
+      <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+        <h3 className="text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">📖 System Reference</h3>
+        <div className="grid grid-cols-2 gap-3">
+          {[
+            { icon: '🛒', title: 'Google Shopping Optimizer', time: '5 AM', what: 'Pulls ALL products from Shopify. Finds underperformers (high impressions, low clicks). Rewrites titles for buyer-intent keywords. Generates custom labels (margin tier, price range, seasonality). Creates product highlights. Updates Shopify metafields with optimized data.', result: 'Optimized titles and custom labels appear in Google Shopping ads. Changes visible in Shopify admin > Products > [product] > Metafields.' },
+            { icon: '🌐', title: 'SEO Landing Page Generator', time: '6 AM', what: 'Analyzes your product catalog for keyword clusters. Generates Shopify pages like "Best Kitchen Gadgets Under $20", "Top Rated Phone Cases". Adds FAQ schema for rich snippets. Builds internal links between product pages and landing pages.', result: 'New pages appear in Shopify admin > Pages. Visible at yourstore.com/pages/[generated-slug]. FAQ rich snippets appear in Google search results.' },
+            { icon: '📊', title: 'Search Console Analyzer', time: '11 PM', what: 'Fetches today\'s Google Search Console data: which queries showed your products, how many impressions, clicks, average position. Discovers new winning search terms. Identifies pages losing position. Generates an improvement plan.', result: 'Data shows in the Search Console tab on this page. Improvement plan stored in learning_history (not yet surfaced in UI).' },
+            { icon: '🤖', title: 'AI Product Optimizer', time: '4 AM', what: 'Uses AI to batch-optimize product titles, descriptions, and SEO metadata across your entire catalog. Prioritizes products with high traffic but low conversion.', result: 'Product titles and descriptions updated directly on Shopify. Results logged to optimization_logs table.' },
+            { icon: '🔍', title: 'Product Discovery', time: '4 AM', what: 'Queries Keepa for bestselling ASINs. Applies your criteria: $3-25, 500+ reviews, 3.5+ rating, Prime required, no branded items. Checks demand consistency (BSR < 100K). Saves qualifying products to database.', result: 'New products appear in the Products page. Discovery stats logged to discovery_runs table.' },
+            { icon: '💰', title: 'Price Sync', time: 'Hourly', what: 'Checks current Amazon prices for all products via Keepa. Recalculates your sell price (cost × 1.70). Flags products where profit dropped below 30%. Updates competitor display prices.', result: 'Price changes reflected on Products page and in Shopify. Price history tracked in price_snapshots.' },
+          ].map(sys => (
+            <div key={sys.title} className="border border-gray-100 rounded-lg p-3">
+              <div className="flex items-center gap-2 mb-1.5">
+                <span className="text-base">{sys.icon}</span>
+                <span className="text-xs font-bold text-gray-900">{sys.title}</span>
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 font-medium">{sys.time}</span>
+              </div>
+              <p className="text-[10px] text-gray-500 leading-relaxed mb-2"><strong className="text-gray-700">What it does:</strong> {sys.what}</p>
+              <p className="text-[10px] text-green-700 leading-relaxed bg-green-50 rounded p-2"><strong>Where results go:</strong> {sys.result}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
