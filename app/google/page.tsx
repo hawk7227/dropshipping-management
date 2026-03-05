@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import FeedBotPanel from '@/components/feed/FeedBotPanel';
 
 const supabase = createClientComponentClient();
 
@@ -23,7 +24,7 @@ interface CronLog {
   id: string; job_name: string; status: string; message: string;
   duration_seconds: number; created_at: string;
 }
-type TabKey = 'shopping' | 'search' | 'seo' | 'sitemap' | 'schema' | 'setup';
+type TabKey = 'shopping' | 'search' | 'seo' | 'sitemap' | 'schema' | 'setup' | 'bot';
 
 export default function GoogleSEOPage() {
   const [activeTab, setActiveTab] = useState<TabKey>('shopping');
@@ -33,6 +34,7 @@ export default function GoogleSEOPage() {
   const [searchQueries, setSearchQueries] = useState<SearchQuery[]>([]);
   const [seoPages, setSeoPages] = useState<SEOPage[]>([]);
   const [cronLogs, setCronLogs] = useState<CronLog[]>([]);
+  const [botOpen, setBotOpen] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -75,9 +77,10 @@ export default function GoogleSEOPage() {
     { key: 'sitemap', label: 'Sitemap' },
     { key: 'schema', label: 'Schema' },
     { key: 'setup', label: 'Setup' },
+    { key: 'bot', label: 'AI Feed Bot' },
   ];
 
-  const tabIcons: Record<TabKey, string> = { shopping: '\u{1F6D2}', search: '\u{1F50D}', seo: '\u{1F4C4}', sitemap: '\u{1F5FA}', schema: '\u{1F4CB}', setup: '\u{2699}' };
+  const tabIcons: Record<TabKey, string> = { shopping: '\u{1F6D2}', search: '\u{1F50D}', seo: '\u{1F4C4}', sitemap: '\u{1F5FA}', schema: '\u{1F4CB}', setup: '\u{2699}', bot: '\u{1F916}' };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -94,6 +97,9 @@ export default function GoogleSEOPage() {
             </div>
             <div className="flex items-center gap-3">
               <HealthBadge score={stats.healthScore} />
+              <button onClick={() => setBotOpen(!botOpen)} className={`px-4 py-2 text-sm rounded-lg flex items-center gap-2 font-medium transition-colors ${botOpen ? 'bg-blue-600 text-white shadow-md' : 'bg-white border border-gray-300 text-gray-700 hover:bg-blue-50 hover:border-blue-300'}`}>
+                <span>{'\u{1F916}'}</span> {botOpen ? 'Close Bot' : 'Feed Bot'}
+              </button>
               <button onClick={fetchData} className="px-4 py-2 text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-2 shadow-sm">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                 Refresh
@@ -129,8 +135,19 @@ export default function GoogleSEOPage() {
           {activeTab === 'sitemap' && <SitemapTab />}
           {activeTab === 'schema' && <SchemaTab />}
           {activeTab === 'setup' && <SetupTab logs={cronLogs} />}
+          {activeTab === 'bot' && (
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden" style={{ height: 'calc(100vh - 280px)' }}>
+              <FeedBotPanel />
+            </div>
+          )}
         </>}
       </div>
+      {/* Feed Bot slide-out — accessible from any tab via button */}
+      {botOpen && activeTab !== 'bot' && (
+        <div className="fixed right-0 top-0 h-screen w-[360px] border-l border-gray-200 bg-white shadow-xl z-50">
+          <FeedBotPanel />
+        </div>
+      )}
     </div>
   );
 }

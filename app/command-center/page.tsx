@@ -1,5 +1,15 @@
 'use client';
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useMemo } from 'react';
+
+// ═══════════════════════════════════════════════════════════
+// FOUNDATION IMPORTS — Level 3 system
+// All types, validators, constants, and pipeline logic from foundation packages
+// ═══════════════════════════════════════════════════════════
+import { TOTAL_GATES } from '@/lib/contracts/merchant';
+import { MARKUP } from '@/lib/contracts/constants';
+import { runAllGates } from '@/lib/gates';
+import GateBadge from '@/components/feed/GateBadge';
+import FeedScoreBadge from '@/components/feed/FeedScoreBadge';
 
 // ═══════════════════════════════════════════════════════════
 // TYPES
@@ -8,18 +18,45 @@ type FileType = 'shopify-matrixify' | 'shopify-csv' | 'autods' | 'asin-list' | '
 type GateStatus = 'pass' | 'fail' | 'warn';
 type ViewMode = 'table' | 'spreadsheet' | 'cards';
 
+interface CompetitorPrices {
+  amazon: number; costco: number; ebay: number; sams: number;
+}
+
+const COMPETITOR_MULTIPLIERS = {
+  amazon: 1.85, costco: 1.82, ebay: 1.90, sams: 1.80,
+};
+
+function calcCompetitorPrices(sellPrice: number): CompetitorPrices {
+  // Fallback: static multipliers when no market research has been done
+  // Market research (researchPrices) will overwrite these with real data
+  if (!sellPrice || sellPrice <= 0) return { amazon: 0, costco: 0, ebay: 0, sams: 0 };
+  return {
+    amazon: +(sellPrice * COMPETITOR_MULTIPLIERS.amazon).toFixed(2),
+    costco: +(sellPrice * COMPETITOR_MULTIPLIERS.costco).toFixed(2),
+    ebay: +(sellPrice * COMPETITOR_MULTIPLIERS.ebay).toFixed(2),
+    sams: +(sellPrice * COMPETITOR_MULTIPLIERS.sams).toFixed(2),
+  };
+}
+
 interface CleanProduct {
   title: string; asin: string; price: number; compareAt: number; image: string;
   images: string[];
   description: string; vendor: string; category: string; tags: string; status: string; quantity: number;
   profit: number; profitPct: number; sellPrice: number;
+  marketPrice: number;
+  competitorPrices: CompetitorPrices;
+  lowMargin: boolean;
   stockStatus: 'In Stock' | 'Out of Stock' | 'Unknown';
   dateChecked: string;
   rating: number; reviews: number; bsr: number;
+  // Google Merchant Center fields
+  barcode: string; weight: string; googleCategory: string;
+  seoTitle: string; seoDescription: string; handle: string; feedScore: number;
   shopifyStatus: 'not_pushed' | 'pushing' | 'pushed' | 'failed';
   shopifyError: string;
   selected: boolean;
-  gates: { title: GateStatus; image: GateStatus; price: GateStatus; asin: GateStatus; description: GateStatus };
+  gates: { title: GateStatus; image: GateStatus; price: GateStatus; asin: GateStatus; description: GateStatus;
+    googleCategory: GateStatus; titleLength: GateStatus; descClean: GateStatus; barcode: GateStatus; identifier: GateStatus; };
   gateCount: number;
 }
 
@@ -39,8 +76,11 @@ function detectFileType(headers: string[]): FileType {
   if (h.includes('handle') && h.includes('title') && joined.includes('image')) return 'shopify-csv';
   if (joined.includes('autods') || (h.includes('source url') && h.includes('source price'))) return 'autods';
   if (h.includes('action') && (h.includes('itemid') || h.includes('category'))) return 'ebay-file-exchange';
-  if (h.some(x => ['title','name','product'].includes(x)) && h.some(x => ['price','cost','sku'].includes(x))) return 'generic-csv';
-  return 'unknown';
+  // Broad generic detection: any file with recognizable product-related columns
+  if (h.some(x => ['title','name','product','product title','product name','item name'].includes(x))) return 'generic-csv';
+  if (h.some(x => ['price','cost','sku','asin','variant price','sell price'].includes(x))) return 'generic-csv';
+  // If we can't identify the format, still treat it as generic so processRows runs
+  return 'generic-csv';
 }
 
 function detectASINList(rows: Record<string,unknown>[]): boolean {
@@ -56,6 +96,29 @@ function detectASINList(rows: Record<string,unknown>[]): boolean {
     }
   }
   return asinCount > 10;
+}
+
+// ═══════════════════════════════════════════════════════════
+// ASIN AUTO-DETECT: Scans cell values to find which column contains ASINs
+// Used as fallback when mapColumns can't find ASIN by header name
+// ═══════════════════════════════════════════════════════════
+function autoDetectASINColumn(headers: string[], rows: Record<string, unknown>[]): string | null {
+  const sample = rows.slice(0, 20);
+  let bestCol: string | null = null;
+  let bestScore = 0;
+
+  for (const col of headers) {
+    let asinHits = 0;
+    for (const row of sample) {
+      const val = String(row[col] ?? '').trim().replace(/['"]/g, '').toUpperCase();
+      if (/^B[0-9A-Z]{9}$/.test(val)) asinHits++;
+      else if (/\/dp\/([A-Z0-9]{10})/i.test(val)) asinHits++;
+    }
+    if (asinHits > bestScore) { bestScore = asinHits; bestCol = col; }
+  }
+
+  // Need at least 30% of sampled rows to have ASINs to be confident
+  return (bestScore >= Math.max(3, sample.length * 0.3)) ? bestCol : null;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -77,19 +140,39 @@ function mapColumns(headers: string[]): Record<string, string | null> {
     return null;
   };
 
-  map.title = find(['title', 'product title', 'product name', 'item name', 'item title', 'name'], ['option', 'meta', 'alt']);
-  map.asin = find(['variant sku', 'sku', 'asin', 'amazon asin', 'source_product_id', 'item number']);
-  map.price = find(['variant price', 'price', 'sale price', 'selling price'], ['compare', 'cost']);
-  map.compareAt = find(['variant compare at price', 'compare at price', 'compare_at_price', 'msrp', 'list price']);
-  map.image = find(['image src', 'image_src', 'image url', 'image_url', 'main image'], ['type', 'command', 'position', 'width', 'height', 'alt']);
-  map.description = find(['body (html)', 'body html', 'body_html', 'description', 'product description']);
-  map.vendor = find(['vendor', 'brand', 'manufacturer', 'supplier']);
-  map.category = find(['product type', 'product_type', 'type', 'category', 'department'], ['image', 'variant', 'meta']);
-  map.tags = find(['tags', 'keywords']);
-  map.status = find(['status'], ['inventory']);
-  map.quantity = find(['variant inventory qty', 'inventory', 'quantity', 'stock', 'total inventory qty']);
-  map.handle = find(['handle', 'slug']);
+  map.title = find(['title', 'product title', 'product name', 'item name', 'item title', 'name', 'listing title', 'product'], ['option', 'meta', 'alt', 'type', 'id', 'code', 'sku']);
+  map.asin = find(['variant sku', 'sku', 'asin', 'amazon asin', 'source_product_id', 'item number', 'product id', 'amazon id', 'item asin', 'item sku', 'product sku', 'source sku', 'fnsku', 'product code', 'id', 'upc', 'ean', 'item id', 'listing id'], ['image', 'order', 'tracking']);
+  map.cost = find(['cost', 'source cost', 'source_cost', 'amazon cost', 'item cost', 'unit cost', 'buy cost', 'purchase price', 'wholesale', 'supplier price', 'source price'], ['costco']);
+  map.sellPrice = find(['sell price', 'sell_price', 'selling price', 'our price', 'your price', 'retail price', 'listed price'], []);
+  map.price = find(['variant price', 'price', 'sale price'], ['compare', 'cost', 'sell', 'source', 'buy', 'wholesale', 'supplier', 'amazon', 'costco', 'ebay', 'sam', 'market', 'retail', 'listed']);
+  map.compareAt = find(['variant compare at price', 'compare at price', 'compare_at_price', 'msrp', 'list price', 'compare at', 'rrp', 'retail price']);
+  map.amazonPrice = find(['amazon $', 'amazon price', 'price_amazon'], ['cost', 'source']);
+  map.costcoPrice = find(['costco $', 'costco price', 'price_costco'], []);
+  map.ebayPrice = find(['ebay $', 'ebay price', 'price_ebay'], []);
+  map.samsPrice = find(["sam's $", 'sams $', 'sams price', 'sam\'s club price', 'price_samsclub', "sam's club $"], []);
+  map.marketPrice = find(['market $', 'market price', 'market_price', 'avg market', 'market avg'], []);
+  map.profitCol = find(['profit $', 'profit_dollar', 'profit'], ['%', 'pct', 'percent', 'margin']);
+  map.profitPctCol = find(['profit %', 'profit_pct', 'profit_percent', 'margin %', 'margin', 'profit margin'], []);
+  map.image = find(['image src', 'image_src', 'image url', 'image_url', 'main image', 'image link', 'photo', 'thumbnail', 'picture', 'img'], ['type', 'command', 'position', 'width', 'height', 'alt', 'all', 'count']);
+  map.allImages = find(['all images', 'all_images', 'additional images', 'image gallery', 'extra images', 'gallery'], []);
+  map.description = find(['body (html)', 'body html', 'body_html', 'description', 'product description', 'details', 'item description', 'long description']);
+  map.vendor = find(['vendor', 'brand', 'manufacturer', 'supplier', 'maker', 'brand name', 'sold by']);
+  map.category = find(['product type', 'product_type', 'type', 'category', 'department', 'product category'], ['image', 'variant', 'meta']);
+  map.tags = find(['tags', 'keywords', 'labels']);
+  map.status = find(['status', 'listing status', 'product status'], ['inventory', 'stock', 'order']);
+  map.quantity = find(['variant inventory qty', 'inventory', 'quantity', 'stock', 'total inventory qty', 'qty', 'available', 'stock qty', 'in stock'], ['status', 'out']);
+  map.handle = find(['handle', 'slug', 'url handle']);
   map.topRow = find(['top row']);
+  map.rating = find(['rating', 'star rating', 'stars', 'avg rating'], []);
+  map.reviews = find(['reviews', 'review count', 'number of reviews', 'ratings count'], []);
+  map.bsr = find(['bsr', 'best seller rank', 'sales rank', 'best sellers rank', 'rank'], ['date', 'page']);
+  map.stockStatus = find(['stock', 'stock status', 'availability', 'in stock'], ['qty', 'quantity', 'inventory']);
+  // Google Merchant Center columns
+  map.barcode = find(['variant barcode', 'barcode', 'gtin', 'upc', 'ean', 'isbn']);
+  map.weight = find(['variant weight', 'weight', 'shipping weight'], ['unit']);
+  map.googleCategory = find(['google product category', 'google_product_category', 'mc-facebook.google_product_category', 'google category']);
+  map.seoTitle = find(['title_tag', 'seo title', 'meta title', 'metafield: title_tag']);
+  map.seoDescription = find(['description_tag', 'seo description', 'meta description', 'metafield: description_tag']);
   return map;
 }
 
@@ -114,16 +197,53 @@ function extractASIN(val: string): string {
   return m ? m[1].toUpperCase() : '';
 }
 
-const MARKUP = 1.70; // 70% markup
+// MARKUP imported from @/lib/contracts/constants
 
 function runGates(p: CleanProduct): CleanProduct {
-  const g = { title:'fail' as GateStatus, image:'fail' as GateStatus, price:'fail' as GateStatus, asin:'fail' as GateStatus, description:'fail' as GateStatus };
+  const g = {
+    title:'fail' as GateStatus, image:'fail' as GateStatus, price:'fail' as GateStatus, asin:'fail' as GateStatus, description:'fail' as GateStatus,
+    googleCategory:'fail' as GateStatus, titleLength:'fail' as GateStatus, descClean:'fail' as GateStatus, barcode:'fail' as GateStatus, identifier:'fail' as GateStatus,
+  };
+  // Original 5 gates
   if (p.title && p.title.length > 5 && !p.title.includes('<') && p.title.toLowerCase() !== 'unknown product') g.title = 'pass';
   else if (p.title?.length > 0) g.title = 'warn';
   if ((p.images?.length || 0) >= 3) g.image = 'pass'; else if (p.image?.startsWith('http')) g.image = 'warn';
   if (p.price > 0) g.price = 'pass'; else if (p.compareAt > 0) g.price = 'warn';
   if (p.asin && /^B[0-9A-Z]{9}$/.test(p.asin)) g.asin = 'pass';
   if (p.description?.length > 30) g.description = 'pass'; else if (p.description?.length > 0) g.description = 'warn';
+
+  // Google Merchant Gate 6: Google Product Category
+  if (p.googleCategory && p.googleCategory.length > 5) g.googleCategory = 'pass';
+  else g.googleCategory = 'fail';
+
+  // Gate 7: Title length + compliance (≤150 chars, no promo text)
+  if (p.title && p.title.length <= 150 && p.title.length > 5) g.titleLength = 'pass';
+  else if (p.title && p.title.length > 150 && p.title.length <= 180) g.titleLength = 'warn';
+  else if (p.title && p.title.length > 180) g.titleLength = 'fail';
+
+  // Gate 8: Description clean (no HTML, no Amazon junk)
+  if (p.description && p.description.length >= 50 && !/<[a-z][^>]*>/i.test(p.description) && !/content="width=device-width/i.test(p.description)) g.descClean = 'pass';
+  else if (p.description && p.description.length >= 20) g.descClean = 'warn';
+
+  // Gate 9: Barcode/GTIN valid
+  if (p.barcode && /^\d{8}$|^\d{12}$|^\d{13}$|^\d{14}$/.test(p.barcode)) g.barcode = 'pass';
+  else if (p.barcode && p.barcode.length >= 8) g.barcode = 'warn';
+
+  // Gate 10: Identifier (GTIN+Brand or Brand+MPN)
+  const hasBrand = p.vendor && p.vendor !== 'Unknown' && p.vendor.length > 1;
+  if ((g.barcode === 'pass' && hasBrand) || (p.asin && hasBrand)) g.identifier = 'pass';
+  else if (hasBrand) g.identifier = 'warn';
+
+  // Calculate feed score (0-100)
+  let feedScore = 0;
+  if (g.titleLength === 'pass') feedScore += 20;
+  if (g.descClean === 'pass') feedScore += 15;
+  if (g.image !== 'fail') feedScore += 15;
+  if (g.price === 'pass') feedScore += 15;
+  if (g.barcode === 'pass') feedScore += 15;
+  if (g.googleCategory === 'pass') feedScore += 10;
+  if (hasBrand) feedScore += 5;
+  feedScore += 5; // Free shipping = always pass
 
   // Auto-calculate sell price and profit if not already set
   let { sellPrice, profit, profitPct, stockStatus } = p;
@@ -136,7 +256,11 @@ function runGates(p: CleanProduct): CleanProduct {
   if (stockStatus === 'Unknown' && p.price > 0 && p.title) stockStatus = 'In Stock';
 
   return { ...p, sellPrice, profit, profitPct, stockStatus,
+    marketPrice: p.marketPrice || 0,
+    competitorPrices: (p.competitorPrices?.amazon > 0) ? p.competitorPrices : calcCompetitorPrices(sellPrice || p.sellPrice),
+    lowMargin: (profitPct > 0 && profitPct < 30) ? true : (p.lowMargin || false),
     shopifyStatus: p.shopifyStatus || 'not_pushed', shopifyError: p.shopifyError || '', selected: p.selected || false,
+    feedScore,
     gates: g, gateCount: Object.values(g).filter(v => v === 'pass').length };
 }
 
@@ -146,6 +270,14 @@ function runGates(p: CleanProduct): CleanProduct {
 function processRows(jsonRows: Record<string,unknown>[], headers: string[], fileType: FileType): FileAnalysis {
   const start = performance.now();
   const colMap = mapColumns(headers);
+
+  // ASIN auto-detect fallback: if mapColumns didn't find an ASIN column by name,
+  // scan actual cell values to find which column contains B0XXXXXXXXX patterns
+  if (!colMap.asin) {
+    const detected = autoDetectASINColumn(headers, jsonRows);
+    if (detected) colMap.asin = detected;
+  }
+
   const features: string[] = [];
   if (colMap.topRow) features.push('Top Row dedup');
   if (colMap.handle) features.push('Handle dedup');
@@ -177,32 +309,82 @@ function processRows(jsonRows: Record<string,unknown>[], headers: string[], file
     if (handle) seenHandles.add(handle);
 
     const rawImage = get(colMap.image);
+    const rawAllImages = get(colMap.allImages);
+    // Priority: cost column > price column (cost is the Amazon source cost)
+    const rawCost = get(colMap.cost) || '';
     const rawPrice = get(colMap.price) || '0';
+    const rawSellPrice = get(colMap.sellPrice) || '';
     const rawCompare = get(colMap.compareAt) || '0';
+
+    // If file has a "Cost" column, use it as p.price (Amazon cost)
+    // If file only has "Price" or "Variant Price", use that as p.price
+    // If file has "Sell Price", preserve it as p.sellPrice
+    const costVal = rawCost ? parseFloat(rawCost.replace(/[^0-9.]/g,'')) || 0 : 0;
+    const priceVal = parseFloat(rawPrice.replace(/[^0-9.]/g,'')) || 0;
+    const sellVal = rawSellPrice ? parseFloat(rawSellPrice.replace(/[^0-9.]/g,'')) || 0 : 0;
+    const importedCost = costVal > 0 ? costVal : priceVal;
+    const importedSell = sellVal > 0 ? sellVal : 0;
+
+    // Read competitor prices from file if present
+    const rawAmazon = parseFloat(get(colMap.amazonPrice) || '0') || 0;
+    const rawCostco = parseFloat(get(colMap.costcoPrice) || '0') || 0;
+    const rawEbay = parseFloat(get(colMap.ebayPrice) || '0') || 0;
+    const rawSams = parseFloat(get(colMap.samsPrice) || '0') || 0;
+    const rawMarket = parseFloat(get(colMap.marketPrice) || '0') || 0;
+    const rawProfitVal = parseFloat(get(colMap.profitCol) || '0') || 0;
+    const rawProfitPct = parseFloat((get(colMap.profitPctCol) || '0').replace('%','')) || 0;
+
+    // Build full images array: main image + all images column (pipe-separated)
+    // Handles both old exports (separate columns) and new exports (single pipe-separated column)
+    const allImgs: string[] = [];
+    // Parse rawImage — may be single URL or pipe-separated list
+    if (rawImage) {
+      const parts = rawImage.split(/\s*\|\s*/).filter((u: string) => u.startsWith('http'));
+      for (const url of parts) { if (!allImgs.includes(url)) allImgs.push(url); }
+    }
+    // Parse rawAllImages — pipe-separated (from old exports or external files)
+    if (rawAllImages) {
+      const parsed = rawAllImages.split(/\s*\|\s*/).filter((u: string) => u.startsWith('http'));
+      for (const url of parsed) { if (!allImgs.includes(url)) allImgs.push(url); }
+    }
 
     const product: CleanProduct = {
       title: title || (asin ? `Amazon Product ${asin}` : 'Unknown Product'),
       asin,
-      price: parseFloat(rawPrice.replace(/[^0-9.]/g,'')) || 0,
+      price: importedCost,
       compareAt: parseFloat(rawCompare.replace(/[^0-9.]/g,'')) || 0,
-      image: rawImage.startsWith('http') ? rawImage : '',
-      images: rawImage.startsWith('http') ? [rawImage] : [],
+      image: allImgs[0] || '',
+      images: allImgs,
       description: cleanHTML(get(colMap.description)),
       vendor: (get(colMap.vendor) || 'Unknown').substring(0, 30),
       category: (get(colMap.category) || 'General').substring(0, 40),
       tags: get(colMap.tags),
       status: get(colMap.status) || 'Active',
       quantity: parseInt(get(colMap.quantity)) || 999,
-      profit: 0, profitPct: 0, sellPrice: 0,
-      stockStatus: 'Unknown', dateChecked: '',
-      rating: 0, reviews: 0, bsr: 0,
+      profit: rawProfitVal, profitPct: rawProfitPct, sellPrice: importedSell,
+      marketPrice: rawMarket,
+      competitorPrices: (rawAmazon > 0 || rawCostco > 0 || rawEbay > 0 || rawSams > 0)
+        ? { amazon: rawAmazon, costco: rawCostco, ebay: rawEbay, sams: rawSams }
+        : { amazon: 0, costco: 0, ebay: 0, sams: 0 },
+      lowMargin: false,
+      stockStatus: (get(colMap.stockStatus) || '').toLowerCase().includes('in stock') ? 'In Stock' as const
+        : (get(colMap.stockStatus) || '').toLowerCase().includes('out') ? 'Out of Stock' as const
+        : 'Unknown' as const,
+      dateChecked: '',
+      rating: parseFloat(get(colMap.rating)) || 0,
+      reviews: parseInt(get(colMap.reviews)) || 0,
+      bsr: parseInt(String(get(colMap.bsr)).replace(/[^0-9]/g, '')) || 0,
       shopifyStatus: 'not_pushed', shopifyError: '', selected: false,
-      gates: { title:'fail', image:'fail', price:'fail', asin:'fail', description:'fail' }, gateCount: 0,
+      barcode: get(colMap.barcode).replace(/[^0-9]/g, ''),
+      weight: get(colMap.weight), googleCategory: get(colMap.googleCategory),
+      seoTitle: get(colMap.seoTitle), seoDescription: get(colMap.seoDescription),
+      handle: get(colMap.handle), feedScore: 0,
+      gates: { title:'fail', image:'fail', price:'fail', asin:'fail', description:'fail', googleCategory:'fail', titleLength:'fail', descClean:'fail', barcode:'fail', identifier:'fail' }, gateCount: 0,
     };
     products.push(runGates(product));
   }
 
-  const passed = products.filter(p => p.gateCount === 5).length;
+  const passed = products.filter(p => p.gateCount === 10).length;
   const failed = products.filter(p => p.gateCount < 3).length;
   return {
     type: fileType, totalRows: jsonRows.length, totalCols: headers.length,
@@ -227,10 +409,14 @@ function processASINList(jsonRows: Record<string,unknown>[]): FileAnalysis {
     title:'', asin, price:0, compareAt:0, image:'', images:[], description:'',
     vendor:'', category:'', tags:'', status:'Draft', quantity:999,
     profit:0, profitPct:0, sellPrice:0,
+    marketPrice:0,
+    competitorPrices:{ amazon:0, costco:0, ebay:0, sams:0 },
+    lowMargin:false,
     stockStatus:'Unknown' as const, dateChecked:'',
     rating:0, reviews:0, bsr:0,
     shopifyStatus:'not_pushed' as const, shopifyError:'', selected:false,
-    gates:{title:'fail',image:'fail',price:'fail',asin:'fail',description:'fail'}, gateCount:0,
+    barcode:'', weight:'', googleCategory:'', seoTitle:'', seoDescription:'', handle:'', feedScore:0,
+    gates:{title:'fail',image:'fail',price:'fail',asin:'fail',description:'fail',googleCategory:'fail',titleLength:'fail',descClean:'fail',barcode:'fail',identifier:'fail'}, gateCount:0,
   }));
   return {
     type:'asin-list', totalRows:jsonRows.length, totalCols:Object.keys(jsonRows[0]||{}).length,
@@ -244,11 +430,11 @@ function processASINList(jsonRows: Record<string,unknown>[]): FileAnalysis {
 // ═══════════════════════════════════════════════════════════
 // SPREADSHEET VIEWER/EDITOR
 // ═══════════════════════════════════════════════════════════
-const COLS = ['title','asin','price','sellPrice','profit','profitPct','stockStatus','image','rating','reviews','bsr','vendor','category','description','dateChecked','status'] as const;
-const COL_LABELS = ['Title','ASIN/SKU','Cost','Sell Price','Profit $','Profit %','Stock','Image URL','Rating','Reviews','BSR','Vendor','Category','Description','Checked','Status'];
-const COL_WIDTHS = [280,120,70,80,70,70,85,200,60,80,80,120,140,300,90,70];
+const COLS = ['title','asin','barcode','price','sellPrice','compareAt','profit','profitPct','marketPrice','amazonPrice','costcoPrice','ebayPrice','samsPrice','stockStatus','image','rating','reviews','bsr','vendor','category','googleCategory','description','dateChecked','status'] as const;
+const COL_LABELS = ['Title','ASIN/SKU','GTIN','Cost','Sell $','Compare At','Profit $','Profit %','Market $','Amazon $','Costco $','eBay $','Sam\'s $','Stock','Image URL','Rating','Reviews','BSR','Vendor','Category','Google Cat','Description','Checked','Status'];
+const COL_WIDTHS = [280,120,130,70,80,80,70,70,80,80,80,80,80,85,200,60,80,80,120,140,200,300,90,70];
 
-function SpreadsheetView({ products, onUpdate, perPage = 50, onToggleSelect, onSelectAll }: { products: CleanProduct[]; onUpdate: (idx: number, field: string, val: string) => void; perPage?: number; onToggleSelect?: (idx: number) => void; onSelectAll?: (val: boolean) => void }) {
+function SpreadsheetView({ products, onUpdate, perPage = 50, onToggleSelect, onSelectAll, onProductClick }: { products: CleanProduct[]; onUpdate: (idx: number, field: string, val: string) => void; perPage?: number; onToggleSelect?: (idx: number) => void; onSelectAll?: (val: boolean) => void; onProductClick?: (p: CleanProduct) => void }) {
   const [page, setPage] = useState(0);
   const PAGE = perPage;
   const total = products.length;
@@ -288,16 +474,17 @@ function SpreadsheetView({ products, onUpdate, perPage = 50, onToggleSelect, onS
             {slice.map((p, ri) => {
               const globalIdx = page * PAGE + ri;
               return (
-                <tr key={globalIdx} style={{ borderBottom:'1px solid #0a0a0a', background: p.selected ? '#1a1a2e22' : 'transparent' }}>
+                <tr key={globalIdx} style={{ borderBottom:'1px solid #0a0a0a', background: p.selected ? '#1a1a2e22' : p.lowMargin ? '#f59e0b08' : 'transparent' }}>
                   <td style={{ padding:'4px 4px', textAlign:'center' }}>
                     <input type="checkbox" checked={p.selected || false} onChange={() => onToggleSelect?.(globalIdx)} style={{ cursor:'pointer' }} />
                   </td>
-                  <td style={{ padding:'4px 6px', fontSize:'9px', color:'#333', textAlign:'center' }}>{globalIdx+1}</td>
+                  <td onClick={() => onProductClick?.(products[globalIdx])}
+                    style={{ padding:'4px 6px', fontSize:'9px', color:'#06b6d4', textAlign:'center', cursor:'pointer', textDecoration:'underline' }}>{globalIdx+1}</td>
                   <td style={{ padding:'4px 6px', textAlign:'center' }}>
                     <span style={{ fontSize:'9px', fontWeight:700, padding:'1px 6px', borderRadius:'3px',
-                      background: p.gateCount===5?'rgba(22,163,74,0.15)':p.gateCount>=3?'rgba(245,158,11,0.15)':'rgba(239,68,68,0.15)',
-                      color: p.gateCount===5?'#16a34a':p.gateCount>=3?'#f59e0b':'#ef4444',
-                    }}>{p.gateCount}/5</span>
+                      background: p.gateCount===10?'rgba(22,163,74,0.15)':p.gateCount>=3?'rgba(245,158,11,0.15)':'rgba(239,68,68,0.15)',
+                      color: p.gateCount===10?'#16a34a':p.gateCount>=3?'#f59e0b':'#ef4444',
+                    }}>{p.gateCount}/10</span>
                   </td>
                   <td style={{ padding:'4px 6px', textAlign:'center' }}>
                     <span style={{ fontSize:'8px', fontWeight:600, padding:'1px 6px', borderRadius:'3px',
@@ -306,7 +493,12 @@ function SpreadsheetView({ products, onUpdate, perPage = 50, onToggleSelect, onS
                     }} title={p.shopifyError}>{p.shopifyStatus==='pushed'?'✅ Synced':p.shopifyStatus==='pushing'?'⏳':p.shopifyStatus==='failed'?'❌ Failed':'—'}</span>
                   </td>
                   {COLS.map((col, ci) => {
-                    const val = String(p[col] ?? '');
+                    const val = col === 'marketPrice' ? String(p.marketPrice || '')
+                      : col === 'amazonPrice' ? String(p.competitorPrices?.amazon || '')
+                      : col === 'costcoPrice' ? String(p.competitorPrices?.costco || '')
+                      : col === 'ebayPrice' ? String(p.competitorPrices?.ebay || '')
+                      : col === 'samsPrice' ? String(p.competitorPrices?.sams || '')
+                      : String(p[col as keyof CleanProduct] ?? '');
                     const isGated = ['title','image','price','asin','description'].includes(col);
                     const gateKey = col === 'compareAt' ? null : col as keyof typeof p.gates;
                     const gateStatus = gateKey && p.gates[gateKey];
@@ -314,7 +506,7 @@ function SpreadsheetView({ products, onUpdate, perPage = 50, onToggleSelect, onS
                       <td key={ci} style={{ padding:0, borderLeft:'1px solid #111', position:'relative' }}>
                         <input
                           defaultValue={
-                            ['price','sellPrice','profit','compareAt'].includes(col) ? (Number(val) > 0 ? `$${Number(val).toFixed(2)}` : '') :
+                            ['price','sellPrice','profit','compareAt','marketPrice','amazonPrice','costcoPrice','ebayPrice','samsPrice'].includes(col) ? (Number(val) > 0 ? `$${Number(val).toFixed(2)}` : '') :
                             col === 'profitPct' ? (Number(val) > 0 ? `${Number(val).toFixed(0)}%` : '') :
                             col === 'bsr' ? (Number(val) > 0 ? Number(val).toLocaleString() : '') :
                             col === 'reviews' ? (Number(val) > 0 ? Number(val).toLocaleString() : '') :
@@ -325,10 +517,12 @@ function SpreadsheetView({ products, onUpdate, perPage = 50, onToggleSelect, onS
                           onBlur={e => onUpdate(globalIdx, col, e.target.value)}
                           style={{
                             width:'100%', padding:'6px 8px', background:'transparent', border:'none', outline:'none',
-                            color: col === 'profit' || col === 'profitPct' ? (Number(val) > 0 ? '#16a34a' : '#ef4444') :
+                            color: col === 'profit' || col === 'profitPct' ? (Number(val) > 0 ? (p.lowMargin ? '#f59e0b' : '#16a34a') : '#ef4444') :
                               col === 'stockStatus' ? (val === 'In Stock' ? '#16a34a' : val === 'Out of Stock' ? '#ef4444' : '#555') :
                               col === 'rating' ? (Number(val) >= 4 ? '#16a34a' : Number(val) >= 3 ? '#f59e0b' : '#ef4444') :
                               col === 'sellPrice' ? '#06b6d4' :
+                              col === 'marketPrice' ? '#06b6d4' :
+                              ['amazonPrice','costcoPrice','ebayPrice','samsPrice'].includes(col) ? '#f59e0b' :
                               col === 'bsr' ? '#8b5cf6' :
                               gateStatus === 'fail' ? '#ef4444' : gateStatus === 'warn' ? '#f59e0b' : '#ccc',
                             fontSize:'11px', fontFamily:'inherit',
@@ -357,15 +551,20 @@ async function exportAndDownload(products: CleanProduct[], filename: string) {
   const data = products.map(p => ({
     'Title': p.title, 'ASIN/SKU': p.asin, 'Cost': p.price || '', 'Sell Price': p.sellPrice || '',
     'Profit $': p.profit || '', 'Profit %': p.profitPct ? `${p.profitPct}%` : '',
-    'Stock': p.stockStatus, 'Image URL': p.image,
-    'All Images': (p.images || []).join(' | '),
+    'Market $': p.marketPrice || '',
+    'Amazon $': p.competitorPrices?.amazon || '', 'Costco $': p.competitorPrices?.costco || '',
+    'eBay $': p.competitorPrices?.ebay || '', 'Sam\'s $': p.competitorPrices?.sams || '',
+    'Low Margin': p.lowMargin ? '⚠️ <30%' : '',
+    'Stock': p.stockStatus, 'Image URL': (p.images && p.images.length > 0) ? p.images.join(' | ') : (p.image || ''),
     'Image Count': (p.images || []).length,
     'Rating': p.rating || '', 'Reviews': p.reviews || '',
     'BSR': p.bsr || '', 'Vendor': p.vendor, 'Category': p.category,
-    'Description': p.description, 'Date Checked': p.dateChecked, 'Status': p.status, 'Gates': `${p.gateCount}/5`,
+    'Google Category': p.googleCategory || '', 'Barcode/GTIN': p.barcode || '', 'Weight': p.weight || '',
+    'Handle': p.handle || '', 'SEO Title': p.seoTitle || '', 'Feed Score': p.feedScore || 0,
+    'Description': p.description, 'Date Checked': p.dateChecked, 'Status': p.status, 'Gates': `${p.gateCount}/10`,
   }));
   const ws = utils.json_to_sheet(data);
-  ws['!cols'] = [55,14,10,12,10,10,12,60,80,8,8,10,10,20,25,80,12,10,8].map(w => ({ wch: w }));
+  ws['!cols'] = [55,14,10,12,10,10,10,10,10,10,10,10,12,80,8,8,10,10,20,25,80,12,10,8].map(w => ({ wch: w }));
   const wb = utils.book_new();
   utils.book_append_sheet(wb, ws, 'Products');
   writeFile(wb, filename);
@@ -392,10 +591,14 @@ export default function CommandCenter() {
   const [sortDir, setSortDir] = useState<'asc'|'desc'>('desc');
   const [perPage, setPerPage] = useState(50);
   const [enriching, setEnriching] = useState(false);
+  const [pricing, setPricing] = useState(false);
+  const [pricingProgress, setPricingProgress] = useState({ done: 0, total: 0, currentBatch: '', priced: 0, lowMarginCount: 0, avgProfit: 0, lastAsin: '', lastPrice: 0, lastProfit: 0, lastProfitPct: 0, lastMarket: 0, tokensLeft: 0 });
   const [enrichProgress, setEnrichProgress] = useState({ done: 0, total: 0, tokensLeft: 0, currentBatch: '', error: '' });
   const [criteria, setCriteria] = useState({ minPrice: 3, maxPrice: 25, minRating: 3.5, minReviews: 500, maxBSR: 100000, markup: 70, maxRetail: 40 });
   const [showCriteria, setShowCriteria] = useState(false);
   const [pushing, setPushing] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<CleanProduct | null>(null);
+  const [modalImageIdx, setModalImageIdx] = useState(0);
   const [pushProgress, setPushProgress] = useState({ done: 0, total: 0, pushed: 0, errors: 0, lastError: '' });
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -419,7 +622,7 @@ export default function CommandCenter() {
   const deleteSelected = useCallback(() => {
     if (!analysis) return;
     const remaining = analysis.products.filter(p => !p.selected);
-    const passed = remaining.filter(x => x.gateCount === 5).length;
+    const passed = remaining.filter(x => x.gateCount === 10).length;
     const failed = remaining.filter(x => x.gateCount < 3).length;
     setAnalysis({ ...analysis, products: remaining, uniqueProducts: remaining.length, passed, failed, warned: remaining.length - passed - failed });
   }, [analysis]);
@@ -428,8 +631,8 @@ export default function CommandCenter() {
   const pushToShopify = useCallback(async (selectedOnly = false) => {
     if (!analysis) return;
     const toPush = selectedOnly
-      ? analysis.products.filter(p => p.selected && p.gateCount === 5 && p.image && p.title)
-      : analysis.products.filter(p => p.gateCount === 5 && p.image && p.title && p.shopifyStatus !== 'pushed');
+      ? analysis.products.filter(p => p.selected && p.gateCount === 10 && p.image && p.title)
+      : analysis.products.filter(p => p.gateCount === 10 && p.image && p.title && p.shopifyStatus !== 'pushed');
     if (!toPush.length) return;
     setPushing(true);
     setPushProgress({ done: 0, total: toPush.length, pushed: 0, errors: 0, lastError: '' });
@@ -454,6 +657,9 @@ export default function CommandCenter() {
               title: p.title, asin: p.asin, price: p.price, sellPrice: p.sellPrice, profit: p.profit,
               image: p.image, images: p.images || [], description: p.description, vendor: p.vendor, category: p.category,
               rating: p.rating, reviews: p.reviews, bsr: p.bsr, stockStatus: p.stockStatus,
+              competitorPrices: p.competitorPrices,
+              barcode: p.barcode, googleCategory: p.googleCategory, weight: p.weight, handle: p.handle,
+              seoTitle: p.seoTitle, seoDescription: p.seoDescription, feedScore: p.feedScore,
             },
             action: 'push',
           }),
@@ -485,11 +691,11 @@ export default function CommandCenter() {
   // ═══════════════════════════════════════════════════════════════
   const bulkPushToShopify = useCallback(async () => {
     if (!analysis) return;
-    const toPush = analysis.products.filter(p => p.gateCount === 5 && p.image && p.title && p.shopifyStatus !== 'pushed');
+    const toPush = analysis.products.filter(p => p.gateCount === 10 && p.image && p.title && p.shopifyStatus !== 'pushed');
     if (!toPush.length) return;
 
     setPushing(true);
-    (window as Record<string, number>).__pushStart = Date.now();
+    (window as unknown as Record<string, number>).__pushStart = Date.now();
     setPushProgress({ done: 0, total: toPush.length, pushed: 0, errors: 0, lastError: '' });
 
     const BATCH = 3; // products per API call
@@ -530,7 +736,9 @@ export default function CommandCenter() {
               products: batch.map(p => ({
                 title: p.title, asin: p.asin, price: p.price, sellPrice: p.sellPrice,
                 image: p.image, images: p.images || [], description: p.description, vendor: p.vendor, category: p.category,
-                rating: p.rating, reviews: p.reviews, bsr: p.bsr,
+                rating: p.rating, reviews: p.reviews, bsr: p.bsr, competitorPrices: p.competitorPrices,
+                barcode: p.barcode, googleCategory: p.googleCategory, weight: p.weight, handle: p.handle,
+                seoTitle: p.seoTitle, seoDescription: p.seoDescription, feedScore: p.feedScore,
               })),
             }),
           }).then(r => r.json())
@@ -674,12 +882,121 @@ export default function CommandCenter() {
       }
     }
 
-    const passed = updated.filter(x => x.gateCount === 5).length;
+    const passed = updated.filter(x => x.gateCount === 10).length;
     const failed = updated.filter(x => x.gateCount < 3).length;
     setAnalysis({ ...analysis, products: updated, passed, failed, warned: updated.length - passed - failed });
-    setEnrichProgress(prev => ({ ...prev, done: maxAsins.length, currentBatch: `Done! ${passed} passed all 5 gates.` }));
+    setEnrichProgress(prev => ({ ...prev, done: maxAsins.length, currentBatch: `Done! ${passed} passed all 10 gates.` }));
     setEnriching(false);
   }, [analysis, criteria]);
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // MARKET PRICE RESEARCH — Searches Amazon for real market average prices
+  // ═══════════════════════════════════════════════════════════════════════
+  const researchPrices = useCallback(async () => {
+    if (!analysis) return;
+    const eligible = analysis.products.filter(p => p.price > 0 && p.title && p.asin);
+    if (!eligible.length) return;
+
+    setPricing(true);
+    setPricingProgress({ done: 0, total: eligible.length, currentBatch: 'Starting market price research...', priced: 0, lowMarginCount: 0, avgProfit: 0, lastAsin: '', lastPrice: 0, lastProfit: 0, lastProfitPct: 0, lastMarket: 0, tokensLeft: 0 });
+
+    const BATCH = 50;
+    const updated = [...analysis.products];
+    let totalPriced = 0;
+    let totalLowMargin = 0;
+    let profitSum = 0;
+    let lastTokens = 0;
+
+    for (let i = 0; i < eligible.length; i += BATCH) {
+      const batch = eligible.slice(i, i + BATCH);
+      const batchNum = Math.floor(i / BATCH) + 1;
+      const totalBatches = Math.ceil(eligible.length / BATCH);
+      setPricingProgress(prev => ({ ...prev, currentBatch: `Batch ${batchNum}/${totalBatches} — fetching Keepa data for ${batch.length} ASINs...` }));
+
+      try {
+        const res = await fetch('/api/market-price', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            products: batch.map(p => ({ asin: p.asin, title: p.title, price: p.price })),
+          }),
+        });
+        const data = await res.json();
+        if (data.tokensLeft) lastTokens = data.tokensLeft;
+
+        if (data.results) {
+          // Process each result and update live
+          for (let j = 0; j < updated.length; j++) {
+            const p = updated[j];
+            const r = data.results[p.asin];
+            if (!r) continue;
+
+            const newCost = r.amazonCost || p.price; // Keepa's real price, Rainforest fallback
+            const newSell = r.adjustedSellPrice || p.sellPrice;
+            const newProfit = +(newSell - newCost).toFixed(2);
+            const newProfitPct = newCost > 0 ? +((newSell - newCost) / newCost * 100).toFixed(1) : 0;
+            const newMarket = r.averageMarketPrice || 0;
+            const isLowMargin = newProfitPct < 30;
+
+            totalPriced++;
+            profitSum += newProfit;
+            if (isLowMargin) totalLowMargin++;
+
+            const merged: CleanProduct = {
+              ...p,
+              price: newCost, // Update Amazon cost with Keepa's accurate price
+              sellPrice: newSell,
+              profit: newProfit,
+              profitPct: newProfitPct,
+              marketPrice: newMarket,
+              lowMargin: isLowMargin,
+              competitorPrices: r.competitorPrices || { amazon: 0, costco: 0, ebay: 0, sams: 0 },
+              compareAt: Math.max(r.competitorPrices?.amazon || 0, r.competitorPrices?.costco || 0, r.competitorPrices?.ebay || 0, r.competitorPrices?.sams || 0),
+            };
+            updated[j] = runGates(merged);
+
+            // Live update progress with last product details
+            setPricingProgress(prev => ({
+              ...prev,
+              done: Math.min(i + totalPriced - (i > 0 ? eligible.slice(0, i).length : 0), eligible.length),
+              priced: totalPriced,
+              lowMarginCount: totalLowMargin,
+              avgProfit: totalPriced > 0 ? +(profitSum / totalPriced).toFixed(2) : 0,
+              lastAsin: p.asin,
+              lastPrice: newSell,
+              lastProfit: newProfit,
+              lastProfitPct: newProfitPct,
+              lastMarket: newMarket,
+              tokensLeft: lastTokens,
+            }));
+          }
+
+          // Live update products in UI after each batch
+          const passed = updated.filter(x => x.gateCount === 10).length;
+          const failed = updated.filter(x => x.gateCount < 3).length;
+          setAnalysis(prev => prev ? { ...prev, products: [...updated], passed, failed, warned: updated.length - passed - failed } : null);
+        }
+      } catch (err) {
+        setPricingProgress(prev => ({ ...prev, currentBatch: `Error on batch ${batchNum}: ${String(err).substring(0, 80)}` }));
+      }
+
+      setPricingProgress(prev => ({ ...prev, done: Math.min(i + BATCH, eligible.length) }));
+      if (i + BATCH < eligible.length) await new Promise(r => setTimeout(r, 500));
+    }
+
+    // Final pass: flag all low margin products
+    for (let j = 0; j < updated.length; j++) {
+      if (updated[j].profitPct > 0 && updated[j].profitPct < 30) {
+        updated[j] = { ...updated[j], lowMargin: true };
+      }
+    }
+
+    const passed = updated.filter(x => x.gateCount === 10).length;
+    const failed = updated.filter(x => x.gateCount < 3).length;
+    setAnalysis(prev => prev ? { ...prev, products: updated, passed, failed, warned: updated.length - passed - failed } : null);
+    setPricingProgress(prev => ({ ...prev, done: eligible.length, priced: totalPriced, lowMarginCount: totalLowMargin, currentBatch: `Done! ${totalPriced} priced · ${totalLowMargin} low margin (<30%)` }));
+    setPricing(false);
+  }, [analysis]);
 
   const handleFile = useCallback(async (file: File) => {
     setProcessing(true); setFileName(file.name); setAnalysis(null);
@@ -720,7 +1037,7 @@ export default function CommandCenter() {
       (p as Record<string,unknown>)[field] = val;
     }
     updated[idx] = runGates(p);
-    const passed = updated.filter(x => x.gateCount === 5).length;
+    const passed = updated.filter(x => x.gateCount === 10).length;
     const failed = updated.filter(x => x.gateCount < 3).length;
     setAnalysis({ ...analysis, products: updated, passed, failed, warned: updated.length - passed - failed });
   }, [analysis]);
@@ -796,14 +1113,18 @@ export default function CommandCenter() {
                 {enriching ? `⏳ ${enrichProgress.done}/${enrichProgress.total}` : `🔍 Enrich All (${analysis.products.filter(p=>p.asin&&/^B[0-9A-Z]{9}$/.test(p.asin)).length})`}
               </button>
             </>
-            <button onClick={() => exportAndDownload(analysis.products.filter(p => p.gateCount === 5), `clean_passed_${Date.now()}.xlsx`)}
+            <button onClick={researchPrices} disabled={pricing || !analysis?.products.some(p => p.price > 0 && p.title)}
+              style={{ padding:'6px 14px', borderRadius:'6px', border:'none', background: pricing ? '#333' : '#f59e0b', color: pricing ? '#888' : '#000', fontSize:'10px', fontWeight:600, cursor: pricing ? 'wait' : 'pointer' }}>
+              {pricing ? `⏳ ${pricingProgress.done}/${pricingProgress.total}` : `💰 Price Research (${analysis.products.filter(p => p.price > 0 && p.title).length})`}
+            </button>
+            <button onClick={() => exportAndDownload(analysis.products.filter(p => p.gateCount === 10), `clean_passed_${Date.now()}.xlsx`)}
               style={{ padding:'6px 14px', borderRadius:'6px', border:'none', background:'#16a34a', color:'#fff', fontSize:'10px', fontWeight:600, cursor:'pointer' }}>
               📥 Export Passed ({analysis.passed})
             </button>
             {analysis.passed > 0 && !pushing && (
               <button onClick={bulkPushToShopify}
                 style={{ padding:'6px 14px', borderRadius:'6px', border:'none', background:'#f59e0b', color:'#000', fontSize:'10px', fontWeight:700, cursor:'pointer' }}>
-                🚀 Push All Passed ({analysis.products.filter(p => p.gateCount === 5 && p.image && p.title && p.shopifyStatus !== 'pushed').length})
+                🚀 Push All Passed ({analysis.products.filter(p => p.gateCount === 10 && p.image && p.title && p.shopifyStatus !== 'pushed').length})
               </button>
             )}
             {pushing && (
@@ -838,7 +1159,7 @@ export default function CommandCenter() {
             <div style={{ marginBottom:'24px' }}>
               <h2 style={{ fontSize:'14px', color:'#fff', fontWeight:700, margin:'0 0 6px' }}>Smart Product File Processor</h2>
               <p style={{ fontSize:'11px', color:'#555', margin:0, lineHeight:'1.6' }}>
-                Upload any product file — this tool auto-detects the format, strips unnecessary data, validates every product against 5 listing requirements, 
+                Upload any product file — this tool auto-detects the format, strips unnecessary data, validates every product against 10 listing requirements, 
                 and lets you enrich missing data via Keepa/Rainforest APIs. No configuration needed.
               </p>
             </div>
@@ -860,7 +1181,7 @@ export default function CommandCenter() {
                   validates every product.
                 </p>
                 <div style={{ fontSize:'9px', color:'#333', display:'flex', flexWrap:'wrap', gap:'4px' }}>
-                  {['166 → 11 cols','70K → 2.5K rows','HTML cleanup','Dedup','5-gate check'].map(t => (
+                  {['166 → 11 cols','70K → 2.5K rows','HTML cleanup','Dedup','10-gate check'].map(t => (
                     <span key={t} style={{ padding:'2px 6px', borderRadius:'3px', background:'#16a34a15', color:'#16a34a', border:'1px solid #16a34a22' }}>{t}</span>
                   ))}
                 </div>
@@ -910,8 +1231,8 @@ export default function CommandCenter() {
 
             {/* The 5 Gates */}
             <div style={{ background:'#111', borderRadius:'10px', padding:'16px', border:'1px solid #1a1a2e', marginBottom:'24px' }}>
-              <p style={{ fontSize:'10px', color:'#fff', fontWeight:700, margin:'0 0 10px', textTransform:'uppercase', letterSpacing:'1px' }}>5-Gate Listing Requirements</p>
-              <p style={{ fontSize:'10px', color:'#555', margin:'0 0 12px' }}>Every product must pass all 5 gates before it can be listed on any platform. No exceptions.</p>
+              <p style={{ fontSize:'10px', color:'#fff', fontWeight:700, margin:'0 0 10px', textTransform:'uppercase', letterSpacing:'1px' }}>10-Gate Listing Requirements</p>
+              <p style={{ fontSize:'10px', color:'#555', margin:'0 0 12px' }}>Every product must pass all 10 gates before it can be listed on any platform. No exceptions.</p>
               <div style={{ display:'flex', flexWrap:'wrap', gap:'10px' }}>
                 {[
                   { icon:'✅', gate:'Title', desc:'Min 6 chars, no HTML, not generic', required:true },
@@ -919,6 +1240,11 @@ export default function CommandCenter() {
                   { icon:'✅', gate:'Price', desc:'Greater than $0, within criteria range', required:true },
                   { icon:'✅', gate:'ASIN/SKU', desc:'Valid Amazon ASIN (B0XXXXXXXXX format)', required:true },
                   { icon:'✅', gate:'Description', desc:'Min 30 chars, cleaned of HTML/boilerplate', required:true },
+                  { icon:'🔵', gate:'Google Category', desc:'Google Product Category taxonomy path assigned', required:true },
+                  { icon:'🔵', gate:'Title Length', desc:'≤150 chars, no promo text, no ALL CAPS', required:true },
+                  { icon:'🔵', gate:'Desc Clean', desc:'No HTML, no Amazon meta tags, no boilerplate', required:true },
+                  { icon:'🔵', gate:'Barcode/GTIN', desc:'Valid 8/12/13/14 digit GTIN with checksum', required:true },
+                  { icon:'🔵', gate:'Identifier', desc:'GTIN+Brand or Brand+MPN for Google visibility', required:true },
                 ].map(g => (
                   <div key={g.gate} style={{ flex:'1 1 160px', background:'#0a0a0a', borderRadius:'6px', padding:'10px', border:'1px solid #1a1a2e' }}>
                     <p style={{ fontSize:'11px', color:'#16a34a', fontWeight:700, margin:'0 0 4px' }}>{g.icon} {g.gate}</p>
@@ -986,7 +1312,7 @@ export default function CommandCenter() {
               <p style={{ fontSize:'9px', color:'#333', margin:'2px 0 0' }}>{analysis.totalCols} → 11 cols · {analysis.totalRows.toLocaleString()} → {analysis.uniqueProducts.toLocaleString()}</p>
             </div>
             <div style={{ background:'#111', borderRadius:'10px', padding:'14px', border:'1px solid #1a1a2e' }}>
-              <p style={{ fontSize:'8px', color:'#444', textTransform:'uppercase', letterSpacing:'1px', margin:'0 0 4px' }}>5-Gate Check</p>
+              <p style={{ fontSize:'8px', color:'#444', textTransform:'uppercase', letterSpacing:'1px', margin:'0 0 4px' }}>10-Gate Check</p>
               <p style={{ fontSize:'12px', margin:0 }}>
                 <span style={{ color:'#16a34a', fontWeight:700 }}>{analysis.passed}</span><span style={{ color:'#333' }}> pass · </span>
                 <span style={{ color:'#f59e0b', fontWeight:700 }}>{analysis.warned}</span><span style={{ color:'#333' }}> warn · </span>
@@ -1049,6 +1375,58 @@ export default function CommandCenter() {
             </div>
           )}
 
+          {/* Pricing Progress */}
+          {(pricing || pricingProgress.done > 0) && (
+            <div style={{ background:'#111', borderRadius:'10px', padding:'12px 16px', border:`1px solid ${pricing ? '#f59e0b33' : pricingProgress.lowMarginCount > 0 ? '#f59e0b33' : '#16a34a33'}`, marginBottom:'12px' }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'6px' }}>
+                <span style={{ fontSize:'10px', color: pricing ? '#f59e0b' : '#16a34a', fontWeight:600 }}>
+                  {pricing ? '💰 Dynamic Pricing Engine Running...' : `✅ Price Research Complete — ${pricingProgress.priced} products priced`}
+                </span>
+                <span style={{ fontSize:'9px', color:'#555' }}>
+                  {pricingProgress.tokensLeft > 0 ? `Keepa tokens: ${pricingProgress.tokensLeft.toLocaleString()}` : ''}
+                </span>
+              </div>
+              <div style={{ height:4, background:'#1a1a2e', borderRadius:'4px', overflow:'hidden', marginBottom:'8px' }}>
+                <div style={{ width:`${pricingProgress.total > 0 ? (pricingProgress.done/pricingProgress.total)*100 : 0}%`, height:'100%', background: pricing ? '#f59e0b' : '#16a34a', borderRadius:'4px', transition:'width 0.3s' }} />
+              </div>
+              {/* Live stats row */}
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(5, 1fr)', gap:'6px', marginBottom:'6px' }}>
+                <div style={{ background:'#0a0a0f', borderRadius:'6px', padding:'6px 8px', textAlign:'center' }}>
+                  <p style={{ fontSize:'14px', fontWeight:800, color:'#f59e0b', margin:0 }}>{pricingProgress.priced}</p>
+                  <p style={{ fontSize:'7px', color:'#555', margin:'2px 0 0', textTransform:'uppercase', letterSpacing:'0.5px' }}>Priced</p>
+                </div>
+                <div style={{ background:'#0a0a0f', borderRadius:'6px', padding:'6px 8px', textAlign:'center' }}>
+                  <p style={{ fontSize:'14px', fontWeight:800, color:'#16a34a', margin:0 }}>${pricingProgress.avgProfit.toFixed(2)}</p>
+                  <p style={{ fontSize:'7px', color:'#555', margin:'2px 0 0', textTransform:'uppercase', letterSpacing:'0.5px' }}>Avg Profit</p>
+                </div>
+                <div style={{ background:'#0a0a0f', borderRadius:'6px', padding:'6px 8px', textAlign:'center' }}>
+                  <p style={{ fontSize:'14px', fontWeight:800, color: pricingProgress.lowMarginCount > 0 ? '#f59e0b' : '#16a34a', margin:0 }}>{pricingProgress.lowMarginCount}</p>
+                  <p style={{ fontSize:'7px', color:'#555', margin:'2px 0 0', textTransform:'uppercase', letterSpacing:'0.5px' }}>Low Margin</p>
+                </div>
+                <div style={{ background:'#0a0a0f', borderRadius:'6px', padding:'6px 8px', textAlign:'center' }}>
+                  <p style={{ fontSize:'14px', fontWeight:800, color:'#06b6d4', margin:0 }}>${pricingProgress.lastMarket > 0 ? pricingProgress.lastMarket.toFixed(2) : '—'}</p>
+                  <p style={{ fontSize:'7px', color:'#555', margin:'2px 0 0', textTransform:'uppercase', letterSpacing:'0.5px' }}>Last Mkt Price</p>
+                </div>
+                <div style={{ background:'#0a0a0f', borderRadius:'6px', padding:'6px 8px', textAlign:'center' }}>
+                  <p style={{ fontSize:'14px', fontWeight:800, color: pricingProgress.lastProfitPct >= 30 ? '#16a34a' : '#f59e0b', margin:0 }}>{pricingProgress.lastProfitPct > 0 ? `${pricingProgress.lastProfitPct}%` : '—'}</p>
+                  <p style={{ fontSize:'7px', color:'#555', margin:'2px 0 0', textTransform:'uppercase', letterSpacing:'0.5px' }}>Last Margin</p>
+                </div>
+              </div>
+              {/* Last processed ASIN */}
+              {pricing && pricingProgress.lastAsin && (
+                <div style={{ background:'#0a0a0f', borderRadius:'6px', padding:'6px 10px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                  <span style={{ fontSize:'9px', color:'#7c3aed', fontFamily:'monospace' }}>{pricingProgress.lastAsin}</span>
+                  <span style={{ fontSize:'9px', color:'#555' }}>
+                    Cost: ${pricingProgress.lastPrice > 0 ? (pricingProgress.lastPrice - pricingProgress.lastProfit).toFixed(2) : '—'} → Sell: <span style={{ color:'#06b6d4' }}>${pricingProgress.lastPrice.toFixed(2)}</span> → Profit: <span style={{ color: pricingProgress.lastProfitPct >= 30 ? '#16a34a' : '#f59e0b' }}>${pricingProgress.lastProfit.toFixed(2)} ({pricingProgress.lastProfitPct}%)</span>
+                  </span>
+                </div>
+              )}
+              <p style={{ fontSize:'9px', color:'#444', margin:'6px 0 0' }}>
+                {`${pricingProgress.done}/${pricingProgress.total} products · ${pricingProgress.currentBatch}`}
+              </p>
+            </div>
+          )}
+
           {/* Push Progress */}
           {(pushing || pushProgress.pushed > 0) && (
             <div style={{ background:'linear-gradient(135deg, #0a0a1a, #111)', borderRadius:'12px', padding:'16px 20px', border:`1px solid ${pushing ? '#f59e0b44' : pushProgress.errors > 0 ? '#f59e0b33' : '#16a34a44'}`, marginBottom:'12px', boxShadow: pushing ? '0 0 20px rgba(245,158,11,0.1)' : 'none' }}>
@@ -1092,7 +1470,7 @@ export default function CommandCenter() {
                 </div>
                 {pushing && pushProgress.done > 0 && (
                   <span style={{ fontSize:'9px', color:'#555' }}>
-                    ~{Math.ceil((pushProgress.total - pushProgress.done) / Math.max(1, pushProgress.done / ((Date.now() - (window as Record<string, number>).__pushStart || Date.now()) / 60000)))} min left
+                    ~{Math.ceil((pushProgress.total - pushProgress.done) / Math.max(1, pushProgress.done / ((Date.now() - (window as unknown as Record<string, number>).__pushStart || Date.now()) / 60000)))} min left
                   </span>
                 )}
               </div>
@@ -1185,7 +1563,8 @@ export default function CommandCenter() {
             /* Product Card Grid */
             <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(260px, 1fr))', gap:'12px' }}>
               {filtered.slice(0, 100).map((p, i) => (
-                <div key={i} style={{ background:'#111', borderRadius:'12px', border:'1px solid #1a1a2e', overflow:'hidden', position:'relative' }}>
+                <div key={i} onClick={() => { setSelectedProduct(p); setModalImageIdx(0); }} style={{ background:'#111', borderRadius:'12px', border:'1px solid #1a1a2e', overflow:'hidden', position:'relative', cursor:'pointer', transition:'border-color 0.15s' }}
+                  onMouseEnter={e => (e.currentTarget.style.borderColor = '#333')} onMouseLeave={e => (e.currentTarget.style.borderColor = '#1a1a2e')}>
                   {/* Stock badge */}
                   <div style={{ position:'absolute', top:8, left:8, zIndex:2 }}>
                     <span style={{ padding:'2px 8px', borderRadius:'4px', fontSize:'8px', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.5px',
@@ -1198,12 +1577,12 @@ export default function CommandCenter() {
                   <div style={{ position:'absolute', top:8, right:8, zIndex:2, display:'flex', gap:'4px' }}>
                     {(p.images || []).length > 1 && (
                       <span style={{ padding:'2px 8px', borderRadius:'4px', fontSize:'8px', fontWeight:700, background:'rgba(6,182,212,0.9)', color:'#fff' }}>
-                        📷 {p.images.length}
+                        📷 {(p.images || []).length}
                       </span>
                     )}
                     <span style={{ padding:'2px 8px', borderRadius:'4px', fontSize:'8px', fontWeight:700,
-                      background: p.gateCount===5?'rgba(22,163,74,0.9)':p.gateCount>=3?'rgba(245,158,11,0.9)':'rgba(239,68,68,0.9)',
-                      color:'#fff' }}>{p.gateCount}/5</span>
+                      background: p.gateCount===10?'rgba(22,163,74,0.9)':p.gateCount>=3?'rgba(245,158,11,0.9)':'rgba(239,68,68,0.9)',
+                      color:'#fff' }}>{p.gateCount}/10</span>
                   </div>
                   {/* Image */}
                   <div style={{ height:180, background:'#0a0a0a', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden' }}>
@@ -1254,7 +1633,7 @@ export default function CommandCenter() {
               {filtered.length > 100 && <div style={{ gridColumn:'1/-1', textAlign:'center', padding:'20px', color:'#333', fontSize:'10px' }}>Showing 100 of {filtered.length}. Use filters or export to see all.</div>}
             </div>
           ) : viewMode === 'spreadsheet' ? (
-            <SpreadsheetView products={filtered} onUpdate={handleUpdate} perPage={perPage} onToggleSelect={toggleSelect} onSelectAll={selectAll} />
+            <SpreadsheetView products={filtered} onUpdate={handleUpdate} perPage={perPage} onToggleSelect={toggleSelect} onSelectAll={selectAll} onProductClick={(p) => { setSelectedProduct(p); setModalImageIdx(0); }} />
           ) : (
             <div style={{ background:'#111', borderRadius:'12px', border:'1px solid #1a1a2e', overflow:'hidden' }}>
               <div style={{ overflowX:'auto' }}>
@@ -1274,11 +1653,12 @@ export default function CommandCenter() {
                   </thead>
                   <tbody>
                     {filtered.slice(0, 200).map((p, i) => (
-                      <tr key={i} style={{ borderBottom:'1px solid #0a0a0a' }}>
+                      <tr key={i} onClick={() => { setSelectedProduct(p); setModalImageIdx(0); }} style={{ borderBottom:'1px solid #0a0a0a', cursor:'pointer' }}
+                        onMouseEnter={e => (e.currentTarget.style.background = '#1a1a2e22')} onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
                         <td style={{ padding:'6px 8px', textAlign:'center' }}>
                           <span style={{ fontSize:'9px', fontWeight:700, padding:'2px 6px', borderRadius:'3px',
-                            background: p.gateCount===5?'rgba(22,163,74,0.15)':p.gateCount>=3?'rgba(245,158,11,0.15)':'rgba(239,68,68,0.15)',
-                            color: p.gateCount===5?'#16a34a':p.gateCount>=3?'#f59e0b':'#ef4444' }}>{p.gateCount}/5</span>
+                            background: p.gateCount===10?'rgba(22,163,74,0.15)':p.gateCount>=3?'rgba(245,158,11,0.15)':'rgba(239,68,68,0.15)',
+                            color: p.gateCount===10?'#16a34a':p.gateCount>=3?'#f59e0b':'#ef4444' }}>{p.gateCount}/10</span>
                         </td>
                         <td style={{ padding:'6px 8px', maxWidth:250 }}>
                           <p style={{ margin:0, color:'#fff', fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontSize:'11px' }}>{p.title}</p>
@@ -1308,7 +1688,8 @@ export default function CommandCenter() {
               </h3>
               <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(240px, 1fr))', gap:'10px' }}>
                 {filtered.filter(p => p.image).slice(0, perPage).map((p, i) => (
-                  <div key={i} style={{ background:'#111', borderRadius:'10px', border:'1px solid #1a1a2e', overflow:'hidden', position:'relative' }}>
+                  <div key={i} onClick={() => { setSelectedProduct(p); setModalImageIdx(0); }} style={{ background:'#111', borderRadius:'10px', border:'1px solid #1a1a2e', overflow:'hidden', position:'relative', cursor:'pointer', transition:'border-color 0.15s' }}
+                    onMouseEnter={e => (e.currentTarget.style.borderColor = '#333')} onMouseLeave={e => (e.currentTarget.style.borderColor = '#1a1a2e')}>
                     {/* Badges */}
                     <div style={{ position:'absolute', top:6, left:6, zIndex:2, display:'flex', gap:'4px' }}>
                       <span style={{ padding:'2px 6px', borderRadius:'3px', fontSize:'7px', fontWeight:700, textTransform:'uppercase',
@@ -1319,10 +1700,10 @@ export default function CommandCenter() {
                     </div>
                     <div style={{ position:'absolute', top:6, right:6, zIndex:2, display:'flex', gap:'4px' }}>
                       {(p.images || []).length > 1 && (
-                        <span style={{ padding:'2px 6px', borderRadius:'3px', fontSize:'7px', fontWeight:700, background:'rgba(6,182,212,0.9)', color:'#fff' }}>📷 {p.images.length}</span>
+                        <span style={{ padding:'2px 6px', borderRadius:'3px', fontSize:'7px', fontWeight:700, background:'rgba(6,182,212,0.9)', color:'#fff' }}>📷 {(p.images || []).length}</span>
                       )}
                       <span style={{ padding:'2px 6px', borderRadius:'3px', fontSize:'7px', fontWeight:700,
-                        background: p.gateCount===5?'rgba(22,163,74,0.9)':p.gateCount>=3?'rgba(245,158,11,0.9)':'rgba(239,68,68,0.9)', color:'#fff' }}>{p.gateCount}/5</span>
+                        background: p.gateCount===10?'rgba(22,163,74,0.9)':p.gateCount>=3?'rgba(245,158,11,0.9)':'rgba(239,68,68,0.9)', color:'#fff' }}>{p.gateCount}/10</span>
                       {p.shopifyStatus === 'pushed' && <span style={{ padding:'2px 6px', borderRadius:'3px', fontSize:'7px', fontWeight:700, background:'rgba(22,163,74,0.9)', color:'#fff' }}>✅ Synced</span>}
                       {p.shopifyStatus === 'failed' && <span style={{ padding:'2px 6px', borderRadius:'3px', fontSize:'7px', fontWeight:700, background:'rgba(239,68,68,0.9)', color:'#fff' }}>❌ Failed</span>}
                     </div>
@@ -1367,6 +1748,251 @@ export default function CommandCenter() {
           )}
 
         </div>)}
+
+        {/* ═══════════════════════════════════════════════════════════ */}
+        {/* PRODUCT DETAIL MODAL                                       */}
+        {/* ═══════════════════════════════════════════════════════════ */}
+        {selectedProduct && (
+          <div style={{ position:'fixed', inset:0, zIndex:9999, display:'flex', alignItems:'center', justifyContent:'center' }}
+            onClick={() => { setSelectedProduct(null); setModalImageIdx(0); }}>
+            <div style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.85)', backdropFilter:'blur(8px)' }} />
+            <div style={{ position:'relative', background:'#111', borderRadius:'16px', border:'1px solid #1a1a2e', width:'92%', maxWidth:700, maxHeight:'90vh', overflow:'auto', boxShadow:'0 20px 60px rgba(0,0,0,0.6)' }}
+              onClick={e => e.stopPropagation()}>
+
+              {/* Close */}
+              <button onClick={() => { setSelectedProduct(null); setModalImageIdx(0); }}
+                style={{ position:'sticky', top:12, float:'right', marginRight:12, zIndex:10, width:32, height:32, borderRadius:'999px', border:'1px solid #333', background:'#1a1a2e', color:'#888', fontSize:'16px', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>✕</button>
+
+              {/* Header */}
+              <div style={{ padding:'20px 24px 14px', borderBottom:'1px solid #1a1a2e', display:'flex', alignItems:'center', gap:'10px' }}>
+                <h2 style={{ fontSize:'14px', color:'#fff', fontWeight:700, margin:0 }}>Product Details</h2>
+                <span style={{ padding:'3px 10px', borderRadius:'999px', fontSize:'9px', fontWeight:700,
+                  background: selectedProduct.stockStatus === 'In Stock' ? 'rgba(22,163,74,0.15)' : 'rgba(239,68,68,0.15)',
+                  color: selectedProduct.stockStatus === 'In Stock' ? '#16a34a' : '#ef4444',
+                  border: `1px solid ${selectedProduct.stockStatus === 'In Stock' ? '#16a34a33' : '#ef444433'}`,
+                }}>{selectedProduct.stockStatus === 'In Stock' ? 'Active' : 'Out of Stock'}</span>
+                <span style={{ padding:'3px 10px', borderRadius:'999px', fontSize:'9px', fontWeight:700,
+                  background: selectedProduct.gateCount===10?'rgba(22,163,74,0.15)':selectedProduct.gateCount>=3?'rgba(245,158,11,0.15)':'rgba(239,68,68,0.15)',
+                  color: selectedProduct.gateCount===10?'#16a34a':selectedProduct.gateCount>=3?'#f59e0b':'#ef4444',
+                }}>{selectedProduct.gateCount}/10 Gates</span>
+              </div>
+
+              <div style={{ display:'flex', flexWrap:'wrap' }}>
+                {/* LEFT — Image gallery */}
+                <div style={{ flex:'0 0 260px', padding:'20px', borderRight:'1px solid #1a1a2e' }}>
+                  {/* Main image */}
+                  <div style={{ width:'100%', height:200, background:'#0a0a0a', borderRadius:'12px', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden', marginBottom:'10px', border:'1px solid #1a1a2e', position:'relative' }}>
+                    {(selectedProduct.images?.length > 0 || selectedProduct.image) ? (
+                      <img src={selectedProduct.images?.[modalImageIdx] || selectedProduct.image} alt={selectedProduct.title}
+                        style={{ maxHeight:'100%', maxWidth:'100%', objectFit:'contain' }}
+                        onError={e => { (e.target as HTMLImageElement).style.display='none'; }} />
+                    ) : (
+                      <span style={{ color:'#333', fontSize:'48px' }}>📦</span>
+                    )}
+                    {/* Arrow nav */}
+                    {(selectedProduct.images?.length || 0) > 1 && (
+                      <>
+                        <button onClick={() => setModalImageIdx(i => i > 0 ? i - 1 : (selectedProduct.images?.length || 1) - 1)}
+                          style={{ position:'absolute', left:4, top:'50%', transform:'translateY(-50%)', width:28, height:28, borderRadius:'999px', border:'none', background:'rgba(0,0,0,0.6)', color:'#fff', fontSize:'14px', cursor:'pointer' }}>‹</button>
+                        <button onClick={() => setModalImageIdx(i => i < (selectedProduct.images?.length || 1) - 1 ? i + 1 : 0)}
+                          style={{ position:'absolute', right:4, top:'50%', transform:'translateY(-50%)', width:28, height:28, borderRadius:'999px', border:'none', background:'rgba(0,0,0,0.6)', color:'#fff', fontSize:'14px', cursor:'pointer' }}>›</button>
+                      </>
+                    )}
+                  </div>
+                  {/* Thumbnails */}
+                  {(selectedProduct.images?.length || 0) > 1 && (
+                    <div style={{ display:'flex', gap:'5px', flexWrap:'wrap', justifyContent:'center' }}>
+                      {(selectedProduct.images || []).map((img, idx) => (
+                        <div key={idx} onClick={() => setModalImageIdx(idx)}
+                          style={{ width:40, height:40, borderRadius:'8px', border: idx === modalImageIdx ? '2px solid #7c3aed' : '1px solid #222', background:'#0a0a0a', cursor:'pointer', overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center', opacity: idx === modalImageIdx ? 1 : 0.5, transition:'opacity 0.15s' }}>
+                          <img src={img} alt="" style={{ maxWidth:'100%', maxHeight:'100%', objectFit:'contain' }}
+                            onError={e => { (e.target as HTMLImageElement).style.display='none'; }} />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <p style={{ fontSize:'9px', color:'#555', textAlign:'center', margin:'8px 0 0' }}>
+                    {modalImageIdx + 1} / {selectedProduct.images?.length || (selectedProduct.image ? 1 : 0)} images
+                  </p>
+
+                  {/* Actions */}
+                  <div style={{ display:'flex', gap:'6px', marginTop:'14px' }}>
+                    {selectedProduct.asin && (
+                      <a href={`https://www.amazon.com/dp/${selectedProduct.asin}`} target="_blank" rel="noopener noreferrer"
+                        style={{ flex:1, padding:'8px', borderRadius:'8px', background:'#1a1a2e', border:'1px solid #333', color:'#06b6d4', fontSize:'10px', fontWeight:600, textAlign:'center', textDecoration:'none' }}>
+                        View on Amazon →
+                      </a>
+                    )}
+                  </div>
+                </div>
+
+                {/* RIGHT — Details */}
+                <div style={{ flex:1, minWidth:280, padding:'20px' }}>
+                  {/* Title */}
+                  <div style={{ marginBottom:'14px' }}>
+                    <p style={{ fontSize:'8px', color:'#555', textTransform:'uppercase', letterSpacing:'1px', margin:'0 0 4px' }}>Title</p>
+                    <p style={{ fontSize:'13px', color:'#fff', fontWeight:600, margin:0, lineHeight:'1.4' }}>{selectedProduct.title || 'Untitled'}</p>
+                  </div>
+
+                  {/* Info grid */}
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px', marginBottom:'16px' }}>
+                    <div>
+                      <p style={{ fontSize:'8px', color:'#555', textTransform:'uppercase', letterSpacing:'1px', margin:'0 0 3px' }}>ASIN</p>
+                      <p style={{ fontSize:'11px', color:'#06b6d4', fontWeight:600, margin:0, fontFamily:'monospace' }}>{selectedProduct.asin || '—'}</p>
+                    </div>
+                    <div>
+                      <p style={{ fontSize:'8px', color:'#555', textTransform:'uppercase', letterSpacing:'1px', margin:'0 0 3px' }}>Category</p>
+                      <p style={{ fontSize:'11px', color:'#ccc', margin:0 }}>{selectedProduct.category || '—'}</p>
+                    </div>
+                    <div>
+                      <p style={{ fontSize:'8px', color:'#555', textTransform:'uppercase', letterSpacing:'1px', margin:'0 0 3px' }}>Rating</p>
+                      <p style={{ fontSize:'11px', margin:0 }}>
+                        <span style={{ color:'#f59e0b' }}>{'★'.repeat(Math.round(selectedProduct.rating))}{'☆'.repeat(Math.max(0, 5 - Math.round(selectedProduct.rating)))}</span>
+                        <span style={{ color:'#888', marginLeft:'4px' }}>{selectedProduct.rating || 0}</span>
+                      </p>
+                    </div>
+                    <div>
+                      <p style={{ fontSize:'8px', color:'#555', textTransform:'uppercase', letterSpacing:'1px', margin:'0 0 3px' }}>Reviews</p>
+                      <p style={{ fontSize:'11px', color:'#ccc', fontWeight:600, margin:0 }}>{(selectedProduct.reviews || 0).toLocaleString()}</p>
+                    </div>
+                    <div>
+                      <p style={{ fontSize:'8px', color:'#555', textTransform:'uppercase', letterSpacing:'1px', margin:'0 0 3px' }}>BSR</p>
+                      <p style={{ fontSize:'11px', color:'#8b5cf6', fontWeight:600, margin:0 }}>{selectedProduct.bsr > 0 ? `#${selectedProduct.bsr.toLocaleString()}` : '—'}</p>
+                    </div>
+                    <div>
+                      <p style={{ fontSize:'8px', color:'#555', textTransform:'uppercase', letterSpacing:'1px', margin:'0 0 3px' }}>Vendor</p>
+                      <p style={{ fontSize:'11px', color:'#ccc', margin:0 }}>{selectedProduct.vendor || '—'}</p>
+                    </div>
+                  </div>
+
+                  {/* Pricing box */}
+                  <div style={{ background:'#0a0a0a', borderRadius:'12px', padding:'14px', border: selectedProduct.lowMargin ? '1px solid #f59e0b33' : '1px solid #1a1a2e', marginBottom:'16px' }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px' }}>
+                      <p style={{ fontSize:'8px', color:'#555', textTransform:'uppercase', letterSpacing:'1px', margin:0 }}>Pricing</p>
+                      {selectedProduct.lowMargin && (
+                        <span style={{ fontSize:'8px', color:'#f59e0b', background:'#f59e0b15', padding:'2px 8px', borderRadius:999, fontWeight:700, border:'1px solid #f59e0b33' }}>⚠️ LOW MARGIN &lt;30%</span>
+                      )}
+                    </div>
+                    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'10px' }}>
+                      <div>
+                        <p style={{ fontSize:'8px', color:'#555', margin:'0 0 2px' }}>Amazon Cost</p>
+                        <p style={{ fontSize:'16px', color:'#ccc', fontWeight:700, margin:0 }}>{selectedProduct.price > 0 ? `$${selectedProduct.price.toFixed(2)}` : '—'}</p>
+                      </div>
+                      <div>
+                        <p style={{ fontSize:'8px', color:'#555', margin:'0 0 2px' }}>Your Price</p>
+                        <p style={{ fontSize:'16px', color:'#06b6d4', fontWeight:700, margin:0 }}>{selectedProduct.sellPrice > 0 ? `$${selectedProduct.sellPrice.toFixed(2)}` : '—'}</p>
+                      </div>
+                      <div>
+                        <p style={{ fontSize:'8px', color:'#555', margin:'0 0 2px' }}>Market Price</p>
+                        <p style={{ fontSize:'16px', color:'#06b6d4', fontWeight:700, margin:0 }}>{selectedProduct.marketPrice > 0 ? `$${selectedProduct.marketPrice.toFixed(2)}` : '—'}</p>
+                      </div>
+                      <div>
+                        <p style={{ fontSize:'8px', color:'#555', margin:'0 0 2px' }}>Profit $</p>
+                        <p style={{ fontSize:'16px', color: selectedProduct.profit > 0 ? (selectedProduct.lowMargin ? '#f59e0b' : '#16a34a') : '#ef4444', fontWeight:700, margin:0 }}>
+                          {selectedProduct.profit > 0 ? `$${selectedProduct.profit.toFixed(2)}` : '—'}
+                        </p>
+                      </div>
+                      <div>
+                        <p style={{ fontSize:'8px', color:'#555', margin:'0 0 2px' }}>Profit %</p>
+                        <p style={{ fontSize:'16px', color: selectedProduct.profitPct > 0 ? (selectedProduct.lowMargin ? '#f59e0b' : '#16a34a') : '#ef4444', fontWeight:700, margin:0 }}>
+                          {selectedProduct.profitPct > 0 ? `${selectedProduct.profitPct.toFixed(1)}%` : '—'}
+                        </p>
+                      </div>
+                      <div>
+                        <p style={{ fontSize:'8px', color:'#555', margin:'0 0 2px' }}>Compare At</p>
+                        <p style={{ fontSize:'16px', color:'#888', fontWeight:700, margin:0 }}>{selectedProduct.compareAt > 0 ? `$${selectedProduct.compareAt.toFixed(2)}` : '—'}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Competitor Prices */}
+                  {selectedProduct.sellPrice > 0 && (
+                    <div style={{ background:'#0a0a0a', borderRadius:'12px', padding:'14px', border:'1px solid #f59e0b22', marginBottom:'16px' }}>
+                      <p style={{ fontSize:'8px', color:'#f59e0b', textTransform:'uppercase', letterSpacing:'1px', margin:'0 0 10px' }}>Competitor Prices</p>
+                      <div style={{ display:'flex', flexDirection:'column', gap:'8px' }}>
+                        {[
+                          { name: 'Amazon', price: selectedProduct.competitorPrices?.amazon, color: '#f59e0b', mult: '1.85×' },
+                          { name: 'Costco', price: selectedProduct.competitorPrices?.costco, color: '#ef4444', mult: '1.82×' },
+                          { name: 'eBay', price: selectedProduct.competitorPrices?.ebay, color: '#8b5cf6', mult: '1.90×' },
+                          { name: 'Sam\'s Club', price: selectedProduct.competitorPrices?.sams, color: '#06b6d4', mult: '1.80×' },
+                        ].map(c => (
+                          <div key={c.name} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'6px 10px', background:'#111', borderRadius:'8px', border:'1px solid #1a1a2e' }}>
+                            <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
+                              <span style={{ width:8, height:8, borderRadius:'999px', background: c.color }} />
+                              <span style={{ fontSize:'11px', color:'#ccc', fontWeight:500 }}>{c.name}</span>
+                              <span style={{ fontSize:'8px', color:'#444' }}>{c.mult}</span>
+                            </div>
+                            <div style={{ textAlign:'right' }}>
+                              <span style={{ fontSize:'13px', color: c.color, fontWeight:700 }}>{c.price ? `$${c.price.toFixed(2)}` : '—'}</span>
+                              {c.price > 0 && selectedProduct.sellPrice > 0 && (
+                                <span style={{ fontSize:'9px', color:'#555', marginLeft:'6px' }}>
+                                  Save {((1 - selectedProduct.sellPrice / c.price) * 100).toFixed(0)}%
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ marginTop:'8px', padding:'8px 10px', background:'#16a34a11', borderRadius:'8px', border:'1px solid #16a34a22', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                        <span style={{ fontSize:'11px', color:'#16a34a', fontWeight:700 }}>✓ Your Price (Best)</span>
+                        <span style={{ fontSize:'14px', color:'#16a34a', fontWeight:800 }}>${selectedProduct.sellPrice.toFixed(2)}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Shopify status */}
+                  <div style={{ background:'#0a0a0a', borderRadius:'12px', padding:'14px', border:'1px solid #1a1a2e', marginBottom:'16px' }}>
+                    <p style={{ fontSize:'8px', color:'#555', textTransform:'uppercase', letterSpacing:'1px', margin:'0 0 10px' }}>Shopify</p>
+                    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px' }}>
+                      <div>
+                        <p style={{ fontSize:'8px', color:'#555', margin:'0 0 2px' }}>Synced</p>
+                        <p style={{ fontSize:'12px', fontWeight:600, margin:0,
+                          color: selectedProduct.shopifyStatus === 'pushed' ? '#16a34a' : selectedProduct.shopifyStatus === 'failed' ? '#ef4444' : '#555'
+                        }}>{selectedProduct.shopifyStatus === 'pushed' ? 'Yes ✅' : selectedProduct.shopifyStatus === 'failed' ? 'Failed ❌' : 'No'}</p>
+                      </div>
+                      <div>
+                        <p style={{ fontSize:'8px', color:'#555', margin:'0 0 2px' }}>Stock</p>
+                        <p style={{ fontSize:'12px', fontWeight:600, margin:0,
+                          color: selectedProduct.stockStatus === 'In Stock' ? '#16a34a' : '#ef4444'
+                        }}>{selectedProduct.stockStatus}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Description */}
+                  {selectedProduct.description && (
+                    <div style={{ marginBottom:'16px' }}>
+                      <p style={{ fontSize:'8px', color:'#555', textTransform:'uppercase', letterSpacing:'1px', margin:'0 0 6px' }}>Description</p>
+                      <p style={{ fontSize:'10px', color:'#888', margin:0, lineHeight:'1.5' }}>{selectedProduct.description}</p>
+                    </div>
+                  )}
+
+                  {/* Timestamps */}
+                  <div style={{ marginBottom:'16px' }}>
+                    <p style={{ fontSize:'8px', color:'#555', textTransform:'uppercase', letterSpacing:'1px', margin:'0 0 6px' }}>Timestamps</p>
+                    <p style={{ fontSize:'10px', color:'#555', margin:0 }}>
+                      Last Checked: {selectedProduct.dateChecked || 'Never'}
+                    </p>
+                  </div>
+
+                  {/* Gate details */}
+                  <div>
+                    <p style={{ fontSize:'8px', color:'#555', textTransform:'uppercase', letterSpacing:'1px', margin:'0 0 6px' }}>Gate Status</p>
+                    <div style={{ display:'flex', gap:'6px', flexWrap:'wrap' }}>
+                      {Object.entries(selectedProduct.gates).map(([gate, status]) => (
+                        <span key={gate} style={{ padding:'3px 8px', borderRadius:'6px', fontSize:'9px', fontWeight:600,
+                          background: status === 'pass' ? 'rgba(22,163,74,0.1)' : status === 'warn' ? 'rgba(245,158,11,0.1)' : 'rgba(239,68,68,0.1)',
+                          color: status === 'pass' ? '#16a34a' : status === 'warn' ? '#f59e0b' : '#ef4444',
+                          border: `1px solid ${status === 'pass' ? '#16a34a22' : status === 'warn' ? '#f59e0b22' : '#ef444422'}`,
+                        }}>{status === 'pass' ? '✅' : status === 'warn' ? '⚠️' : '❌'} {gate}</span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
