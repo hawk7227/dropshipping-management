@@ -823,26 +823,8 @@ export default function CommandCenter() {
       }
 
       if (changed) {
-        // Re-run gates after fixes
-        const g = { ...p.gates };
-        // Re-check affected gates
-        if (p.title && p.title.length <= 150 && p.title.length > 5) g.titleLength = 'pass' as GateStatus;
-        if (p.description && p.description.length >= 50 && !/<[a-z][^>]*>/i.test(p.description)) g.descClean = 'pass' as GateStatus;
-        if (p.googleCategory && p.googleCategory.length > 5) g.googleCategory = 'pass' as GateStatus;
-        // Recalculate feed score
-        let feedScore = 0;
-        if (g.titleLength === 'pass') feedScore += 20;
-        if (g.descClean === 'pass') feedScore += 15;
-        if (g.image !== 'fail') feedScore += 15;
-        if (g.price === 'pass') feedScore += 15;
-        if (g.barcode === 'pass') feedScore += 15;
-        if (g.googleCategory === 'pass') feedScore += 10;
-        if (p.vendor && p.vendor !== 'Unknown') feedScore += 5;
-        feedScore += 5; // Free shipping
-        p.gates = g;
-        p.gateCount = Object.values(g).filter(v => v === 'pass').length;
-        p.feedScore = feedScore;
-        updated[i] = p;
+        // Re-run the FULL gate evaluation (not manual patches)
+        updated[i] = runGates(p);
       }
 
       if (i % 100 === 0) setAutoFixProgress({ done: i, total, fixed: { ...fixed } });
