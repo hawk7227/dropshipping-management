@@ -197,12 +197,12 @@ export function Navigation({ children }: { children: React.ReactNode }) {
 
       {/* Sidebar */}
       <aside
-        className={`fixed top-0 left-0 z-50 h-full w-64 bg-white border-r border-gray-200 transform transition-transform duration-200 ease-in-out lg:translate-x-0 ${
+        className={`fixed top-0 left-0 z-50 h-full w-64 bg-white border-r border-gray-200 transform transition-transform duration-200 ease-in-out lg:translate-x-0 flex flex-col ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
         {/* Logo */}
-        <div className="h-16 flex items-center px-6 border-b border-gray-200">
+        <div className="h-16 flex items-center px-6 border-b border-gray-200 flex-shrink-0">
           <Link href="/dashboard" className="flex items-center gap-2">
             <div className="w-8 h-8 bg-gray-900 rounded-lg flex items-center justify-center">
               <span className="text-white font-bold text-sm">DS</span>
@@ -211,8 +211,8 @@ export function Navigation({ children }: { children: React.ReactNode }) {
           </Link>
         </div>
 
-        {/* Navigation */}
-        <nav className="p-4 space-y-1">
+        {/* Navigation — scrollable, takes remaining space */}
+        <nav className="p-4 space-y-1 flex-1 overflow-y-auto">
           {NAV_ITEMS.map(item => {
             const isActive = pathname === item.href || (item.href !== '/dashboard' && pathname?.startsWith(item.href));
             return (
@@ -233,8 +233,8 @@ export function Navigation({ children }: { children: React.ReactNode }) {
           })}
         </nav>
 
-        {/* Bottom section */}
-        <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-gray-200">
+        {/* Bottom section — fixed at bottom, never overlaps */}
+        <div className="p-4 border-t border-gray-200 flex-shrink-0">
           <div className="flex items-center gap-3 mb-3">
             <div className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center">
               <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
