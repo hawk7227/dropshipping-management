@@ -544,6 +544,73 @@ function SpreadsheetView({ products, onUpdate, perPage = 50, onToggleSelect, onS
 }
 
 // ═══════════════════════════════════════════════════════════
+// COMPLIANCE GATE CARD — expandable dropdown with full Google requirements
+// ═══════════════════════════════════════════════════════════
+function ComplianceGateCard({ icon, gate, category, severity, desc, details, rules, disapproval, fix }: {
+  icon: string; gate: string; category: string; severity: string; desc: string;
+  details: string; rules: string[]; disapproval: string; fix: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const isGoogle = category === 'google';
+  const borderColor = isGoogle ? '#3b82f622' : '#16a34a22';
+  const accentColor = isGoogle ? '#3b82f6' : '#16a34a';
+  const sevColor = severity.includes('Critical') ? '#ef4444' : severity.includes('Major') ? '#f59e0b' : '#06b6d4';
+
+  return (
+    <div style={{ background:'#0a0a0a', borderRadius:'8px', border: `1px solid ${open ? accentColor + '44' : '#1a1a2e'}`, overflow:'hidden', transition:'border-color 0.15s' }}>
+      {/* Header — always visible */}
+      <button onClick={() => setOpen(!open)} style={{ width:'100%', display:'flex', alignItems:'flex-start', gap:'8px', padding:'10px 12px', border:'none', background:'transparent', cursor:'pointer', textAlign:'left' }}>
+        <span style={{ fontSize:'14px', flexShrink:0, marginTop:'1px' }}>{icon}</span>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'6px', marginBottom:'2px' }}>
+            <span style={{ fontSize:'11px', color: accentColor, fontWeight:700 }}>{gate}</span>
+            <span style={{ fontSize:'7px', padding:'1px 5px', borderRadius:'3px', background: sevColor + '15', color: sevColor, fontWeight:600, textTransform:'uppercase', letterSpacing:'0.3px' }}>{severity}</span>
+          </div>
+          <p style={{ fontSize:'9px', color:'#666', margin:0, lineHeight:'1.4' }}>{desc}</p>
+        </div>
+        <span style={{ fontSize:'10px', color:'#333', flexShrink:0, transform: open ? 'rotate(180deg)' : 'rotate(0)', transition:'transform 0.15s' }}>▼</span>
+      </button>
+
+      {/* Dropdown — full compliance details */}
+      {open && (
+        <div style={{ padding:'0 12px 12px', borderTop:'1px solid #1a1a2e' }}>
+          {/* What Google checks */}
+          <div style={{ marginTop:'10px', marginBottom:'10px' }}>
+            <p style={{ fontSize:'8px', color: accentColor, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.5px', margin:'0 0 4px' }}>What Google Checks</p>
+            <p style={{ fontSize:'9px', color:'#888', margin:0, lineHeight:'1.5' }}>{details}</p>
+          </div>
+
+          {/* Rules */}
+          <div style={{ marginBottom:'10px' }}>
+            <p style={{ fontSize:'8px', color:'#06b6d4', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.5px', margin:'0 0 6px' }}>Requirements</p>
+            <div style={{ display:'flex', flexDirection:'column', gap:'3px' }}>
+              {rules.map((rule, i) => (
+                <div key={i} style={{ display:'flex', gap:'6px', alignItems:'flex-start' }}>
+                  <span style={{ fontSize:'8px', color:'#333', marginTop:'2px', flexShrink:0 }}>•</span>
+                  <span style={{ fontSize:'9px', color:'#999', lineHeight:'1.4' }}>{rule}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Disapproval Risk */}
+          <div style={{ marginBottom:'10px', padding:'8px', background: sevColor + '08', borderRadius:'6px', border: `1px solid ${sevColor}15` }}>
+            <p style={{ fontSize:'8px', color: sevColor, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.5px', margin:'0 0 3px' }}>Disapproval Risk</p>
+            <p style={{ fontSize:'9px', color:'#999', margin:0, lineHeight:'1.4' }}>{disapproval}</p>
+          </div>
+
+          {/* How to Fix */}
+          <div style={{ padding:'8px', background:'#16a34a08', borderRadius:'6px', border:'1px solid #16a34a15' }}>
+            <p style={{ fontSize:'8px', color:'#16a34a', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.5px', margin:'0 0 3px' }}>How to Fix</p>
+            <p style={{ fontSize:'9px', color:'#999', margin:0, lineHeight:'1.4' }}>{fix}</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
 // XLSX EXPORT + DOWNLOAD
 // ═══════════════════════════════════════════════════════════
 async function exportAndDownload(products: CleanProduct[], filename: string) {
@@ -1229,27 +1296,65 @@ export default function CommandCenter() {
               </div>
             </div>
 
-            {/* The 5 Gates */}
+            {/* The 10 Gates — with compliance dropdown */}
             <div style={{ background:'#111', borderRadius:'10px', padding:'16px', border:'1px solid #1a1a2e', marginBottom:'24px' }}>
-              <p style={{ fontSize:'10px', color:'#fff', fontWeight:700, margin:'0 0 10px', textTransform:'uppercase', letterSpacing:'1px' }}>10-Gate Listing Requirements</p>
-              <p style={{ fontSize:'10px', color:'#555', margin:'0 0 12px' }}>Every product must pass all 10 gates before it can be listed on any platform. No exceptions.</p>
-              <div style={{ display:'flex', flexWrap:'wrap', gap:'10px' }}>
+              <p style={{ fontSize:'10px', color:'#fff', fontWeight:700, margin:'0 0 4px', textTransform:'uppercase', letterSpacing:'1px' }}>10-Gate Google Merchant Compliance System</p>
+              <p style={{ fontSize:'10px', color:'#555', margin:'0 0 12px' }}>Every product must pass all 10 gates before Google Merchant Center will approve it. Click any gate to see full compliance details.</p>
+              
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px' }}>
                 {[
-                  { icon:'✅', gate:'Title', desc:'Min 6 chars, no HTML, not generic', required:true },
-                  { icon:'✅', gate:'Image', desc:'Minimum 3 images (1-2 = warning, 0 = fail)', required:true },
-                  { icon:'✅', gate:'Price', desc:'Greater than $0, within criteria range', required:true },
-                  { icon:'✅', gate:'ASIN/SKU', desc:'Valid Amazon ASIN (B0XXXXXXXXX format)', required:true },
-                  { icon:'✅', gate:'Description', desc:'Min 30 chars, cleaned of HTML/boilerplate', required:true },
-                  { icon:'🔵', gate:'Google Category', desc:'Google Product Category taxonomy path assigned', required:true },
-                  { icon:'🔵', gate:'Title Length', desc:'≤150 chars, no promo text, no ALL CAPS', required:true },
-                  { icon:'🔵', gate:'Desc Clean', desc:'No HTML, no Amazon meta tags, no boilerplate', required:true },
-                  { icon:'🔵', gate:'Barcode/GTIN', desc:'Valid 8/12/13/14 digit GTIN with checksum', required:true },
-                  { icon:'🔵', gate:'Identifier', desc:'GTIN+Brand or Brand+MPN for Google visibility', required:true },
+                  { icon:'✅', gate:'Title', category:'core', severity:'Critical — Disapproval', desc:'Product title exists, is descriptive, and contains no HTML.',
+                    details:'Google requires every product to have a title. Titles must accurately describe the product without promotional language. HTML tags cause immediate disapproval.',
+                    rules:['Min 6 characters, max 150 characters','No HTML tags (<b>, <br>, etc.)','Must not be a generic placeholder like "Unknown Product"','Should include the product type (what it IS)'],
+                    disapproval:'Products without a title are rejected. Products with HTML in titles are disapproved.',
+                    fix:'Use formula: Brand + Product Type + Key Feature + Size/Color' },
+                  { icon:'✅', gate:'Image', category:'core', severity:'Critical — Disapproval', desc:'Product has at least 1 image. 3+ images for full pass.',
+                    details:'Google requires a main product image. Images must be real product photos on clean backgrounds. No watermarks, no promotional text overlays, no placeholder images.',
+                    rules:['Minimum 1 image URL (https://)','3+ images = full pass, 1-2 = warning','Minimum 800×800px resolution','No text overlays, watermarks, or promotional badges','No placeholder/stock images'],
+                    disapproval:'Products without images are rejected. Products with promotional overlays may be disapproved.',
+                    fix:'Use the main product photo from Amazon. Ensure minimum 800×800px resolution.' },
+                  { icon:'✅', gate:'Price', category:'core', severity:'Critical — Disapproval', desc:'Product has a price greater than $0.',
+                    details:'Google requires an accurate price that EXACTLY matches what the customer sees on your landing page. Even a $0.01 mismatch causes disapproval.',
+                    rules:['Price must be > $0','Must match the price on your Shopify product page exactly','Currency must be specified (USD)','Tax should NOT be included in the price (US/Canada)'],
+                    disapproval:'Price mismatch between feed and landing page is the #1 cause of disapproval. Products with no price are rejected.',
+                    fix:'Ensure your feed pulls from the same Shopify price field that displays on the product page.' },
+                  { icon:'✅', gate:'ASIN/SKU', category:'core', severity:'Major — Reduced visibility', desc:'Valid Amazon ASIN (B0XXXXXXXXX format).',
+                    details:'ASIN serves as your Manufacturer Part Number (MPN) for Google. Combined with the brand, it helps Google identify your product in their catalog.',
+                    rules:['Must be B followed by exactly 9 alphanumeric characters','Used as MPN (Manufacturer Part Number) in Google feed','Combined with brand name for product identification'],
+                    disapproval:'Missing ASIN does not cause disapproval but significantly reduces product visibility and search matching.',
+                    fix:'Extract ASIN from the Amazon product page URL (/dp/B0XXXXXXXXX).' },
+                  { icon:'✅', gate:'Description', category:'core', severity:'Major — Reduced visibility', desc:'Minimum 30 characters, cleaned of HTML/boilerplate.',
+                    details:'Google uses descriptions for search matching. Descriptions must be plain text — no HTML, no Amazon boilerplate, no promotional language.',
+                    rules:['Minimum 30 chars (150+ recommended)','Maximum 5,000 characters','No HTML tags','No promotional text (same banned words as titles)','First sentence should contain the primary product keyword'],
+                    disapproval:'Empty descriptions cause disapproval. Short descriptions reduce visibility.',
+                    fix:'Write a factual description: what it is, key features, materials, dimensions, who it is for.' },
+                  { icon:'🔵', gate:'Google Category', category:'google', severity:'Major — Poor matching', desc:'Google Product Category taxonomy path assigned.',
+                    details:'Google uses this to match your product to search queries. Without it, Google guesses — and often guesses wrong. The more specific your category, the better your placement.',
+                    rules:['Must use Google\'s official taxonomy','Use the MOST SPECIFIC path available','Example: "Health & Beauty > Personal Care > Cosmetics > Makeup > Lip Glosses"','NOT just "Health & Beauty"','Auto-mapped from your product tags when possible'],
+                    disapproval:'Missing category does not cause disapproval but severely limits where your product appears. Google may place it in the wrong category entirely.',
+                    fix:'The Feed Bot auto-maps from tags. For unmapped products, assign manually using Google\'s taxonomy.' },
+                  { icon:'🔵', gate:'Title Length', category:'google', severity:'Major — Truncation', desc:'≤150 characters, no promo text, no ALL CAPS.',
+                    details:'Google truncates titles at 150 characters. Everything after is invisible. Promotional text (best, sale, free shipping) is flagged. ALL CAPS is treated as spam.',
+                    rules:['Maximum 150 characters (hard limit)','No promotional words: best, cheap, sale, discount, free shipping, #1, buy now, limited time, hot deal, clearance, lowest price','No ALL CAPS words (Title Case only)','No exclamation marks','Front-load the most important search keyword'],
+                    disapproval:'Titles with promotional text may be disapproved. Titles over 150 chars are truncated (not disapproved but lose keywords). ALL CAPS titles are flagged as spam.',
+                    fix:'Use title formula: Brand + Product Type + Key Feature + Size. Keep under 150 chars.' },
+                  { icon:'🔵', gate:'Desc Clean', category:'google', severity:'Critical — Disapproval', desc:'No HTML, no Amazon <meta> tags, no boilerplate.',
+                    details:'Descriptions imported from Amazon often contain raw HTML, <meta> viewport tags, <script> tags, and Amazon-specific boilerplate. Google rejects all of this.',
+                    rules:['No HTML tags of any kind','No <meta> or <script> tags (common in Amazon imports)','No "charset=" declarations','No Amazon boilerplate ("About Us", "Shipping", "Returns", etc.)','Must be plain, factual text only'],
+                    disapproval:'HTML in descriptions causes disapproval. Meta tags cause disapproval. This is the most common issue with Amazon-sourced products.',
+                    fix:'The pipeline auto-strips HTML and Amazon junk. If it still fails, rewrite the description from scratch.' },
+                  { icon:'🔵', gate:'Barcode/GTIN', category:'google', severity:'Major — 20-40% less clicks', desc:'Valid 8/12/13/14 digit GTIN with checksum.',
+                    details:'Products WITH valid GTINs get 20-40% more clicks than products without. Google uses GTINs to match your product to their global product catalog. This is your biggest competitive advantage — most dropshippers don\'t have GTINs.',
+                    rules:['Must be exactly 8, 12, 13, or 14 digits (numeric only)','Must pass GS1 checksum validation','Prefix must NOT start with 2, 02, or 04 (reserved by GS1)','Must be the REAL barcode from the manufacturer','Never make up or guess a GTIN — Google validates against GS1 database'],
+                    disapproval:'Invalid GTIN causes disapproval. Missing GTIN shows "Limited performance due to missing identifiers" warning. Products with valid GTINs get 20-40% more clicks.',
+                    fix:'Use the barcode from the product packaging or Amazon listing. Your Matrixify export has barcodes in the "Variant Barcode" column.' },
+                  { icon:'🔵', gate:'Identifier', category:'google', severity:'Critical — Limited visibility', desc:'GTIN + Brand, or Brand + MPN (ASIN) required.',
+                    details:'Google requires product identifiers to catalog your product. The strongest combo is GTIN + Brand. Fallback is Brand + MPN (your ASIN). Without identifiers, Google can\'t match your product to searches.',
+                    rules:['Best: Valid GTIN + Brand name (vendor) → full visibility','Good: ASIN (as MPN) + Brand name → decent visibility','Weak: Brand only, no GTIN or MPN → limited visibility','Fail: No brand, no GTIN, no MPN → product may not appear at all','Brand must be the REAL brand name, not "Unknown" or your store name'],
+                    disapproval:'Missing identifiers shows "Limited performance" warning. Products without any identifiers may not appear in Shopping results at all.',
+                    fix:'Ensure the vendor/brand field is set to the real manufacturer name. Add barcode/GTIN from the product packaging.' },
                 ].map(g => (
-                  <div key={g.gate} style={{ flex:'1 1 160px', background:'#0a0a0a', borderRadius:'6px', padding:'10px', border:'1px solid #1a1a2e' }}>
-                    <p style={{ fontSize:'11px', color:'#16a34a', fontWeight:700, margin:'0 0 4px' }}>{g.icon} {g.gate}</p>
-                    <p style={{ fontSize:'9px', color:'#555', margin:0 }}>{g.desc}</p>
-                  </div>
+                  <ComplianceGateCard key={g.gate} {...g} />
                 ))}
               </div>
             </div>
@@ -1865,6 +1970,43 @@ export default function CommandCenter() {
                     </div>
                   </div>
 
+                  {/* Google Merchant Fields */}
+                  <div style={{ background:'#0a0a0a', borderRadius:'12px', padding:'14px', border:'1px solid #3b82f622', marginBottom:'16px' }}>
+                    <p style={{ fontSize:'8px', color:'#3b82f6', textTransform:'uppercase', letterSpacing:'1px', margin:'0 0 10px', fontWeight:700 }}>Google Merchant Center</p>
+                    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px' }}>
+                      <div>
+                        <p style={{ fontSize:'8px', color:'#555', margin:'0 0 2px' }}>Barcode / GTIN</p>
+                        <p style={{ fontSize:'11px', color: selectedProduct.barcode ? '#06b6d4' : '#ef4444', fontWeight:600, margin:0, fontFamily:'monospace' }}>
+                          {selectedProduct.barcode || '❌ Missing'}
+                        </p>
+                      </div>
+                      <div>
+                        <p style={{ fontSize:'8px', color:'#555', margin:'0 0 2px' }}>Feed Score</p>
+                        <p style={{ fontSize:'16px', fontWeight:800, margin:0,
+                          color: (selectedProduct.feedScore || 0) >= 80 ? '#16a34a' : (selectedProduct.feedScore || 0) >= 50 ? '#f59e0b' : '#ef4444'
+                        }}>{selectedProduct.feedScore || 0}<span style={{ fontSize:'10px', color:'#555' }}>/100</span></p>
+                      </div>
+                      <div style={{ gridColumn:'span 2' }}>
+                        <p style={{ fontSize:'8px', color:'#555', margin:'0 0 2px' }}>Google Product Category</p>
+                        <p style={{ fontSize:'10px', color: selectedProduct.googleCategory ? '#16a34a' : '#ef4444', margin:0, lineHeight:'1.3' }}>
+                          {selectedProduct.googleCategory || '❌ Not assigned — Feed Bot can auto-map this'}
+                        </p>
+                      </div>
+                      {selectedProduct.handle && (
+                        <div>
+                          <p style={{ fontSize:'8px', color:'#555', margin:'0 0 2px' }}>Handle</p>
+                          <p style={{ fontSize:'10px', color:'#888', margin:0, fontFamily:'monospace' }}>{selectedProduct.handle}</p>
+                        </div>
+                      )}
+                      {selectedProduct.weight && (
+                        <div>
+                          <p style={{ fontSize:'8px', color:'#555', margin:'0 0 2px' }}>Weight</p>
+                          <p style={{ fontSize:'10px', color:'#888', margin:0 }}>{selectedProduct.weight}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
                   {/* Pricing box */}
                   <div style={{ background:'#0a0a0a', borderRadius:'12px', padding:'14px', border: selectedProduct.lowMargin ? '1px solid #f59e0b33' : '1px solid #1a1a2e', marginBottom:'16px' }}>
                     <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px' }}>
@@ -1975,17 +2117,54 @@ export default function CommandCenter() {
                     </p>
                   </div>
 
-                  {/* Gate details */}
+                  {/* Google Feed Health — full compliance breakdown */}
                   <div>
-                    <p style={{ fontSize:'8px', color:'#555', textTransform:'uppercase', letterSpacing:'1px', margin:'0 0 6px' }}>Gate Status</p>
-                    <div style={{ display:'flex', gap:'6px', flexWrap:'wrap' }}>
-                      {Object.entries(selectedProduct.gates).map(([gate, status]) => (
-                        <span key={gate} style={{ padding:'3px 8px', borderRadius:'6px', fontSize:'9px', fontWeight:600,
-                          background: status === 'pass' ? 'rgba(22,163,74,0.1)' : status === 'warn' ? 'rgba(245,158,11,0.1)' : 'rgba(239,68,68,0.1)',
-                          color: status === 'pass' ? '#16a34a' : status === 'warn' ? '#f59e0b' : '#ef4444',
-                          border: `1px solid ${status === 'pass' ? '#16a34a22' : status === 'warn' ? '#f59e0b22' : '#ef444422'}`,
-                        }}>{status === 'pass' ? '✅' : status === 'warn' ? '⚠️' : '❌'} {gate}</span>
-                      ))}
+                    <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'8px' }}>
+                      <p style={{ fontSize:'8px', color:'#3b82f6', textTransform:'uppercase', letterSpacing:'1px', margin:0, fontWeight:700 }}>Google Feed Health</p>
+                      <div style={{ display:'flex', alignItems:'center', gap:'6px' }}>
+                        <span style={{ fontSize:'18px', fontWeight:800, color: (selectedProduct.feedScore || 0) >= 80 ? '#16a34a' : (selectedProduct.feedScore || 0) >= 50 ? '#f59e0b' : '#ef4444' }}>
+                          {selectedProduct.feedScore || 0}
+                        </span>
+                        <span style={{ fontSize:'9px', color:'#555' }}>/100</span>
+                      </div>
+                    </div>
+
+                    {/* Gate results with expandable details */}
+                    <div style={{ display:'flex', flexDirection:'column', gap:'4px' }}>
+                      {Object.entries(selectedProduct.gates).map(([gate, status]) => {
+                        const gateInfo: Record<string, { label: string; fix: string; severity: string }> = {
+                          title: { label: 'Product Title', fix: 'Add a descriptive title with brand + product type', severity: 'Critical' },
+                          image: { label: 'Product Images', fix: 'Add at least 1 product image (3+ recommended)', severity: 'Critical' },
+                          price: { label: 'Product Price', fix: 'Set a price > $0 that matches your Shopify page', severity: 'Critical' },
+                          asin: { label: 'ASIN / MPN', fix: 'Add the Amazon ASIN (B0XXXXXXXXX format)', severity: 'Major' },
+                          description: { label: 'Description', fix: 'Add a 150+ char description with key product details', severity: 'Major' },
+                          googleCategory: { label: 'Google Category', fix: 'Assign a Google Product Category taxonomy path', severity: 'Major' },
+                          titleLength: { label: 'Title Compliance', fix: 'Trim title to ≤150 chars, remove promo text', severity: 'Major' },
+                          descClean: { label: 'Description Quality', fix: 'Strip HTML, remove Amazon meta tags and boilerplate', severity: 'Critical' },
+                          barcode: { label: 'GTIN / Barcode', fix: 'Add valid barcode from product packaging (20-40% more clicks)', severity: 'Major' },
+                          identifier: { label: 'Product Identifier', fix: 'Need GTIN+Brand or Brand+ASIN for Google visibility', severity: 'Critical' },
+                        };
+                        const info = gateInfo[gate] || { label: gate, fix: '', severity: 'Info' };
+                        const statusColor = status === 'pass' ? '#16a34a' : status === 'warn' ? '#f59e0b' : '#ef4444';
+                        const statusBg = status === 'pass' ? 'rgba(22,163,74,0.06)' : status === 'warn' ? 'rgba(245,158,11,0.06)' : 'rgba(239,68,68,0.06)';
+                        const statusIcon = status === 'pass' ? '✅' : status === 'warn' ? '⚠️' : '❌';
+
+                        return (
+                          <div key={gate} style={{ background: statusBg, borderRadius:'6px', padding:'6px 8px', border:`1px solid ${statusColor}15` }}>
+                            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                              <div style={{ display:'flex', alignItems:'center', gap:'6px' }}>
+                                <span style={{ fontSize:'10px' }}>{statusIcon}</span>
+                                <span style={{ fontSize:'9px', fontWeight:600, color: statusColor }}>{info.label}</span>
+                                <span style={{ fontSize:'7px', padding:'1px 4px', borderRadius:'3px', background:'#ffffff08', color:'#555' }}>{info.severity}</span>
+                              </div>
+                              <span style={{ fontSize:'8px', fontWeight:700, color: statusColor, textTransform:'uppercase' }}>{status}</span>
+                            </div>
+                            {status !== 'pass' && info.fix && (
+                              <p style={{ fontSize:'8px', color:'#666', margin:'3px 0 0 16px', lineHeight:'1.3' }}>💡 {info.fix}</p>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 </div>
