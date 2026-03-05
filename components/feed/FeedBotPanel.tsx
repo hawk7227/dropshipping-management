@@ -35,6 +35,10 @@ interface FeedBotPanelProps {
   productContext?: Record<string, unknown> | null;
   /** Optional: callback when bot suggests a product fix */
   onProductUpdate?: (productId: string, updates: Record<string, unknown>) => void;
+  /** Optional: auto-send this prompt when the panel opens (from "Fix with AI" buttons) */
+  initialPrompt?: string | null;
+  /** Optional: callback to close the panel */
+  onClose?: () => void;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -53,12 +57,13 @@ const QUICK_ACTIONS = [
 // COMPONENT
 // ═══════════════════════════════════════════════════════════
 
-export default function FeedBotPanel({ productContext, onProductUpdate }: FeedBotPanelProps) {
+export default function FeedBotPanel({ productContext, onProductUpdate, initialPrompt, onClose }: FeedBotPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingTools, setPendingTools] = useState<ToolCall[]>([]);
+  const [autoSent, setAutoSent] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -68,6 +73,16 @@ export default function FeedBotPanel({ productContext, onProductUpdate }: FeedBo
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages, loading]);
+
+  // Auto-send initialPrompt when it changes (from "Fix with AI" buttons)
+  useEffect(() => {
+    if (initialPrompt && initialPrompt !== autoSent && !loading) {
+      setAutoSent(initialPrompt);
+      // Small delay to let the panel render first
+      const timer = setTimeout(() => { sendMessage(initialPrompt); }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [initialPrompt]);
 
   // Send message to Feed Bot API
   const sendMessage = useCallback(async (text: string) => {
@@ -165,6 +180,9 @@ export default function FeedBotPanel({ productContext, onProductUpdate }: FeedBo
           </div>
         </div>
         <span className="px-2 py-0.5 text-[9px] font-medium bg-blue-100 text-blue-700 rounded-full">LIVE</span>
+        {onClose && (
+          <button onClick={onClose} className="w-6 h-6 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors text-sm">✕</button>
+        )}
       </div>
 
       {/* Quick Actions (shown when no messages) */}

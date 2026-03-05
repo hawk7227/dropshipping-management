@@ -10,6 +10,7 @@ import { MARKUP } from '@/lib/contracts/constants';
 import { runAllGates } from '@/lib/gates';
 import GateBadge from '@/components/feed/GateBadge';
 import FeedScoreBadge from '@/components/feed/FeedScoreBadge';
+import FeedBotPanel from '@/components/feed/FeedBotPanel';
 
 // ═══════════════════════════════════════════════════════════
 // TYPES
@@ -666,6 +667,10 @@ export default function CommandCenter() {
   const [pushing, setPushing] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<CleanProduct | null>(null);
   const [modalImageIdx, setModalImageIdx] = useState(0);
+  // Feed Bot state — AI agent for real-time fix suggestions
+  const [botOpen, setBotOpen] = useState(false);
+  const [botPrompt, setBotPrompt] = useState<string | null>(null);
+  const [botContext, setBotContext] = useState<Record<string, unknown> | null>(null);
   const [pushProgress, setPushProgress] = useState({ done: 0, total: 0, pushed: 0, errors: 0, lastError: '' });
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -684,6 +689,36 @@ export default function CommandCenter() {
   }, [analysis]);
 
   const selectedCount = analysis?.products.filter(p => p.selected).length || 0;
+
+  // Open Feed Bot with targeted prompt for a specific product + gate
+  const askAI = useCallback((product: CleanProduct, gateName?: string, gateStatus?: string) => {
+    const context = {
+      title: product.title, asin: product.asin, vendor: product.vendor,
+      category: product.category, tags: product.tags, barcode: product.barcode,
+      googleCategory: product.googleCategory, description: product.description?.substring(0, 300),
+      price: product.price, sellPrice: product.sellPrice, feedScore: product.feedScore,
+      gateCount: product.gateCount, gates: product.gates,
+    };
+    setBotContext(context);
+    if (gateName && gateStatus !== 'pass') {
+      const prompts: Record<string, string> = {
+        title: `Fix the title for "${product.title.substring(0, 50)}...". Current title is ${product.title.length} chars. Rewrite it using the best Google Shopping formula. Show the optimized title with character count.`,
+        image: `Product "${product.title.substring(0, 50)}..." has ${product.images?.length || 0} images. What are the Google image requirements and how can I get more images for this product?`,
+        price: `Product "${product.title.substring(0, 50)}..." has price $${product.price}. Verify this will match the Shopify landing page price. What price-related disapprovals should I watch for?`,
+        asin: `Product "${product.title.substring(0, 50)}..." has ASIN "${product.asin || 'MISSING'}". ${product.asin ? 'Verify this ASIN format.' : 'How do I find the ASIN for this product?'}`,
+        description: `Rewrite the description for "${product.title.substring(0, 50)}..." to be Google Shopping compliant. Current description is ${product.description?.length || 0} chars. Make it clean, factual, keyword-rich, and 150-300 words.`,
+        googleCategory: `Assign the most specific Google Product Category for: "${product.title}". Tags: ${product.tags?.substring(0, 100) || 'none'}. Brand: ${product.vendor}. Current category: ${product.category || 'none'}. Show the full taxonomy path.`,
+        titleLength: `The title "${product.title}" is ${product.title.length} chars (max 150). Rewrite it under 150 chars using formula: Brand + Product Type + Key Feature + Size. Show the character count.`,
+        descClean: `Clean the description for "${product.title.substring(0, 50)}...". Current description contains ${/<[a-z]/i.test(product.description || '') ? 'HTML tags' : 'possible boilerplate'}. Strip all HTML, remove Amazon junk, and rewrite as clean factual text.`,
+        barcode: `Product "${product.title.substring(0, 50)}..." has barcode "${product.barcode || 'MISSING'}". ${product.barcode ? `Validate this GTIN. Is it a valid ${product.barcode.length}-digit code?` : 'This product has no barcode. Where can I find the GTIN? Products with GTINs get 20-40% more clicks.'}`,
+        identifier: `Product "${product.title.substring(0, 50)}..." — Brand: "${product.vendor}", ASIN: "${product.asin || 'none'}", Barcode: "${product.barcode || 'none'}". Does this product have sufficient identifiers for Google Shopping? What's missing?`,
+      };
+      setBotPrompt(prompts[gateName] || `Analyze the "${gateName}" gate failure for product "${product.title.substring(0, 60)}". How do I fix it to pass Google Merchant Center validation?`);
+    } else {
+      setBotPrompt(`Run a full Google Merchant Center compliance check on this product: "${product.title.substring(0, 60)}". Score: ${product.feedScore}/100, Gates: ${product.gateCount}/10. Show every issue and how to fix each one.`);
+    }
+    setBotOpen(true);
+  }, []);
 
   // Bulk delete selected
   const deleteSelected = useCallback(() => {
@@ -1152,10 +1187,19 @@ export default function CommandCenter() {
       <div style={{ borderBottom:'1px solid #1a1a2e', padding:'16px 24px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
         <div>
           <h1 style={{ fontSize:'16px', fontWeight:700, color:'#fff', margin:0 }}>⚡ Product Command Center</h1>
-          <p style={{ fontSize:'10px', color:'#555', margin:'2px 0 0' }}>Drop any file. Auto-detect. Auto-clean. 5-gate validation. Edit inline.</p>
+          <p style={{ fontSize:'10px', color:'#555', margin:'2px 0 0' }}>Drop any file. Auto-detect. Auto-clean. 10-gate Google Merchant validation. AI-powered fixes.</p>
         </div>
+        {/* AI Bot toggle — always visible */}
+        <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
+          <button onClick={() => { setBotOpen(!botOpen); if (!botOpen) { setBotPrompt(null); setBotContext(null); } }}
+            style={{ padding:'6px 14px', borderRadius:'6px', border: botOpen ? 'none' : '1px solid #3b82f644', background: botOpen ? '#3b82f6' : 'transparent', color: botOpen ? '#fff' : '#3b82f6', fontSize:'10px', fontWeight:700, cursor:'pointer', display:'flex', alignItems:'center', gap:'4px', transition:'all 0.15s' }}>
+            🤖 {botOpen ? 'Close AI Bot' : 'AI Feed Bot'}
+          </button>
+        </div>
+      </div>
+      <div style={{ borderBottom:'1px solid #1a1a2e', padding:'0 24px', display:'flex', alignItems:'center', justifyContent:'flex-end' }}>
         {analysis && (
-          <div style={{ display:'flex', gap:'6px', alignItems:'center' }}>
+          <div style={{ display:'flex', gap:'6px', alignItems:'center', padding:'8px 0' }}>
             {/* View toggle */}
             <div style={{ display:'flex', border:'1px solid #222', borderRadius:'6px', overflow:'hidden', marginRight:'8px' }}>
               {(['spreadsheet','cards','table'] as const).map(m => (
@@ -2117,7 +2161,7 @@ export default function CommandCenter() {
                     </p>
                   </div>
 
-                  {/* Google Feed Health — full compliance breakdown */}
+                  {/* Google Feed Health — AI-powered compliance breakdown */}
                   <div>
                     <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'8px' }}>
                       <p style={{ fontSize:'8px', color:'#3b82f6', textTransform:'uppercase', letterSpacing:'1px', margin:0, fontWeight:700 }}>Google Feed Health</p>
@@ -2126,25 +2170,28 @@ export default function CommandCenter() {
                           {selectedProduct.feedScore || 0}
                         </span>
                         <span style={{ fontSize:'9px', color:'#555' }}>/100</span>
+                        <button onClick={() => askAI(selectedProduct)} style={{ padding:'3px 8px', borderRadius:'6px', border:'none', background:'#3b82f6', color:'#fff', fontSize:'8px', fontWeight:700, cursor:'pointer', marginLeft:'4px' }}>
+                          🤖 Full AI Audit
+                        </button>
                       </div>
                     </div>
 
-                    {/* Gate results with expandable details */}
+                    {/* Gate results — each failing gate has a "Fix with AI" button */}
                     <div style={{ display:'flex', flexDirection:'column', gap:'4px' }}>
                       {Object.entries(selectedProduct.gates).map(([gate, status]) => {
-                        const gateInfo: Record<string, { label: string; fix: string; severity: string }> = {
-                          title: { label: 'Product Title', fix: 'Add a descriptive title with brand + product type', severity: 'Critical' },
-                          image: { label: 'Product Images', fix: 'Add at least 1 product image (3+ recommended)', severity: 'Critical' },
-                          price: { label: 'Product Price', fix: 'Set a price > $0 that matches your Shopify page', severity: 'Critical' },
-                          asin: { label: 'ASIN / MPN', fix: 'Add the Amazon ASIN (B0XXXXXXXXX format)', severity: 'Major' },
-                          description: { label: 'Description', fix: 'Add a 150+ char description with key product details', severity: 'Major' },
-                          googleCategory: { label: 'Google Category', fix: 'Assign a Google Product Category taxonomy path', severity: 'Major' },
-                          titleLength: { label: 'Title Compliance', fix: 'Trim title to ≤150 chars, remove promo text', severity: 'Major' },
-                          descClean: { label: 'Description Quality', fix: 'Strip HTML, remove Amazon meta tags and boilerplate', severity: 'Critical' },
-                          barcode: { label: 'GTIN / Barcode', fix: 'Add valid barcode from product packaging (20-40% more clicks)', severity: 'Major' },
-                          identifier: { label: 'Product Identifier', fix: 'Need GTIN+Brand or Brand+ASIN for Google visibility', severity: 'Critical' },
+                        const gateInfo: Record<string, { label: string; severity: string }> = {
+                          title: { label: 'Product Title', severity: 'Critical' },
+                          image: { label: 'Product Images', severity: 'Critical' },
+                          price: { label: 'Product Price', severity: 'Critical' },
+                          asin: { label: 'ASIN / MPN', severity: 'Major' },
+                          description: { label: 'Description', severity: 'Major' },
+                          googleCategory: { label: 'Google Category', severity: 'Major' },
+                          titleLength: { label: 'Title Compliance', severity: 'Major' },
+                          descClean: { label: 'Description Quality', severity: 'Critical' },
+                          barcode: { label: 'GTIN / Barcode', severity: 'Major' },
+                          identifier: { label: 'Product Identifier', severity: 'Critical' },
                         };
-                        const info = gateInfo[gate] || { label: gate, fix: '', severity: 'Info' };
+                        const info = gateInfo[gate] || { label: gate, severity: 'Info' };
                         const statusColor = status === 'pass' ? '#16a34a' : status === 'warn' ? '#f59e0b' : '#ef4444';
                         const statusBg = status === 'pass' ? 'rgba(22,163,74,0.06)' : status === 'warn' ? 'rgba(245,158,11,0.06)' : 'rgba(239,68,68,0.06)';
                         const statusIcon = status === 'pass' ? '✅' : status === 'warn' ? '⚠️' : '❌';
@@ -2157,11 +2204,18 @@ export default function CommandCenter() {
                                 <span style={{ fontSize:'9px', fontWeight:600, color: statusColor }}>{info.label}</span>
                                 <span style={{ fontSize:'7px', padding:'1px 4px', borderRadius:'3px', background:'#ffffff08', color:'#555' }}>{info.severity}</span>
                               </div>
-                              <span style={{ fontSize:'8px', fontWeight:700, color: statusColor, textTransform:'uppercase' }}>{status}</span>
+                              <div style={{ display:'flex', alignItems:'center', gap:'4px' }}>
+                                <span style={{ fontSize:'8px', fontWeight:700, color: statusColor, textTransform:'uppercase' }}>{status}</span>
+                                {status !== 'pass' && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); askAI(selectedProduct, gate, status); }}
+                                    style={{ padding:'2px 6px', borderRadius:'4px', border:'none', background:'#3b82f6', color:'#fff', fontSize:'7px', fontWeight:700, cursor:'pointer', whiteSpace:'nowrap' }}
+                                  >
+                                    🤖 Fix with AI
+                                  </button>
+                                )}
+                              </div>
                             </div>
-                            {status !== 'pass' && info.fix && (
-                              <p style={{ fontSize:'8px', color:'#666', margin:'3px 0 0 16px', lineHeight:'1.3' }}>💡 {info.fix}</p>
-                            )}
                           </div>
                         );
                       })}
@@ -2170,6 +2224,17 @@ export default function CommandCenter() {
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Feed Bot slide-out panel — AI agent for real-time fix suggestions */}
+        {botOpen && (
+          <div style={{ position:'fixed', right:0, top:0, height:'100vh', width:380, borderLeft:'1px solid #1a1a2e', background:'#fff', boxShadow:'-4px 0 30px rgba(0,0,0,0.3)', zIndex:10000, display:'flex', flexDirection:'column' }}>
+            <FeedBotPanel
+              productContext={botContext}
+              initialPrompt={botPrompt}
+              onClose={() => { setBotOpen(false); setBotPrompt(null); setBotContext(null); }}
+            />
           </div>
         )}
       </div>
