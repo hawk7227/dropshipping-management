@@ -964,6 +964,59 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: true, deleted: totalCount || 0, message: `Deleted all ${totalCount || 0} products` });
       }
 
+      // ── PHASE 2: Feed compliance actions ────────────────────
+
+      case 'feed-check': {
+        // Triggers the feed compliance check via the feed route
+        const feedRes = await fetch(
+          `${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/api/feed/google-shopping?action=feed-check`,
+          { method: 'POST', headers: { 'Content-Type': 'application/json' } }
+        );
+        const feedData = await feedRes.json();
+        return NextResponse.json(feedData);
+      }
+
+      case 'feed-rejected': {
+        const sbRej = getSupabaseClient();
+        const { data: rejected, error: rejErr } = await sbRej
+          .from('products')
+          .select('id, title, handle, asin, image_url, retail_price, category, product_type, google_product_category, barcode, feed_status, feed_score, feed_rejection_reasons, vendor')
+          .eq('feed_status', 'rejected')
+          .order('feed_score', { ascending: true })
+          .limit(500);
+        if (rejErr) return NextResponse.json({ success: false, error: rejErr.message }, { status: 500 });
+        return NextResponse.json({ success: true, rejected: rejected || [], count: rejected?.length || 0 });
+      }
+
+      case 'ai-changelog': {
+        const sbLog = getSupabaseClient();
+        const productId = body.product_id;
+        if (body.write) {
+          // Write a new changelog entry
+          const { data, error: logErr } = await sbLog.from('product_ai_changelog').insert({
+            product_id: productId,
+            field_changed: body.field_changed,
+            old_value: body.old_value || null,
+            new_value: body.new_value || null,
+            reasoning: body.reasoning || null,
+            ai_model: body.ai_model || 'claude-sonnet-4-20250514',
+            optimization_type: body.optimization_type || null,
+            applied_by: body.applied_by || 'system',
+          }).select().single();
+          if (logErr) return NextResponse.json({ success: false, error: logErr.message }, { status: 500 });
+          return NextResponse.json({ success: true, entry: data });
+        }
+        // Read changelog for a product
+        const { data: logs, error: readErr } = await sbLog
+          .from('product_ai_changelog')
+          .select('*')
+          .eq('product_id', productId)
+          .order('optimized_at', { ascending: false })
+          .limit(50);
+        if (readErr) return NextResponse.json({ success: false, error: readErr.message }, { status: 500 });
+        return NextResponse.json({ success: true, changelog: logs || [] });
+      }
+
       default:
         return NextResponse.json(
           { success: false, error: `Unknown action: ${action}` },

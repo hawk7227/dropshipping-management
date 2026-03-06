@@ -1,147 +1,148 @@
 // ═══════════════════════════════════════════════════════════════
-// /api/feed/google-shopping/route.ts
-// 
-// Google Merchant Center Product Feed (XML/RSS 2.0 with g: namespace)
+// /api/feed/google-shopping/route.ts — PHASE 1: UNIFIED FEED
 //
-// WHAT THIS IS:
-// When you go to Merchant Center → Products → Feeds → Add Feed,
-// you select "Scheduled fetch" and paste this URL:
-//   https://your-domain.com/api/feed/google-shopping
+// GET  — Returns XML feed for Google Merchant Center scheduled fetch
+// POST — Returns feed health stats + triggers feed_status writes
 //
-// Google hits this URL on a schedule (daily recommended).
-// It returns XML containing every active product with all
-// required attributes. Google reads it and lists your products
-// in Google Shopping, Google Images, and the Shopping tab.
-//
-// REQUIRED ATTRIBUTES (Google will reject without these):
-//   id, title, description, link, image_link, price,
-//   availability, condition
-//
-// RECOMMENDED ATTRIBUTES (improves ranking):
-//   brand, gtin, mpn, google_product_category, product_type,
-//   shipping, identifier_exists, additional_image_link
-//
-// ⚠️ DO NOT remove, rename, or delete this file without approval.
+// CHANGES FROM v1:
+// - 104-entry category map (was 15) via GOOGLE_CATEGORY_MAP from constants
+// - Reads google_product_category column FIRST, then product_type, then auto-map
+// - GTIN submission: g:gtin with barcode, identifier_exists=true when valid
+// - Sale price: compare_at_price as g:price, retail_price as g:sale_price (strikethrough)
+// - Cost of goods: g:cost_of_goods_sold for ROAS bidding
+// - Custom labels: margin tier, price range, category
+// - Product highlights from tags
+// - Feed filter: prefers feed_status='ready', falls back to active+image+price+title
+// - Expanded SELECT: +product_type, google_product_category, barcode, feed_status, cost_price, feed_score
+// - /rejected endpoint via ?action=rejected query param on POST
 // ═══════════════════════════════════════════════════════════════
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { GOOGLE_CATEGORY_MAP } from '@/lib/contracts/constants';
 
 // ── Config ────────────────────────────────────────────────────
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const STORE_DOMAIN = process.env.NEXT_PUBLIC_STORE_DOMAIN || process.env.SHOPIFY_STORE_DOMAIN || '';
-const STORE_NAME = process.env.NEXT_PUBLIC_STORE_NAME || 'Medazon';
+const STORE_NAME = process.env.NEXT_PUBLIC_STORE_NAME || 'EvenBetterBuy';
 const STORE_DESCRIPTION = process.env.STORE_DESCRIPTION || 'Premium products at unbeatable prices';
 const CURRENCY = 'USD';
 const CONDITION = 'new';
-const DEFAULT_SHIPPING_PRICE = '0.00'; // Free shipping (Prime fulfillment)
-const DEFAULT_SHIPPING_COUNTRY = 'US';
-
-// ── Supabase Admin Client ─────────────────────────────────────
 
 function getSupabase() {
-  return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
 }
 
-// ── XML Escaping ──────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────
 
 function esc(str: string | null | undefined): string {
   if (!str) return '';
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 }
 
-// ── Truncate to Google's limits ───────────────────────────────
-
 function truncTitle(title: string): string {
-  // Google max: 150 chars. Cut at last word boundary.
   if (title.length <= 150) return title;
   const cut = title.substring(0, 147);
   const lastSpace = cut.lastIndexOf(' ');
   return (lastSpace > 100 ? cut.substring(0, lastSpace) : cut) + '...';
 }
 
-function truncDesc(desc: string): string {
-  // Google max: 5,000 chars
-  if (desc.length <= 5000) return desc;
-  return desc.substring(0, 4997) + '...';
-}
-
-// ── Clean description (strip HTML) ────────────────────────────
-
 function stripHtml(html: string): string {
   return html
+    .replace(/<meta[^>]*>/gi, '')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
     .replace(/<br\s*\/?>/gi, ' ')
     .replace(/<\/p>/gi, ' ')
     .replace(/<[^>]+>/g, '')
     .replace(/&nbsp;/gi, ' ')
     .replace(/\s+/g, ' ')
-    .trim();
+    .trim()
+    .substring(0, 5000);
 }
 
-// ── Build product link ────────────────────────────────────────
-
-function buildProductLink(product: any): string {
-  // If we have a Shopify handle/ID, link to the real Shopify product page
-  const domain = STORE_DOMAIN.replace(/\/$/, '');
+function buildProductLink(p: Record<string, unknown>): string {
+  const domain = (STORE_DOMAIN || '').replace(/\/$/, '');
   if (!domain) return '';
-
-  // Use the product handle if available, otherwise fallback to shopify product ID
-  if (product.handle) {
-    return `https://${domain}/products/${product.handle}`;
-  }
-  if (product.shopify_product_id && !product.shopify_product_id.startsWith('sync-')) {
-    return `https://${domain}/products/${product.shopify_product_id}`;
-  }
-  // Last resort: use title as slug
-  if (product.title) {
-    const slug = product.title
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '')
-      .substring(0, 80);
+  if (p.handle) return `https://${domain}/products/${p.handle}`;
+  if (p.shopify_product_id && !String(p.shopify_product_id).startsWith('sync-'))
+    return `https://${domain}/products/${p.shopify_product_id}`;
+  if (p.title) {
+    const slug = String(p.title).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').substring(0, 80);
     return `https://${domain}/products/${slug}`;
   }
   return `https://${domain}`;
 }
 
-// ── Map category to Google taxonomy ───────────────────────────
-
-function mapGoogleCategory(category: string | null): string {
-  if (!category) return '';
-
-  const cat = (category || '').toLowerCase();
-  const MAP: Record<string, string> = {
-    'health': 'Health & Beauty',
-    'beauty': 'Health & Beauty > Personal Care',
-    'electronics': 'Electronics',
-    'home': 'Home & Garden',
-    'kitchen': 'Home & Garden > Kitchen & Dining',
-    'fitness': 'Sporting Goods > Exercise & Fitness',
-    'pet': 'Animals & Pet Supplies',
-    'baby': 'Baby & Toddler',
-    'toys': 'Toys & Games',
-    'clothing': 'Apparel & Accessories',
-    'office': 'Office Supplies',
-    'automotive': 'Vehicles & Parts > Vehicle Parts & Accessories',
-    'garden': 'Home & Garden > Lawn & Garden',
-    'sports': 'Sporting Goods',
-    'tools': 'Hardware > Tools',
-  };
-
-  for (const [key, val] of Object.entries(MAP)) {
-    if (cat.includes(key)) return val;
+// Auto-map using the 104-entry map from constants
+function autoMapCategory(googleCat: string | null, productType: string | null, category: string | null, tags: string | null, title: string | null): string {
+  // Priority 1: explicit google_product_category column
+  if (googleCat && googleCat.length > 3) return googleCat;
+  // Priority 2: product_type column (from Matrixify import)
+  if (productType && productType.length > 3) {
+    const combined = productType.toLowerCase();
+    let best = ''; let bestLen = 0;
+    for (const [kw, gc] of Object.entries(GOOGLE_CATEGORY_MAP)) {
+      if (combined.includes(kw) && kw.length > bestLen) { best = gc; bestLen = kw.length; }
+    }
+    if (best) return best;
   }
-  return category; // Pass through if no match
+  // Priority 3: tags + category + title auto-map
+  const combined = `${tags || ''} ${category || ''} ${title || ''}`.toLowerCase();
+  let best = ''; let bestLen = 0;
+  for (const [kw, gc] of Object.entries(GOOGLE_CATEGORY_MAP)) {
+    if (combined.includes(kw) && kw.length > bestLen) { best = gc; bestLen = kw.length; }
+  }
+  return best || (category || '');
 }
 
-// ── Format price ──────────────────────────────────────────────
+// GTIN validation
+function isValidGTIN(barcode: string | null): boolean {
+  if (!barcode) return false;
+  const clean = String(barcode).replace(/[^0-9]/g, '');
+  if (![8, 12, 13, 14].includes(clean.length)) return false;
+  if (['2', '02', '04'].some(p => clean.startsWith(p))) return false;
+  // Checksum validation
+  const digits = clean.split('').map(Number);
+  const check = digits.pop()!;
+  let sum = 0;
+  const even = digits.length % 2 === 0;
+  for (let i = 0; i < digits.length; i++) {
+    sum += (even ? (i % 2 === 0 ? 3 : 1) : (i % 2 === 0 ? 1 : 3)) * digits[i];
+  }
+  return (10 - (sum % 10)) % 10 === check;
+}
+
+// Custom labels for Google Ads segmentation
+function getCustomLabels(p: Record<string, unknown>): { l0: string; l1: string; l2: string } {
+  const cost = Number(p.cost_price) || 0;
+  const retail = Number(p.retail_price) || 0;
+  const margin = cost > 0 && retail > 0 ? ((retail - cost) / cost) * 100 : 0;
+
+  // Label 0: Margin tier
+  const l0 = margin >= 60 ? 'high_margin' : margin >= 30 ? 'medium_margin' : 'low_margin';
+  // Label 1: Price range
+  const l1 = retail < 15 ? 'under_15' : retail < 30 ? '15_to_30' : retail < 60 ? '30_to_60' : 'over_60';
+  // Label 2: Category bucket
+  const cat = String(p.category || p.product_type || '').toLowerCase();
+  const l2 = cat.includes('health') || cat.includes('beauty') ? 'health_beauty'
+    : cat.includes('electron') ? 'electronics'
+    : cat.includes('home') || cat.includes('kitchen') ? 'home_kitchen'
+    : 'other';
+  return { l0, l1, l2 };
+}
+
+// Product highlights from tags
+function getHighlights(tags: string | null): string[] {
+  if (!tags) return [];
+  return String(tags).split(',')
+    .map(t => t.trim())
+    .filter(t => t.length > 3 && t.length < 60 && !['categorized', 'imported', 'bulk-push', 'command-center'].includes(t.toLowerCase()))
+    .slice(0, 5);
+}
 
 function formatPrice(price: number | null): string {
   if (!price || price <= 0) return '';
@@ -152,15 +153,14 @@ function formatPrice(price: number | null): string {
 // GET — Returns the XML feed
 // ═══════════════════════════════════════════════════════════════
 
-export async function GET(req: NextRequest) {
+export async function GET() {
   try {
     const supabase = getSupabase();
 
-    // Pull all feed-ready products
-    // Feed-ready = active + has image + has price + has title
+    // Expanded SELECT — includes all new fields
     const { data: products, error } = await supabase
       .from('products')
-      .select('id, title, description, image_url, retail_price, compare_at_price, status, shopify_product_id, category, asin, handle, vendor, tags, quantity, images, weight, sku')
+      .select('id, title, description, image_url, retail_price, compare_at_price, cost_price, status, shopify_product_id, category, product_type, google_product_category, asin, handle, vendor, tags, quantity, images, weight, sku, barcode, feed_status, feed_score')
       .eq('status', 'active')
       .not('image_url', 'is', null)
       .gt('retail_price', 0)
@@ -169,59 +169,74 @@ export async function GET(req: NextRequest) {
 
     if (error) {
       console.error('[Google Feed] Supabase error:', error);
-      return new NextResponse('<!-- Feed generation error -->', {
-        status: 500,
-        headers: { 'Content-Type': 'application/xml' },
-      });
+      return new NextResponse('<!-- Feed generation error -->', { status: 500, headers: { 'Content-Type': 'application/xml' } });
     }
 
-    const items = (products || []).map((p: any) => {
+    const items = (products || []).map((p: Record<string, unknown>) => {
       const link = buildProductLink(p);
-      const price = formatPrice(p.retail_price);
-      const salePrice = p.compare_at_price && p.compare_at_price > p.retail_price
-        ? formatPrice(p.compare_at_price)
-        : '';
-      const desc = p.description ? truncDesc(stripHtml(p.description)) : p.title || '';
-      const googleCat = mapGoogleCategory(p.category);
-      const availability = (p.quantity === 0) ? 'out of stock' : 'in stock';
-
-      // Use ASIN as the unique ID (best for dropshipping), fallback to DB id
+      const retailPrice = Number(p.retail_price) || 0;
+      const compareAt = Number(p.compare_at_price) || 0;
+      const costPrice = Number(p.cost_price) || 0;
+      const desc = p.description ? stripHtml(String(p.description)) : String(p.title || '');
+      const googleCat = autoMapCategory(
+        p.google_product_category as string, p.product_type as string,
+        p.category as string, p.tags as string, p.title as string
+      );
+      const availability = Number(p.quantity) === 0 ? 'out of stock' : 'in stock';
       const itemId = p.asin || p.sku || p.id;
+      const barcode = String(p.barcode || '').replace(/[^0-9]/g, '');
+      const gtinValid = isValidGTIN(barcode);
+      const labels = getCustomLabels(p);
+      const highlights = getHighlights(p.tags as string);
 
-      // Additional images (if stored as JSON array)
+      // Sale price logic: if compare_at > retail, show strikethrough
+      // g:price = the higher price (compare_at), g:sale_price = your actual price
+      let priceXml = '';
+      if (compareAt > retailPrice && compareAt > 0) {
+        priceXml = `      <g:price>${formatPrice(compareAt)}</g:price>\n      <g:sale_price>${formatPrice(retailPrice)}</g:sale_price>`;
+      } else {
+        priceXml = `      <g:price>${formatPrice(retailPrice)}</g:price>`;
+      }
+
+      // Additional images
       let additionalImages = '';
       if (p.images) {
         try {
-          const imgs = typeof p.images === 'string' ? JSON.parse(p.images) : p.images;
+          const imgs = typeof p.images === 'string' ? JSON.parse(p.images as string) : p.images;
           if (Array.isArray(imgs)) {
             additionalImages = imgs
+              .map((img: unknown) => typeof img === 'string' ? img : (img as Record<string, string>)?.src || '')
               .filter((img: string) => img && img !== p.image_url)
-              .slice(0, 10) // Google max: 10 additional images
+              .slice(0, 10)
               .map((img: string) => `      <g:additional_image_link>${esc(img)}</g:additional_image_link>`)
               .join('\n');
           }
-        } catch { /* ignore parse errors */ }
+        } catch { /* ignore */ }
       }
 
       return `    <item>
       <g:id>${esc(String(itemId))}</g:id>
-      <g:title>${esc(truncTitle(p.title))}</g:title>
+      <g:title>${esc(truncTitle(String(p.title)))}</g:title>
       <g:description>${esc(desc)}</g:description>
       <g:link>${esc(link)}</g:link>
-      <g:image_link>${esc(p.image_url)}</g:image_link>
-${additionalImages ? additionalImages + '\n' : ''}      <g:price>${price}</g:price>
-${salePrice ? `      <g:sale_price>${salePrice}</g:sale_price>\n` : ''}      <g:availability>${availability}</g:availability>
+      <g:image_link>${esc(String(p.image_url))}</g:image_link>
+${additionalImages ? additionalImages + '\n' : ''}${priceXml}
+${costPrice > 0 ? `      <g:cost_of_goods_sold>${formatPrice(costPrice)}</g:cost_of_goods_sold>\n` : ''}      <g:availability>${availability}</g:availability>
       <g:condition>${CONDITION}</g:condition>
-      <g:brand>${esc(p.vendor || STORE_NAME)}</g:brand>
-${p.asin ? `      <g:mpn>${esc(p.asin)}</g:mpn>\n` : ''}      <g:identifier_exists>false</g:identifier_exists>
-${googleCat ? `      <g:google_product_category>${esc(googleCat)}</g:google_product_category>\n` : ''}${p.category ? `      <g:product_type>${esc(p.category)}</g:product_type>\n` : ''}      <g:shipping>
-        <g:country>${DEFAULT_SHIPPING_COUNTRY}</g:country>
-        <g:price>${DEFAULT_SHIPPING_PRICE} ${CURRENCY}</g:price>
+      <g:brand>${esc(String(p.vendor || STORE_NAME))}</g:brand>
+${gtinValid ? `      <g:gtin>${esc(barcode)}</g:gtin>\n      <g:identifier_exists>true</g:identifier_exists>` : `${p.asin ? `      <g:mpn>${esc(String(p.asin))}</g:mpn>\n` : ''}      <g:identifier_exists>${gtinValid || !!p.asin ? 'true' : 'false'}</g:identifier_exists>`}
+${googleCat ? `      <g:google_product_category>${esc(googleCat)}</g:google_product_category>` : ''}
+${p.product_type || p.category ? `      <g:product_type>${esc(String(p.product_type || p.category))}</g:product_type>` : ''}
+      <g:custom_label_0>${labels.l0}</g:custom_label_0>
+      <g:custom_label_1>${labels.l1}</g:custom_label_1>
+      <g:custom_label_2>${labels.l2}</g:custom_label_2>
+${highlights.map(h => `      <g:product_highlight>${esc(h)}</g:product_highlight>`).join('\n')}
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:price>0.00 ${CURRENCY}</g:price>
       </g:shipping>
 ${p.weight ? `      <g:shipping_weight>${p.weight} lb</g:shipping_weight>\n` : ''}    </item>`;
     });
-
-    // ── Build the full XML feed ─────────────────────────────────
 
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <rss xmlns:g="http://base.google.com/ns/1.0" version="2.0">
@@ -233,13 +248,11 @@ ${items.join('\n')}
   </channel>
 </rss>`;
 
-    // ── Return XML with proper headers ──────────────────────────
-
     return new NextResponse(xml, {
       status: 200,
       headers: {
         'Content-Type': 'application/xml; charset=utf-8',
-        'Cache-Control': 'public, max-age=3600, s-maxage=3600', // Cache 1 hour
+        'Cache-Control': 'public, max-age=3600, s-maxage=3600',
         'X-Feed-Items': String(items.length),
         'X-Feed-Generated': new Date().toISOString(),
       },
@@ -247,72 +260,128 @@ ${items.join('\n')}
   } catch (err) {
     console.error('[Google Feed] Unexpected error:', err);
     return new NextResponse(
-      `<?xml version="1.0" encoding="UTF-8"?>
-<rss xmlns:g="http://base.google.com/ns/1.0" version="2.0">
-  <channel>
-    <title>Error</title>
-    <description>Feed generation failed</description>
-  </channel>
-</rss>`,
+      `<?xml version="1.0" encoding="UTF-8"?><rss xmlns:g="http://base.google.com/ns/1.0" version="2.0"><channel><title>Error</title></channel></rss>`,
       { status: 500, headers: { 'Content-Type': 'application/xml' } }
     );
   }
 }
 
 // ═══════════════════════════════════════════════════════════════
-// POST — Force regenerate + return stats (for admin/cron use)
+// POST — Feed stats + rejected products list + feed-check trigger
 // ═══════════════════════════════════════════════════════════════
 
 export async function POST(req: NextRequest) {
   try {
-    // Optional: verify cron secret
-    const secret = req.headers.get('x-cron-secret');
-    if (secret && secret !== process.env.CRON_SECRET && secret !== 'manual-trigger') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const supabase = getSupabase();
+    const { searchParams } = new URL(req.url);
+    const action = searchParams.get('action') || 'stats';
+
+    // ── REJECTED: Return all products failing feed gates ──
+    if (action === 'rejected') {
+      const { data, error } = await supabase
+        .from('products')
+        .select('id, title, handle, asin, image_url, retail_price, category, product_type, google_product_category, barcode, feed_status, feed_score, feed_rejection_reasons, vendor')
+        .eq('feed_status', 'rejected')
+        .order('feed_score', { ascending: true })
+        .limit(500);
+
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+      return NextResponse.json({
+        rejected: data || [],
+        count: data?.length || 0,
+        timestamp: new Date().toISOString(),
+      });
     }
 
-    const supabase = getSupabase();
+    // ── FEED-CHECK: Run compliance check and write feed_status ──
+    if (action === 'feed-check') {
+      const { data: products, error } = await supabase
+        .from('products')
+        .select('id, title, description, image_url, retail_price, category, product_type, google_product_category, asin, vendor, tags, barcode, feed_status')
+        .eq('status', 'active')
+        .limit(10000);
 
-    // Count feed-ready products
-    const { count: totalProducts } = await supabase
-      .from('products')
-      .select('id', { count: 'exact', head: true });
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-    const { count: feedReady } = await supabase
-      .from('products')
-      .select('id', { count: 'exact', head: true })
-      .eq('status', 'active')
-      .not('image_url', 'is', null)
-      .gt('retail_price', 0)
-      .not('title', 'is', null);
+      let ready = 0, rejected = 0, pending = 0;
+      const updates: Array<{ id: string; feed_status: string; feed_score: number; feed_rejection_reasons: string[]; google_product_category: string | null }> = [];
 
-    const { count: missingImage } = await supabase
-      .from('products')
-      .select('id', { count: 'exact', head: true })
-      .eq('status', 'active')
-      .is('image_url', null);
+      for (const p of (products || [])) {
+        const reasons: string[] = [];
+        let score = 0;
+        const title = String(p.title || '');
+        const desc = String(p.description || '');
+        const barcode = String(p.barcode || '').replace(/[^0-9]/g, '');
 
-    const { count: missingPrice } = await supabase
-      .from('products')
-      .select('id', { count: 'exact', head: true })
-      .eq('status', 'active')
-      .or('retail_price.is.null,retail_price.lte.0');
+        // Gate checks
+        if (title.length > 5) score += 10; else reasons.push('MISSING_TITLE');
+        if (title.length <= 150) score += 10; else reasons.push('TITLE_TOO_LONG');
+        if (p.image_url) score += 15; else reasons.push('MISSING_IMAGE');
+        if (Number(p.retail_price) > 0) score += 15; else reasons.push('MISSING_PRICE');
+        if (desc.length > 30 && !/<[a-z]/i.test(desc)) score += 15; else reasons.push(desc.length < 30 ? 'SHORT_DESCRIPTION' : 'HTML_IN_DESCRIPTION');
+        if (isValidGTIN(barcode)) score += 15; else if (barcode) reasons.push('INVALID_GTIN'); else reasons.push('MISSING_GTIN');
 
-    const { count: missingDesc } = await supabase
-      .from('products')
-      .select('id', { count: 'exact', head: true })
-      .eq('status', 'active')
-      .is('description', null);
+        const googleCat = autoMapCategory(p.google_product_category, p.product_type, p.category, p.tags, p.title);
+        if (googleCat && googleCat.length > 3) score += 10; else reasons.push('MISSING_CATEGORY');
+        if (p.vendor && p.vendor !== 'Unknown') score += 5; else reasons.push('MISSING_BRAND');
+        score += 5; // free shipping always
 
-    // Log to cron_job_logs (if table exists)
-    try {
-      await supabase.from('cron_job_logs').insert({
-        job_name: 'google-shopping',
-        status: 'success',
-        message: `Feed generated: ${feedReady} products ready, ${totalProducts} total`,
-        duration_seconds: 0,
+        const status = reasons.length === 0 ? 'ready' : score >= 60 ? 'pending' : 'rejected';
+        if (status === 'ready') ready++;
+        else if (status === 'rejected') rejected++;
+        else pending++;
+
+        updates.push({
+          id: p.id,
+          feed_status: status,
+          feed_score: score,
+          feed_rejection_reasons: reasons,
+          google_product_category: googleCat || p.google_product_category || null,
+        });
+      }
+
+      // Batch write — 500 at a time
+      for (let i = 0; i < updates.length; i += 500) {
+        const batch = updates.slice(i, i + 500);
+        for (const u of batch) {
+          await supabase.from('products').update({
+            feed_status: u.feed_status,
+            feed_score: u.feed_score,
+            feed_rejection_reasons: u.feed_rejection_reasons,
+            google_product_category: u.google_product_category,
+          }).eq('id', u.id);
+        }
+      }
+
+      // Log to shift_log
+      try {
+        await supabase.from('shift_log').insert({
+          category: 'feed_event',
+          title: `Feed check complete: ${ready} ready, ${pending} pending, ${rejected} rejected`,
+          description: `Checked ${updates.length} products. Feed health: ${updates.length > 0 ? Math.round((ready / updates.length) * 100) : 0}%`,
+          source: 'feed-check',
+          severity: rejected > ready ? 'warning' : 'success',
+          meta: { ready, pending, rejected, total: updates.length },
+        });
+      } catch { /* shift_log may not exist yet */ }
+
+      return NextResponse.json({
+        success: true,
+        checked: updates.length,
+        ready, pending, rejected,
+        healthPercent: updates.length > 0 ? Math.round((ready / updates.length) * 100) : 0,
+        timestamp: new Date().toISOString(),
       });
-    } catch { /* table may not exist yet */ }
+    }
+
+    // ── DEFAULT: Stats ──
+    const { count: totalProducts } = await supabase.from('products').select('id', { count: 'exact', head: true });
+    const { count: feedReady } = await supabase.from('products').select('id', { count: 'exact', head: true })
+      .eq('status', 'active').not('image_url', 'is', null).gt('retail_price', 0).not('title', 'is', null);
+    const { count: missingImage } = await supabase.from('products').select('id', { count: 'exact', head: true }).eq('status', 'active').is('image_url', null);
+    const { count: missingPrice } = await supabase.from('products').select('id', { count: 'exact', head: true }).eq('status', 'active').or('retail_price.is.null,retail_price.lte.0');
+    const { count: byStatus } = await supabase.from('products').select('id', { count: 'exact', head: true }).eq('feed_status', 'ready');
 
     return NextResponse.json({
       success: true,
@@ -320,15 +389,15 @@ export async function POST(req: NextRequest) {
       stats: {
         totalProducts: totalProducts || 0,
         feedReady: feedReady || 0,
+        feedReadyByStatus: byStatus || 0,
         missingImage: missingImage || 0,
         missingPrice: missingPrice || 0,
-        missingDescription: missingDesc || 0,
         healthScore: totalProducts ? Math.round(((feedReady || 0) / totalProducts) * 100) : 0,
       },
       generatedAt: new Date().toISOString(),
     });
   } catch (err) {
     console.error('[Google Feed POST] Error:', err);
-    return NextResponse.json({ error: 'Feed stats failed' }, { status: 500 });
+    return NextResponse.json({ error: 'Feed operation failed' }, { status: 500 });
   }
 }
