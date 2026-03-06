@@ -1,4 +1,5 @@
 'use client';
+import MissionStatus from '@/components/MissionStatus';
 
 // app/products/page.tsx
 // ═══════════════════════════════════════════════════════════════════════════
@@ -86,10 +87,12 @@ interface ProductStats {
   lowMargin: number;
   synced: number;
   stale: number;
+  feedReady: number;
+  feedRejected: number;
 }
 
 /** Which stat card is active as a filter — null means "show all" */
-type StatFilter = 'total' | 'active' | 'paused' | 'lowMargin' | 'synced' | 'stale' | null;
+type StatFilter = 'total' | 'active' | 'paused' | 'lowMargin' | 'synced' | 'stale' | 'feedReady' | 'feedRejected' | null;
 
 interface PageState {
   products: Product[];
@@ -143,8 +146,10 @@ function calculateStats(products: Product[]): ProductStats {
     const days = (Date.now() - new Date(p.last_price_check).getTime()) / (1000 * 60 * 60 * 24);
     return days > STALE_DAYS;
   }).length;
+  const feedReady = products.filter(p => p.feed_status === 'ready').length;
+  const feedRejected = products.filter(p => p.feed_status === 'rejected').length;
 
-  return { total, active, paused, lowMargin, synced, stale };
+  return { total, active, paused, lowMargin, synced, stale, feedReady, feedRejected };
 }
 
 const initialState: PageState = {
@@ -157,7 +162,7 @@ const initialState: PageState = {
   showSourcing: true,
   lastFetch: null,
   totalCount: 0,
-  stats: { total: 0, active: 0, paused: 0, lowMargin: 0, synced: 0, stale: 0 },
+  stats: { total: 0, active: 0, paused: 0, lowMargin: 0, synced: 0, stale: 0, feedReady: 0, feedRejected: 0 },
 };
 
 function pageReducer(state: PageState, action: PageAction): PageState {
@@ -282,6 +287,10 @@ function mapApiProduct(item: Record<string, unknown>): Product {
     admin_override: (item.admin_override as boolean) || false,
     admin_override_by: (item.admin_override_by as string) || null,
     admin_override_at: (item.admin_override_at as string) || null,
+    feed_status: (item.feed_status as string) || null,
+    feed_score: (item.feed_score as number) || null,
+    feed_rejection_reasons: (item.feed_rejection_reasons as string[]) || null,
+    google_product_category: (item.google_product_category as string) || null,
   };
 }
 
@@ -311,6 +320,10 @@ function applyStatFilter(products: Product[], filter: StatFilter): Product[] {
         const days = (Date.now() - new Date(p.last_price_check).getTime()) / (1000 * 60 * 60 * 24);
         return days > STALE_DAYS;
       });
+    case 'feedReady':
+      return products.filter(p => p.feed_status === 'ready');
+    case 'feedRejected':
+      return products.filter(p => p.feed_status === 'rejected');
     default:
       return products;
   }
@@ -372,11 +385,17 @@ function StatsRow({
     { key: 'stale', label: 'Stale Prices', value: stats.stale,
       color: 'bg-orange-50 border-orange-200 text-orange-700',
       activeColor: 'bg-orange-500 border-orange-500 text-white shadow-lg shadow-orange-200' },
+    { key: 'feedReady' as StatFilter, label: 'Feed Ready', value: stats.feedReady ?? 0,
+      color: 'bg-emerald-50 border-emerald-200 text-emerald-700',
+      activeColor: 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-200' },
+    { key: 'feedRejected' as StatFilter, label: 'Feed Rejected', value: stats.feedRejected ?? 0,
+      color: 'bg-rose-50 border-rose-200 text-rose-700',
+      activeColor: 'bg-rose-600 border-rose-600 text-white shadow-lg shadow-rose-200' },
   ];
 
   return (
     <div
-      className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3"
+      className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3"
       role="toolbar"
       aria-label="Product stat filters"
     >
@@ -953,7 +972,10 @@ function ProductsPageInner() {
   // ═════════════════════════════════════════════════════════════════════
 
   return (
-    <div className="products-dark space-y-5" style={{ padding: '20px 24px', maxWidth: 1500, margin: '0 auto' }}>
+    <div className="products-dark space-y-5" style={{ padding: 0, maxWidth: 1500, margin: '0 auto' }}>
+      {/* Mission Status — Real-time system dashboard */}
+      <MissionStatus pageName="Products" />
+      <div style={{ padding: '20px 24px' }}>
       {/* ── Loading State (no products yet) ─────────────────────────── */}
       {state.isLoading && state.products.length === 0 && (
         <SkeletonProductsPage density={gridDensity} />
@@ -1246,6 +1268,7 @@ function ProductsPageInner() {
         onApplySuggestion={handleApplySuggestion}
         onProductAction={handleProductAction}
       />
+      </div>{/* end padding wrapper */}
     </div>
   );
 }

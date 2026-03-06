@@ -1,5 +1,6 @@
 'use client';
 import { useState, useCallback, useRef, useMemo } from 'react';
+import MissionStatus from '@/components/MissionStatus';
 
 // ═══════════════════════════════════════════════════════════
 // FOUNDATION IMPORTS — Level 3 system
@@ -317,14 +318,32 @@ function processRows(jsonRows: Record<string,unknown>[], headers: string[], file
     const rawSellPrice = get(colMap.sellPrice) || '';
     const rawCompare = get(colMap.compareAt) || '0';
 
-    // If file has a "Cost" column, use it as p.price (Amazon cost)
-    // If file only has "Price" or "Variant Price", use that as p.price
-    // If file has "Sell Price", preserve it as p.sellPrice
+    // PRICING LOGIC — depends on file format:
+    // Matrixify/Shopify exports: "Variant Price" = retail sell price (NOT Amazon cost)
+    //   "Variant Compare At Price" = strikethrough price. No cost column exists.
+    //   Reverse-calculate: cost = sellPrice / MARKUP
+    // Other files (AutoDS, ASIN enrichment): may have explicit Cost column
     const costVal = rawCost ? parseFloat(rawCost.replace(/[^0-9.]/g,'')) || 0 : 0;
     const priceVal = parseFloat(rawPrice.replace(/[^0-9.]/g,'')) || 0;
     const sellVal = rawSellPrice ? parseFloat(rawSellPrice.replace(/[^0-9.]/g,'')) || 0 : 0;
-    const importedCost = costVal > 0 ? costVal : priceVal;
-    const importedSell = sellVal > 0 ? sellVal : 0;
+
+    let importedCost: number;
+    let importedSell: number;
+
+    if (costVal > 0) {
+      // Explicit cost column found (AutoDS, enriched files) — cost is cost, sell is sell
+      importedCost = costVal;
+      importedSell = sellVal > 0 ? sellVal : 0;
+    } else if (fileType === 'shopify-matrixify' || fileType === 'shopify-csv') {
+      // Shopify exports: "Variant Price" = retail sell price, no cost column
+      // Reverse-calculate the Amazon cost from sell price
+      importedSell = priceVal;
+      importedCost = priceVal > 0 ? +(priceVal / MARKUP).toFixed(2) : 0;
+    } else {
+      // Generic: treat price as cost if no explicit cost column
+      importedCost = priceVal;
+      importedSell = sellVal > 0 ? sellVal : 0;
+    }
 
     // Read competitor prices from file if present
     const rawAmazon = parseFloat(get(colMap.amazonPrice) || '0') || 0;
@@ -616,23 +635,35 @@ function ComplianceGateCard({ icon, gate, category, severity, desc, details, rul
 // ═══════════════════════════════════════════════════════════
 async function exportAndDownload(products: CleanProduct[], filename: string) {
   const { utils, writeFile } = await import('xlsx');
-  const data = products.map(p => ({
-    'Title': p.title, 'ASIN/SKU': p.asin, 'Cost': p.price || '', 'Sell Price': p.sellPrice || '',
-    'Profit $': p.profit || '', 'Profit %': p.profitPct ? `${p.profitPct}%` : '',
-    'Market $': p.marketPrice || '',
-    'Amazon $': p.competitorPrices?.amazon || '', 'Costco $': p.competitorPrices?.costco || '',
-    'eBay $': p.competitorPrices?.ebay || '', 'Sam\'s $': p.competitorPrices?.sams || '',
-    'Low Margin': p.lowMargin ? '⚠️ <30%' : '',
-    'Stock': p.stockStatus, 'Image URL': (p.images && p.images.length > 0) ? p.images.join(' | ') : (p.image || ''),
-    'Image Count': (p.images || []).length,
-    'Rating': p.rating || '', 'Reviews': p.reviews || '',
-    'BSR': p.bsr || '', 'Vendor': p.vendor, 'Category': p.category,
-    'Google Category': p.googleCategory || '', 'Barcode/GTIN': p.barcode || '', 'Weight': p.weight || '',
-    'Handle': p.handle || '', 'SEO Title': p.seoTitle || '', 'Feed Score': p.feedScore || 0,
-    'Description': p.description, 'Date Checked': p.dateChecked, 'Status': p.status, 'Gates': `${p.gateCount}/10`,
-  }));
+  const gateIds = ['title','image','price','asin','description','googleCategory','titleLength','descClean','barcode','identifier'] as const;
+  const data = products.map(p => {
+    // Build failing gates summary
+    const failingGates = gateIds.filter(g => p.gates[g] !== 'pass').map(g => {
+      const labels: Record<string,string> = { title:'Title', image:'Image', price:'Price', asin:'ASIN', description:'Desc', googleCategory:'Google Cat', titleLength:'Title Len', descClean:'Desc Clean', barcode:'Barcode', identifier:'Identifier' };
+      return `${labels[g]}:${p.gates[g]}`;
+    });
+    return {
+      'Title': p.title, 'Handle': p.handle || '', 'ASIN/SKU': p.asin, 'Barcode/GTIN': p.barcode || '',
+      'Cost': p.price || '', 'Sell Price': p.sellPrice || '', 'Compare At': p.compareAt || '',
+      'Profit $': p.profit || '', 'Profit %': p.profitPct ? `${p.profitPct}%` : '',
+      'Market $': p.marketPrice || '',
+      'Amazon $': p.competitorPrices?.amazon || '', 'Costco $': p.competitorPrices?.costco || '',
+      'eBay $': p.competitorPrices?.ebay || '', "Sam's $": p.competitorPrices?.sams || '',
+      'Low Margin': p.lowMargin ? '⚠️ <30%' : '',
+      'Stock': p.stockStatus,
+      'Image URL': (p.images && p.images.length > 0) ? p.images.join(' | ') : (p.image || ''),
+      'Image Count': (p.images || []).length,
+      'Rating': p.rating || '', 'Reviews': p.reviews || '', 'BSR': p.bsr || '',
+      'Vendor': p.vendor, 'Category': p.category,
+      'Google Category': p.googleCategory || '', 'Weight': p.weight || '',
+      'SEO Title': p.seoTitle || '', 'Feed Score': p.feedScore || 0,
+      'Gates': `${p.gateCount}/10`,
+      'Failing Gates': failingGates.join(', ') || 'ALL PASS',
+      'Description': p.description, 'Date Checked': p.dateChecked, 'Status': p.status,
+    };
+  });
   const ws = utils.json_to_sheet(data);
-  ws['!cols'] = [55,14,10,12,10,10,10,10,10,10,10,10,12,80,8,8,10,10,20,25,80,12,10,8].map(w => ({ wch: w }));
+  ws['!cols'] = [55,20,14,15,10,12,12,10,10,10,10,10,10,10,10,12,80,8,8,10,10,20,25,10,12,8,40,80,12,10].map(w => ({ wch: w }));
   const wb = utils.book_new();
   utils.book_append_sheet(wb, ws, 'Products');
   writeFile(wb, filename);
@@ -1330,6 +1361,8 @@ export default function CommandCenter() {
 
   return (
     <div style={{ minHeight:'100vh', background:'#0a0a0a', color:'#e5e5e5', fontFamily:"'JetBrains Mono','SF Mono','Fira Code',monospace" }}>
+      {/* Mission Status — Real-time system dashboard */}
+      <MissionStatus pageName="Command Center" />
       {/* Header */}
       <div style={{ borderBottom:'1px solid #1a1a2e', padding:'16px 24px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
         <div>
@@ -1408,8 +1441,23 @@ export default function CommandCenter() {
               {pricing ? `⏳ ${pricingProgress.done}/${pricingProgress.total}` : `💰 Price Research (${analysis.products.filter(p => p.price > 0 && p.title).length})`}
             </button>
             <button onClick={() => exportAndDownload(analysis.products.filter(p => p.gateCount === 10), `clean_passed_${Date.now()}.xlsx`)}
-              style={{ padding:'6px 14px', borderRadius:'6px', border:'none', background:'#16a34a', color:'#fff', fontSize:'10px', fontWeight:600, cursor:'pointer' }}>
-              📥 Export Passed ({analysis.passed})
+              disabled={analysis.passed === 0}
+              style={{ padding:'6px 14px', borderRadius:'6px', border:'none', background: analysis.passed > 0 ? '#16a34a' : '#333', color: analysis.passed > 0 ? '#fff' : '#555', fontSize:'10px', fontWeight:600, cursor: analysis.passed > 0 ? 'pointer' : 'not-allowed' }}>
+              📥 Passed ({analysis.passed})
+            </button>
+            <button onClick={() => exportAndDownload(analysis.products.filter(p => p.gateCount >= 3 && p.gateCount < 10), `export_warned_${Date.now()}.xlsx`)}
+              disabled={analysis.warned === 0}
+              style={{ padding:'6px 14px', borderRadius:'6px', border:'none', background: analysis.warned > 0 ? '#f59e0b' : '#333', color: analysis.warned > 0 ? '#000' : '#555', fontSize:'10px', fontWeight:600, cursor: analysis.warned > 0 ? 'pointer' : 'not-allowed' }}>
+              📥 Warned ({analysis.warned})
+            </button>
+            <button onClick={() => exportAndDownload(analysis.products.filter(p => p.gateCount < 3), `export_failed_${Date.now()}.xlsx`)}
+              disabled={analysis.failed === 0}
+              style={{ padding:'6px 14px', borderRadius:'6px', border:'none', background: analysis.failed > 0 ? '#ef4444' : '#333', color: analysis.failed > 0 ? '#fff' : '#555', fontSize:'10px', fontWeight:600, cursor: analysis.failed > 0 ? 'pointer' : 'not-allowed' }}>
+              📥 Failed ({analysis.failed})
+            </button>
+            <button onClick={() => exportAndDownload(analysis.products, `export_all_${analysis.uniqueProducts}_products_${Date.now()}.xlsx`)}
+              style={{ padding:'6px 14px', borderRadius:'6px', border:'none', background:'#06b6d4', color:'#fff', fontSize:'10px', fontWeight:600, cursor:'pointer' }}>
+              📥 All ({analysis.uniqueProducts})
             </button>
             {analysis.passed > 0 && !pushing && (
               <button onClick={bulkPushToShopify}
@@ -1429,10 +1477,6 @@ export default function CommandCenter() {
                 🗑️ Delete ({selectedCount})
               </button>
             )}
-            <button onClick={() => exportAndDownload(analysis.products, `clean_all_${Date.now()}.xlsx`)}
-              style={{ padding:'6px 14px', borderRadius:'6px', border:'1px solid #333', background:'transparent', color:'#888', fontSize:'10px', fontWeight:600, cursor:'pointer' }}>
-              📥 All ({analysis.uniqueProducts})
-            </button>
             <button onClick={() => { setAnalysis(null); setFileName(''); setFilter('all'); }}
               style={{ padding:'6px 14px', borderRadius:'6px', border:'1px solid #222', background:'transparent', color:'#555', fontSize:'10px', cursor:'pointer' }}>
               🗑️ Clear
@@ -1685,7 +1729,7 @@ export default function CommandCenter() {
                   </div>
                 </div>
                 <p style={{ fontSize:'10px', color:'#777', margin:'0 0 8px', lineHeight:'1.5' }}>
-                  Once products pass 5-gate validation, export in the exact format each platform requires — 
+                  Once products pass 10-gate validation, export in the exact format each platform requires — 
                   eBay File Exchange, TikTok Shop template, Walmart feed, Shopify CSV. Image compliance per platform.
                 </p>
                 <div style={{ fontSize:'9px', color:'#333', display:'flex', flexWrap:'wrap', gap:'4px' }}>

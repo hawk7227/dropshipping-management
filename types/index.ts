@@ -136,6 +136,12 @@ export interface Product {
   admin_override?: boolean;
   admin_override_by?: string | null;
   admin_override_at?: string | null;
+
+  // Google Feed compliance
+  feed_status?: string | null;
+  feed_score?: number | null;
+  feed_rejection_reasons?: string[] | null;
+  google_product_category?: string | null;
 }
 
 export interface ProductCreateInput {
